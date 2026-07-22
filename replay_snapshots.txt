@@ -1,0 +1,502 @@
+2026-07-22 17:27:51,544 INFO [__main__:262] Starting replay_snapshots for 1 symbols from 2026-07-20 09:18:00+05:30 to 2026-07-20 15:30:00+05:30 | symbols=['COFORGE'] active=1 type=EQ
+2026-07-22 17:27:51,545 INFO [__main__:275] >>> 2026-07-20 09:18:00+05:30
+2026-07-22 17:27:51,549 INFO [__main__:299] Tick 2026-07-20 09:18:00+05:30 -> snapshot_time 2026-07-20 09:15:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:27:52,844 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:15:00+05:30 total_ms=1241.138 assemble_ms=1122.320 validation_ms=0.340 snapshot_write_ms=18.094 symbol_cache_write_ms=99.904 auction_ms=3.399 structure_ms=81.513
+2026-07-22 17:27:52,849 INFO [__main__:346] Completed tick 2026-07-20 09:18:00+05:30 -> snapshot_time 2026-07-20 09:15:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.304 sec
+2026-07-22 17:27:52,850 INFO [__main__:275] >>> 2026-07-20 09:21:00+05:30
+2026-07-22 17:27:52,865 INFO [__main__:299] Tick 2026-07-20 09:21:00+05:30 -> snapshot_time 2026-07-20 09:18:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:27:54,195 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:18:00+05:30 total_ms=1301.442 assemble_ms=1179.874 validation_ms=0.314 snapshot_write_ms=20.354 symbol_cache_write_ms=100.503 auction_ms=5.248 structure_ms=47.986
+2026-07-22 17:27:54,199 INFO [__main__:346] Completed tick 2026-07-20 09:21:00+05:30 -> snapshot_time 2026-07-20 09:18:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.349 sec
+2026-07-22 17:27:54,199 INFO [__main__:275] >>> 2026-07-20 09:24:00+05:30
+2026-07-22 17:27:54,201 INFO [__main__:299] Tick 2026-07-20 09:24:00+05:30 -> snapshot_time 2026-07-20 09:21:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:27:55,453 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:21:00+05:30 total_ms=1223.741 assemble_ms=1089.844 validation_ms=0.306 snapshot_write_ms=25.937 symbol_cache_write_ms=107.072 auction_ms=4.926 structure_ms=54.769
+2026-07-22 17:27:55,459 INFO [__main__:346] Completed tick 2026-07-20 09:24:00+05:30 -> snapshot_time 2026-07-20 09:21:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.259 sec
+2026-07-22 17:27:55,459 INFO [__main__:275] >>> 2026-07-20 09:27:00+05:30
+2026-07-22 17:27:55,463 INFO [__main__:299] Tick 2026-07-20 09:27:00+05:30 -> snapshot_time 2026-07-20 09:24:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:27:56,704 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:24:00+05:30 total_ms=1211.486 assemble_ms=1100.604 validation_ms=0.263 snapshot_write_ms=19.211 symbol_cache_write_ms=90.985 auction_ms=5.572 structure_ms=60.342
+2026-07-22 17:27:56,709 INFO [__main__:346] Completed tick 2026-07-20 09:27:00+05:30 -> snapshot_time 2026-07-20 09:24:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.250 sec
+2026-07-22 17:27:56,709 INFO [__main__:275] >>> 2026-07-20 09:30:00+05:30
+2026-07-22 17:27:56,711 INFO [__main__:299] Tick 2026-07-20 09:30:00+05:30 -> snapshot_time 2026-07-20 09:27:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:27:57,915 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:27:00+05:30 total_ms=1184.052 assemble_ms=1072.020 validation_ms=0.309 snapshot_write_ms=28.122 symbol_cache_write_ms=83.081 auction_ms=5.785 structure_ms=50.612
+2026-07-22 17:27:57,920 INFO [__main__:346] Completed tick 2026-07-20 09:30:00+05:30 -> snapshot_time 2026-07-20 09:27:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.211 sec
+2026-07-22 17:27:57,921 INFO [__main__:275] >>> 2026-07-20 09:33:00+05:30
+2026-07-22 17:27:57,923 INFO [__main__:299] Tick 2026-07-20 09:33:00+05:30 -> snapshot_time 2026-07-20 09:30:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:27:59,044 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:30:00+05:30 total_ms=1112.645 assemble_ms=1008.561 validation_ms=0.308 snapshot_write_ms=16.941 symbol_cache_write_ms=86.310 auction_ms=5.388 structure_ms=46.435
+2026-07-22 17:27:59,049 INFO [__main__:346] Completed tick 2026-07-20 09:33:00+05:30 -> snapshot_time 2026-07-20 09:30:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.128 sec
+2026-07-22 17:27:59,049 INFO [__main__:275] >>> 2026-07-20 09:36:00+05:30
+2026-07-22 17:27:59,053 INFO [__main__:299] Tick 2026-07-20 09:36:00+05:30 -> snapshot_time 2026-07-20 09:33:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:00,277 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:33:00+05:30 total_ms=1215.720 assemble_ms=1039.592 validation_ms=0.327 snapshot_write_ms=32.768 symbol_cache_write_ms=142.485 auction_ms=6.905 structure_ms=87.513
+2026-07-22 17:28:00,281 INFO [__main__:346] Completed tick 2026-07-20 09:36:00+05:30 -> snapshot_time 2026-07-20 09:33:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.232 sec
+2026-07-22 17:28:00,281 INFO [__main__:275] >>> 2026-07-20 09:39:00+05:30
+2026-07-22 17:28:00,284 INFO [__main__:299] Tick 2026-07-20 09:39:00+05:30 -> snapshot_time 2026-07-20 09:36:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:01,732 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:36:00+05:30 total_ms=1436.851 assemble_ms=1314.193 validation_ms=0.385 snapshot_write_ms=32.993 symbol_cache_write_ms=88.338 auction_ms=7.181 structure_ms=77.797
+2026-07-22 17:28:01,737 INFO [__main__:346] Completed tick 2026-07-20 09:39:00+05:30 -> snapshot_time 2026-07-20 09:36:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.456 sec
+2026-07-22 17:28:01,737 INFO [__main__:275] >>> 2026-07-20 09:42:00+05:30
+2026-07-22 17:28:01,740 INFO [__main__:299] Tick 2026-07-20 09:42:00+05:30 -> snapshot_time 2026-07-20 09:39:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:03,137 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:39:00+05:30 total_ms=1380.678 assemble_ms=1232.453 validation_ms=0.294 snapshot_write_ms=44.935 symbol_cache_write_ms=102.301 auction_ms=6.143 structure_ms=72.225
+2026-07-22 17:28:03,142 INFO [__main__:346] Completed tick 2026-07-20 09:42:00+05:30 -> snapshot_time 2026-07-20 09:39:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.404 sec
+2026-07-22 17:28:03,142 INFO [__main__:275] >>> 2026-07-20 09:45:00+05:30
+2026-07-22 17:28:03,144 INFO [__main__:299] Tick 2026-07-20 09:45:00+05:30 -> snapshot_time 2026-07-20 09:42:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:04,292 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:42:00+05:30 total_ms=1139.285 assemble_ms=1032.057 validation_ms=0.228 snapshot_write_ms=9.134 symbol_cache_write_ms=97.482 auction_ms=4.419 structure_ms=52.852
+2026-07-22 17:28:04,296 INFO [__main__:346] Completed tick 2026-07-20 09:45:00+05:30 -> snapshot_time 2026-07-20 09:42:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.154 sec
+2026-07-22 17:28:04,296 INFO [__main__:275] >>> 2026-07-20 09:48:00+05:30
+2026-07-22 17:28:04,299 INFO [__main__:299] Tick 2026-07-20 09:48:00+05:30 -> snapshot_time 2026-07-20 09:45:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:05,585 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:45:00+05:30 total_ms=1276.989 assemble_ms=1148.975 validation_ms=0.341 snapshot_write_ms=11.576 symbol_cache_write_ms=115.492 auction_ms=6.238 structure_ms=74.801
+2026-07-22 17:28:05,590 INFO [__main__:346] Completed tick 2026-07-20 09:48:00+05:30 -> snapshot_time 2026-07-20 09:45:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.294 sec
+2026-07-22 17:28:05,591 INFO [__main__:275] >>> 2026-07-20 09:51:00+05:30
+2026-07-22 17:28:05,593 INFO [__main__:299] Tick 2026-07-20 09:51:00+05:30 -> snapshot_time 2026-07-20 09:48:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:06,704 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:48:00+05:30 total_ms=1099.671 assemble_ms=989.732 validation_ms=0.366 snapshot_write_ms=10.008 symbol_cache_write_ms=99.067 auction_ms=6.286 structure_ms=71.074
+2026-07-22 17:28:06,708 INFO [__main__:346] Completed tick 2026-07-20 09:51:00+05:30 -> snapshot_time 2026-07-20 09:48:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.117 sec
+2026-07-22 17:28:06,708 INFO [__main__:275] >>> 2026-07-20 09:54:00+05:30
+2026-07-22 17:28:06,710 INFO [__main__:299] Tick 2026-07-20 09:54:00+05:30 -> snapshot_time 2026-07-20 09:51:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:07,809 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:51:00+05:30 total_ms=1092.115 assemble_ms=1006.439 validation_ms=0.318 snapshot_write_ms=10.601 symbol_cache_write_ms=74.178 auction_ms=4.945 structure_ms=88.353
+2026-07-22 17:28:07,813 INFO [__main__:346] Completed tick 2026-07-20 09:54:00+05:30 -> snapshot_time 2026-07-20 09:51:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.105 sec
+2026-07-22 17:28:07,813 INFO [__main__:275] >>> 2026-07-20 09:57:00+05:30
+2026-07-22 17:28:07,816 INFO [__main__:299] Tick 2026-07-20 09:57:00+05:30 -> snapshot_time 2026-07-20 09:54:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:09,078 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:54:00+05:30 total_ms=1254.837 assemble_ms=1149.333 validation_ms=0.323 snapshot_write_ms=11.807 symbol_cache_write_ms=92.762 auction_ms=6.417 structure_ms=72.795
+2026-07-22 17:28:09,083 INFO [__main__:346] Completed tick 2026-07-20 09:57:00+05:30 -> snapshot_time 2026-07-20 09:54:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.270 sec
+2026-07-22 17:28:09,083 INFO [__main__:275] >>> 2026-07-20 10:00:00+05:30
+2026-07-22 17:28:09,087 INFO [__main__:299] Tick 2026-07-20 10:00:00+05:30 -> snapshot_time 2026-07-20 09:57:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:10,304 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 09:57:00+05:30 total_ms=1209.202 assemble_ms=1103.002 validation_ms=0.395 snapshot_write_ms=12.586 symbol_cache_write_ms=92.548 auction_ms=6.52 structure_ms=73.34
+2026-07-22 17:28:10,308 INFO [__main__:346] Completed tick 2026-07-20 10:00:00+05:30 -> snapshot_time 2026-07-20 09:57:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.225 sec
+2026-07-22 17:28:10,308 INFO [__main__:275] >>> 2026-07-20 10:03:00+05:30
+2026-07-22 17:28:10,310 INFO [__main__:299] Tick 2026-07-20 10:03:00+05:30 -> snapshot_time 2026-07-20 10:00:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:11,615 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:00:00+05:30 total_ms=1297.575 assemble_ms=1177.273 validation_ms=0.266 snapshot_write_ms=12.650 symbol_cache_write_ms=106.969 auction_ms=5.476 structure_ms=61.254
+2026-07-22 17:28:11,621 INFO [__main__:346] Completed tick 2026-07-20 10:03:00+05:30 -> snapshot_time 2026-07-20 10:00:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.313 sec
+2026-07-22 17:28:11,623 INFO [__main__:275] >>> 2026-07-20 10:06:00+05:30
+2026-07-22 17:28:11,625 INFO [__main__:299] Tick 2026-07-20 10:06:00+05:30 -> snapshot_time 2026-07-20 10:03:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:12,868 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:03:00+05:30 total_ms=1231.765 assemble_ms=1132.279 validation_ms=0.259 snapshot_write_ms=11.304 symbol_cache_write_ms=87.467 auction_ms=5.091 structure_ms=63.145
+2026-07-22 17:28:12,873 INFO [__main__:346] Completed tick 2026-07-20 10:06:00+05:30 -> snapshot_time 2026-07-20 10:03:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.250 sec
+2026-07-22 17:28:12,873 INFO [__main__:275] >>> 2026-07-20 10:09:00+05:30
+2026-07-22 17:28:12,876 INFO [__main__:299] Tick 2026-07-20 10:09:00+05:30 -> snapshot_time 2026-07-20 10:06:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:14,071 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:06:00+05:30 total_ms=1187.611 assemble_ms=1076.443 validation_ms=0.316 snapshot_write_ms=12.815 symbol_cache_write_ms=97.410 auction_ms=7.38 structure_ms=84.727
+2026-07-22 17:28:14,076 INFO [__main__:346] Completed tick 2026-07-20 10:09:00+05:30 -> snapshot_time 2026-07-20 10:06:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.202 sec
+2026-07-22 17:28:14,077 INFO [__main__:275] >>> 2026-07-20 10:12:00+05:30
+2026-07-22 17:28:14,079 INFO [__main__:299] Tick 2026-07-20 10:12:00+05:30 -> snapshot_time 2026-07-20 10:09:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:15,344 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:09:00+05:30 total_ms=1256.368 assemble_ms=1126.854 validation_ms=0.314 snapshot_write_ms=12.138 symbol_cache_write_ms=116.561 auction_ms=5.52 structure_ms=75.138
+2026-07-22 17:28:15,353 INFO [__main__:346] Completed tick 2026-07-20 10:12:00+05:30 -> snapshot_time 2026-07-20 10:09:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.276 sec
+2026-07-22 17:28:15,354 INFO [__main__:275] >>> 2026-07-20 10:15:00+05:30
+2026-07-22 17:28:15,357 INFO [__main__:299] Tick 2026-07-20 10:15:00+05:30 -> snapshot_time 2026-07-20 10:12:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:16,579 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:12:00+05:30 total_ms=1204.344 assemble_ms=1098.560 validation_ms=0.240 snapshot_write_ms=10.863 symbol_cache_write_ms=94.268 auction_ms=6.238 structure_ms=96.616
+2026-07-22 17:28:16,584 INFO [__main__:346] Completed tick 2026-07-20 10:15:00+05:30 -> snapshot_time 2026-07-20 10:12:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.230 sec
+2026-07-22 17:28:16,584 INFO [__main__:275] >>> 2026-07-20 10:18:00+05:30
+2026-07-22 17:28:16,586 INFO [__main__:299] Tick 2026-07-20 10:18:00+05:30 -> snapshot_time 2026-07-20 10:15:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:17,681 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:15:00+05:30 total_ms=1087.187 assemble_ms=978.184 validation_ms=0.345 snapshot_write_ms=13.974 symbol_cache_write_ms=94.009 auction_ms=6.719 structure_ms=98.111
+2026-07-22 17:28:17,689 INFO [__main__:346] Completed tick 2026-07-20 10:18:00+05:30 -> snapshot_time 2026-07-20 10:15:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.105 sec
+2026-07-22 17:28:17,689 INFO [__main__:275] >>> 2026-07-20 10:21:00+05:30
+2026-07-22 17:28:17,692 INFO [__main__:299] Tick 2026-07-20 10:21:00+05:30 -> snapshot_time 2026-07-20 10:18:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:18,935 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:18:00+05:30 total_ms=1234.899 assemble_ms=1130.619 validation_ms=0.274 snapshot_write_ms=18.594 symbol_cache_write_ms=84.848 auction_ms=7.134 structure_ms=131.426
+2026-07-22 17:28:18,940 INFO [__main__:346] Completed tick 2026-07-20 10:21:00+05:30 -> snapshot_time 2026-07-20 10:18:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.251 sec
+2026-07-22 17:28:18,940 INFO [__main__:275] >>> 2026-07-20 10:24:00+05:30
+2026-07-22 17:28:18,943 INFO [__main__:299] Tick 2026-07-20 10:24:00+05:30 -> snapshot_time 2026-07-20 10:21:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:20,221 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:21:00+05:30 total_ms=1269.134 assemble_ms=1121.937 validation_ms=0.313 snapshot_write_ms=20.544 symbol_cache_write_ms=125.563 auction_ms=9.128 structure_ms=110.902
+2026-07-22 17:28:20,230 INFO [__main__:346] Completed tick 2026-07-20 10:24:00+05:30 -> snapshot_time 2026-07-20 10:21:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.290 sec
+2026-07-22 17:28:20,232 INFO [__main__:275] >>> 2026-07-20 10:27:00+05:30
+2026-07-22 17:28:20,236 INFO [__main__:299] Tick 2026-07-20 10:27:00+05:30 -> snapshot_time 2026-07-20 10:24:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:21,378 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:24:00+05:30 total_ms=1129.352 assemble_ms=1037.011 validation_ms=0.261 snapshot_write_ms=16.140 symbol_cache_write_ms=75.282 auction_ms=8.963 structure_ms=69.64
+2026-07-22 17:28:21,381 INFO [__main__:346] Completed tick 2026-07-20 10:27:00+05:30 -> snapshot_time 2026-07-20 10:24:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.149 sec
+2026-07-22 17:28:21,382 INFO [__main__:275] >>> 2026-07-20 10:30:00+05:30
+2026-07-22 17:28:21,384 INFO [__main__:299] Tick 2026-07-20 10:30:00+05:30 -> snapshot_time 2026-07-20 10:27:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:22,524 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:27:00+05:30 total_ms=1133.643 assemble_ms=1026.882 validation_ms=0.339 snapshot_write_ms=14.876 symbol_cache_write_ms=90.755 auction_ms=9.855 structure_ms=78.1
+2026-07-22 17:28:22,529 INFO [__main__:346] Completed tick 2026-07-20 10:30:00+05:30 -> snapshot_time 2026-07-20 10:27:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.147 sec
+2026-07-22 17:28:22,530 INFO [__main__:275] >>> 2026-07-20 10:33:00+05:30
+2026-07-22 17:28:22,532 INFO [__main__:299] Tick 2026-07-20 10:33:00+05:30 -> snapshot_time 2026-07-20 10:30:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:23,723 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:30:00+05:30 total_ms=1181.618 assemble_ms=1052.490 validation_ms=0.262 snapshot_write_ms=15.943 symbol_cache_write_ms=112.260 auction_ms=8.139 structure_ms=81.859
+2026-07-22 17:28:23,729 INFO [__main__:346] Completed tick 2026-07-20 10:33:00+05:30 -> snapshot_time 2026-07-20 10:30:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.199 sec
+2026-07-22 17:28:23,729 INFO [__main__:275] >>> 2026-07-20 10:36:00+05:30
+2026-07-22 17:28:23,732 INFO [__main__:299] Tick 2026-07-20 10:36:00+05:30 -> snapshot_time 2026-07-20 10:33:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:24,933 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:33:00+05:30 total_ms=1187.979 assemble_ms=1073.078 validation_ms=0.399 snapshot_write_ms=16.410 symbol_cache_write_ms=96.997 auction_ms=10.098 structure_ms=99.493
+2026-07-22 17:28:24,936 INFO [__main__:346] Completed tick 2026-07-20 10:36:00+05:30 -> snapshot_time 2026-07-20 10:33:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.207 sec
+2026-07-22 17:28:24,937 INFO [__main__:275] >>> 2026-07-20 10:39:00+05:30
+2026-07-22 17:28:24,938 INFO [__main__:299] Tick 2026-07-20 10:39:00+05:30 -> snapshot_time 2026-07-20 10:36:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:26,045 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:36:00+05:30 total_ms=1100.030 assemble_ms=998.351 validation_ms=0.263 snapshot_write_ms=14.399 symbol_cache_write_ms=86.394 auction_ms=8.496 structure_ms=89.145
+2026-07-22 17:28:26,050 INFO [__main__:346] Completed tick 2026-07-20 10:39:00+05:30 -> snapshot_time 2026-07-20 10:36:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.113 sec
+2026-07-22 17:28:26,050 INFO [__main__:275] >>> 2026-07-20 10:42:00+05:30
+2026-07-22 17:28:26,052 INFO [__main__:299] Tick 2026-07-20 10:42:00+05:30 -> snapshot_time 2026-07-20 10:39:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:27,193 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:39:00+05:30 total_ms=1130.794 assemble_ms=1022.450 validation_ms=0.302 snapshot_write_ms=13.580 symbol_cache_write_ms=93.779 auction_ms=7.927 structure_ms=84.222
+2026-07-22 17:28:27,199 INFO [__main__:346] Completed tick 2026-07-20 10:42:00+05:30 -> snapshot_time 2026-07-20 10:39:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.149 sec
+2026-07-22 17:28:27,200 INFO [__main__:275] >>> 2026-07-20 10:45:00+05:30
+2026-07-22 17:28:27,203 INFO [__main__:299] Tick 2026-07-20 10:45:00+05:30 -> snapshot_time 2026-07-20 10:42:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:28,359 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:42:00+05:30 total_ms=1148.507 assemble_ms=1042.495 validation_ms=0.303 snapshot_write_ms=13.329 symbol_cache_write_ms=91.664 auction_ms=8.272 structure_ms=70.135
+2026-07-22 17:28:28,366 INFO [__main__:346] Completed tick 2026-07-20 10:45:00+05:30 -> snapshot_time 2026-07-20 10:42:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.166 sec
+2026-07-22 17:28:28,367 INFO [__main__:275] >>> 2026-07-20 10:48:00+05:30
+2026-07-22 17:28:28,371 INFO [__main__:299] Tick 2026-07-20 10:48:00+05:30 -> snapshot_time 2026-07-20 10:45:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:29,547 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:45:00+05:30 total_ms=1167.951 assemble_ms=1062.624 validation_ms=0.250 snapshot_write_ms=12.475 symbol_cache_write_ms=92.105 auction_ms=7.311 structure_ms=70.175
+2026-07-22 17:28:29,550 INFO [__main__:346] Completed tick 2026-07-20 10:48:00+05:30 -> snapshot_time 2026-07-20 10:45:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.183 sec
+2026-07-22 17:28:29,551 INFO [__main__:275] >>> 2026-07-20 10:51:00+05:30
+2026-07-22 17:28:29,552 INFO [__main__:299] Tick 2026-07-20 10:51:00+05:30 -> snapshot_time 2026-07-20 10:48:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:30,674 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:48:00+05:30 total_ms=1115.220 assemble_ms=1019.021 validation_ms=0.269 snapshot_write_ms=12.073 symbol_cache_write_ms=83.404 auction_ms=6.089 structure_ms=72.736
+2026-07-22 17:28:30,679 INFO [__main__:346] Completed tick 2026-07-20 10:51:00+05:30 -> snapshot_time 2026-07-20 10:48:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.128 sec
+2026-07-22 17:28:30,679 INFO [__main__:275] >>> 2026-07-20 10:54:00+05:30
+2026-07-22 17:28:30,682 INFO [__main__:299] Tick 2026-07-20 10:54:00+05:30 -> snapshot_time 2026-07-20 10:51:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:31,834 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:51:00+05:30 total_ms=1143.139 assemble_ms=1030.929 validation_ms=0.272 snapshot_write_ms=11.018 symbol_cache_write_ms=100.299 auction_ms=6.227 structure_ms=66.58
+2026-07-22 17:28:31,840 INFO [__main__:346] Completed tick 2026-07-20 10:54:00+05:30 -> snapshot_time 2026-07-20 10:51:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.160 sec
+2026-07-22 17:28:31,840 INFO [__main__:275] >>> 2026-07-20 10:57:00+05:30
+2026-07-22 17:28:31,843 INFO [__main__:299] Tick 2026-07-20 10:57:00+05:30 -> snapshot_time 2026-07-20 10:54:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:33,087 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:54:00+05:30 total_ms=1236.397 assemble_ms=1140.884 validation_ms=0.325 snapshot_write_ms=13.244 symbol_cache_write_ms=81.314 auction_ms=8.527 structure_ms=84.844
+2026-07-22 17:28:33,091 INFO [__main__:346] Completed tick 2026-07-20 10:57:00+05:30 -> snapshot_time 2026-07-20 10:54:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.251 sec
+2026-07-22 17:28:33,091 INFO [__main__:275] >>> 2026-07-20 11:00:00+05:30
+2026-07-22 17:28:33,093 INFO [__main__:299] Tick 2026-07-20 11:00:00+05:30 -> snapshot_time 2026-07-20 10:57:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:34,236 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 10:57:00+05:30 total_ms=1135.536 assemble_ms=1018.780 validation_ms=0.287 snapshot_write_ms=12.744 symbol_cache_write_ms=103.247 auction_ms=8.152 structure_ms=71.474
+2026-07-22 17:28:34,240 INFO [__main__:346] Completed tick 2026-07-20 11:00:00+05:30 -> snapshot_time 2026-07-20 10:57:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.149 sec
+2026-07-22 17:28:34,240 INFO [__main__:275] >>> 2026-07-20 11:03:00+05:30
+2026-07-22 17:28:34,243 INFO [__main__:299] Tick 2026-07-20 11:03:00+05:30 -> snapshot_time 2026-07-20 11:00:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:35,358 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:00:00+05:30 total_ms=1107.230 assemble_ms=1001.521 validation_ms=0.254 snapshot_write_ms=11.711 symbol_cache_write_ms=93.242 auction_ms=6.714 structure_ms=69.398
+2026-07-22 17:28:35,363 INFO [__main__:346] Completed tick 2026-07-20 11:03:00+05:30 -> snapshot_time 2026-07-20 11:00:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.122 sec
+2026-07-22 17:28:35,363 INFO [__main__:275] >>> 2026-07-20 11:06:00+05:30
+2026-07-22 17:28:35,365 INFO [__main__:299] Tick 2026-07-20 11:06:00+05:30 -> snapshot_time 2026-07-20 11:03:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:36,736 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:03:00+05:30 total_ms=1364.081 assemble_ms=1253.924 validation_ms=0.356 snapshot_write_ms=13.205 symbol_cache_write_ms=95.844 auction_ms=7.984 structure_ms=72.643
+2026-07-22 17:28:36,741 INFO [__main__:346] Completed tick 2026-07-20 11:06:00+05:30 -> snapshot_time 2026-07-20 11:03:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.378 sec
+2026-07-22 17:28:36,741 INFO [__main__:275] >>> 2026-07-20 11:09:00+05:30
+2026-07-22 17:28:36,744 INFO [__main__:299] Tick 2026-07-20 11:09:00+05:30 -> snapshot_time 2026-07-20 11:06:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:37,917 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:06:00+05:30 total_ms=1165.243 assemble_ms=1069.831 validation_ms=0.358 snapshot_write_ms=12.975 symbol_cache_write_ms=81.417 auction_ms=7.094 structure_ms=81.928
+2026-07-22 17:28:37,920 INFO [__main__:346] Completed tick 2026-07-20 11:09:00+05:30 -> snapshot_time 2026-07-20 11:06:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.179 sec
+2026-07-22 17:28:37,921 INFO [__main__:275] >>> 2026-07-20 11:12:00+05:30
+2026-07-22 17:28:37,922 INFO [__main__:299] Tick 2026-07-20 11:12:00+05:30 -> snapshot_time 2026-07-20 11:09:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:39,200 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:09:00+05:30 total_ms=1270.695 assemble_ms=1114.584 validation_ms=0.278 snapshot_write_ms=32.667 symbol_cache_write_ms=122.629 auction_ms=6.532 structure_ms=96.945
+2026-07-22 17:28:39,205 INFO [__main__:346] Completed tick 2026-07-20 11:12:00+05:30 -> snapshot_time 2026-07-20 11:09:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.285 sec
+2026-07-22 17:28:39,206 INFO [__main__:275] >>> 2026-07-20 11:15:00+05:30
+2026-07-22 17:28:39,208 INFO [__main__:299] Tick 2026-07-20 11:15:00+05:30 -> snapshot_time 2026-07-20 11:12:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:40,513 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:12:00+05:30 total_ms=1294.272 assemble_ms=1188.798 validation_ms=0.331 snapshot_write_ms=13.238 symbol_cache_write_ms=91.146 auction_ms=8.241 structure_ms=111.828
+2026-07-22 17:28:40,517 INFO [__main__:346] Completed tick 2026-07-20 11:15:00+05:30 -> snapshot_time 2026-07-20 11:12:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.311 sec
+2026-07-22 17:28:40,517 INFO [__main__:275] >>> 2026-07-20 11:18:00+05:30
+2026-07-22 17:28:40,520 INFO [__main__:299] Tick 2026-07-20 11:18:00+05:30 -> snapshot_time 2026-07-20 11:15:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:41,712 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:15:00+05:30 total_ms=1185.054 assemble_ms=1069.592 validation_ms=0.379 snapshot_write_ms=16.302 symbol_cache_write_ms=98.051 auction_ms=7.607 structure_ms=117.663
+2026-07-22 17:28:41,717 INFO [__main__:346] Completed tick 2026-07-20 11:18:00+05:30 -> snapshot_time 2026-07-20 11:15:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.199 sec
+2026-07-22 17:28:41,717 INFO [__main__:275] >>> 2026-07-20 11:21:00+05:30
+2026-07-22 17:28:41,719 INFO [__main__:299] Tick 2026-07-20 11:21:00+05:30 -> snapshot_time 2026-07-20 11:18:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:42,955 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:18:00+05:30 total_ms=1227.469 assemble_ms=1119.066 validation_ms=0.289 snapshot_write_ms=12.604 symbol_cache_write_ms=94.987 auction_ms=5.431 structure_ms=99.236
+2026-07-22 17:28:42,960 INFO [__main__:346] Completed tick 2026-07-20 11:21:00+05:30 -> snapshot_time 2026-07-20 11:18:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.243 sec
+2026-07-22 17:28:42,960 INFO [__main__:275] >>> 2026-07-20 11:24:00+05:30
+2026-07-22 17:28:42,963 INFO [__main__:299] Tick 2026-07-20 11:24:00+05:30 -> snapshot_time 2026-07-20 11:21:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:44,189 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:21:00+05:30 total_ms=1208.051 assemble_ms=1108.538 validation_ms=0.303 snapshot_write_ms=10.655 symbol_cache_write_ms=87.757 auction_ms=6.583 structure_ms=124.725
+2026-07-22 17:28:44,198 INFO [__main__:346] Completed tick 2026-07-20 11:24:00+05:30 -> snapshot_time 2026-07-20 11:21:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.238 sec
+2026-07-22 17:28:44,199 INFO [__main__:275] >>> 2026-07-20 11:27:00+05:30
+2026-07-22 17:28:44,204 INFO [__main__:299] Tick 2026-07-20 11:27:00+05:30 -> snapshot_time 2026-07-20 11:24:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:45,515 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:24:00+05:30 total_ms=1299.847 assemble_ms=1186.615 validation_ms=0.378 snapshot_write_ms=14.798 symbol_cache_write_ms=97.273 auction_ms=6.822 structure_ms=115.4
+2026-07-22 17:28:45,520 INFO [__main__:346] Completed tick 2026-07-20 11:27:00+05:30 -> snapshot_time 2026-07-20 11:24:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.321 sec
+2026-07-22 17:28:45,520 INFO [__main__:275] >>> 2026-07-20 11:30:00+05:30
+2026-07-22 17:28:45,523 INFO [__main__:299] Tick 2026-07-20 11:30:00+05:30 -> snapshot_time 2026-07-20 11:27:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:46,754 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:27:00+05:30 total_ms=1217.856 assemble_ms=1098.685 validation_ms=0.367 snapshot_write_ms=17.123 symbol_cache_write_ms=100.842 auction_ms=7.758 structure_ms=97.871
+2026-07-22 17:28:46,758 INFO [__main__:346] Completed tick 2026-07-20 11:30:00+05:30 -> snapshot_time 2026-07-20 11:27:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.238 sec
+2026-07-22 17:28:46,758 INFO [__main__:275] >>> 2026-07-20 11:33:00+05:30
+2026-07-22 17:28:46,761 INFO [__main__:299] Tick 2026-07-20 11:33:00+05:30 -> snapshot_time 2026-07-20 11:30:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:47,953 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:30:00+05:30 total_ms=1182.769 assemble_ms=1063.625 validation_ms=0.350 snapshot_write_ms=14.366 symbol_cache_write_ms=103.734 auction_ms=6.453 structure_ms=92.794
+2026-07-22 17:28:47,957 INFO [__main__:346] Completed tick 2026-07-20 11:33:00+05:30 -> snapshot_time 2026-07-20 11:30:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.199 sec
+2026-07-22 17:28:47,958 INFO [__main__:275] >>> 2026-07-20 11:36:00+05:30
+2026-07-22 17:28:47,960 INFO [__main__:299] Tick 2026-07-20 11:36:00+05:30 -> snapshot_time 2026-07-20 11:33:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:49,170 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:33:00+05:30 total_ms=1202.971 assemble_ms=1084.054 validation_ms=0.342 snapshot_write_ms=12.470 symbol_cache_write_ms=105.385 auction_ms=7.549 structure_ms=101.002
+2026-07-22 17:28:49,175 INFO [__main__:346] Completed tick 2026-07-20 11:36:00+05:30 -> snapshot_time 2026-07-20 11:33:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.217 sec
+2026-07-22 17:28:49,175 INFO [__main__:275] >>> 2026-07-20 11:39:00+05:30
+2026-07-22 17:28:49,177 INFO [__main__:299] Tick 2026-07-20 11:39:00+05:30 -> snapshot_time 2026-07-20 11:36:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:50,361 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:36:00+05:30 total_ms=1175.161 assemble_ms=1064.739 validation_ms=0.302 snapshot_write_ms=22.222 symbol_cache_write_ms=87.179 auction_ms=8.246 structure_ms=96.77
+2026-07-22 17:28:50,367 INFO [__main__:346] Completed tick 2026-07-20 11:39:00+05:30 -> snapshot_time 2026-07-20 11:36:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.192 sec
+2026-07-22 17:28:50,368 INFO [__main__:275] >>> 2026-07-20 11:42:00+05:30
+2026-07-22 17:28:50,370 INFO [__main__:299] Tick 2026-07-20 11:42:00+05:30 -> snapshot_time 2026-07-20 11:39:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:51,552 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:39:00+05:30 total_ms=1172.299 assemble_ms=1074.724 validation_ms=0.299 snapshot_write_ms=12.136 symbol_cache_write_ms=84.621 auction_ms=6.641 structure_ms=108.233
+2026-07-22 17:28:51,556 INFO [__main__:346] Completed tick 2026-07-20 11:42:00+05:30 -> snapshot_time 2026-07-20 11:39:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.188 sec
+2026-07-22 17:28:51,556 INFO [__main__:275] >>> 2026-07-20 11:45:00+05:30
+2026-07-22 17:28:51,559 INFO [__main__:299] Tick 2026-07-20 11:45:00+05:30 -> snapshot_time 2026-07-20 11:42:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:52,728 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:42:00+05:30 total_ms=1161.745 assemble_ms=1038.778 validation_ms=0.245 snapshot_write_ms=13.051 symbol_cache_write_ms=109.110 auction_ms=6.592 structure_ms=96.731
+2026-07-22 17:28:52,733 INFO [__main__:346] Completed tick 2026-07-20 11:45:00+05:30 -> snapshot_time 2026-07-20 11:42:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.176 sec
+2026-07-22 17:28:52,733 INFO [__main__:275] >>> 2026-07-20 11:48:00+05:30
+2026-07-22 17:28:52,735 INFO [__main__:299] Tick 2026-07-20 11:48:00+05:30 -> snapshot_time 2026-07-20 11:45:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:53,981 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:45:00+05:30 total_ms=1237.566 assemble_ms=1087.826 validation_ms=0.352 snapshot_write_ms=19.953 symbol_cache_write_ms=128.318 auction_ms=10.482 structure_ms=114.035
+2026-07-22 17:28:53,988 INFO [__main__:346] Completed tick 2026-07-20 11:48:00+05:30 -> snapshot_time 2026-07-20 11:45:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.255 sec
+2026-07-22 17:28:53,988 INFO [__main__:275] >>> 2026-07-20 11:51:00+05:30
+2026-07-22 17:28:53,994 INFO [__main__:299] Tick 2026-07-20 11:51:00+05:30 -> snapshot_time 2026-07-20 11:48:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:55,238 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:48:00+05:30 total_ms=1234.967 assemble_ms=1124.421 validation_ms=0.351 snapshot_write_ms=15.700 symbol_cache_write_ms=93.503 auction_ms=9.14 structure_ms=92.907
+2026-07-22 17:28:55,244 INFO [__main__:346] Completed tick 2026-07-20 11:51:00+05:30 -> snapshot_time 2026-07-20 11:48:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.255 sec
+2026-07-22 17:28:55,244 INFO [__main__:275] >>> 2026-07-20 11:54:00+05:30
+2026-07-22 17:28:55,246 INFO [__main__:299] Tick 2026-07-20 11:54:00+05:30 -> snapshot_time 2026-07-20 11:51:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:56,422 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:51:00+05:30 total_ms=1168.086 assemble_ms=1053.799 validation_ms=0.375 snapshot_write_ms=14.834 symbol_cache_write_ms=97.986 auction_ms=9.85 structure_ms=80.587
+2026-07-22 17:28:56,428 INFO [__main__:346] Completed tick 2026-07-20 11:54:00+05:30 -> snapshot_time 2026-07-20 11:51:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.183 sec
+2026-07-22 17:28:56,428 INFO [__main__:275] >>> 2026-07-20 11:57:00+05:30
+2026-07-22 17:28:56,431 INFO [__main__:299] Tick 2026-07-20 11:57:00+05:30 -> snapshot_time 2026-07-20 11:54:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:57,576 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:54:00+05:30 total_ms=1136.141 assemble_ms=1033.007 validation_ms=0.307 snapshot_write_ms=14.666 symbol_cache_write_ms=87.493 auction_ms=7.356 structure_ms=75.688
+2026-07-22 17:28:57,580 INFO [__main__:346] Completed tick 2026-07-20 11:57:00+05:30 -> snapshot_time 2026-07-20 11:54:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.152 sec
+2026-07-22 17:28:57,581 INFO [__main__:275] >>> 2026-07-20 12:00:00+05:30
+2026-07-22 17:28:57,583 INFO [__main__:299] Tick 2026-07-20 12:00:00+05:30 -> snapshot_time 2026-07-20 11:57:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:28:58,830 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 11:57:00+05:30 total_ms=1239.139 assemble_ms=1117.883 validation_ms=0.341 snapshot_write_ms=20.421 symbol_cache_write_ms=99.709 auction_ms=8.617 structure_ms=79.36
+2026-07-22 17:28:58,835 INFO [__main__:346] Completed tick 2026-07-20 12:00:00+05:30 -> snapshot_time 2026-07-20 11:57:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.254 sec
+2026-07-22 17:28:58,835 INFO [__main__:275] >>> 2026-07-20 12:03:00+05:30
+2026-07-22 17:28:58,838 INFO [__main__:299] Tick 2026-07-20 12:03:00+05:30 -> snapshot_time 2026-07-20 12:00:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:00,064 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:00:00+05:30 total_ms=1218.449 assemble_ms=1090.351 validation_ms=0.344 snapshot_write_ms=18.457 symbol_cache_write_ms=108.507 auction_ms=11.247 structure_ms=80.45
+2026-07-22 17:29:00,074 INFO [__main__:346] Completed tick 2026-07-20 12:03:00+05:30 -> snapshot_time 2026-07-20 12:00:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.239 sec
+2026-07-22 17:29:00,075 INFO [__main__:275] >>> 2026-07-20 12:06:00+05:30
+2026-07-22 17:29:00,079 INFO [__main__:299] Tick 2026-07-20 12:06:00+05:30 -> snapshot_time 2026-07-20 12:03:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:01,559 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:03:00+05:30 total_ms=1463.481 assemble_ms=1334.549 validation_ms=0.343 snapshot_write_ms=19.785 symbol_cache_write_ms=108.070 auction_ms=7.299 structure_ms=91.402
+2026-07-22 17:29:01,564 INFO [__main__:346] Completed tick 2026-07-20 12:06:00+05:30 -> snapshot_time 2026-07-20 12:03:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.489 sec
+2026-07-22 17:29:01,564 INFO [__main__:275] >>> 2026-07-20 12:09:00+05:30
+2026-07-22 17:29:01,569 INFO [__main__:299] Tick 2026-07-20 12:09:00+05:30 -> snapshot_time 2026-07-20 12:06:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:03,140 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:06:00+05:30 total_ms=1554.599 assemble_ms=1396.068 validation_ms=0.360 snapshot_write_ms=19.847 symbol_cache_write_ms=137.314 auction_ms=9.334 structure_ms=101.896
+2026-07-22 17:29:03,145 INFO [__main__:346] Completed tick 2026-07-20 12:09:00+05:30 -> snapshot_time 2026-07-20 12:06:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.581 sec
+2026-07-22 17:29:03,146 INFO [__main__:275] >>> 2026-07-20 12:12:00+05:30
+2026-07-22 17:29:03,149 INFO [__main__:299] Tick 2026-07-20 12:12:00+05:30 -> snapshot_time 2026-07-20 12:09:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:04,406 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:09:00+05:30 total_ms=1246.167 assemble_ms=1116.728 validation_ms=0.248 snapshot_write_ms=18.830 symbol_cache_write_ms=109.682 auction_ms=7.097 structure_ms=66.793
+2026-07-22 17:29:04,411 INFO [__main__:346] Completed tick 2026-07-20 12:12:00+05:30 -> snapshot_time 2026-07-20 12:09:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.266 sec
+2026-07-22 17:29:04,412 INFO [__main__:275] >>> 2026-07-20 12:15:00+05:30
+2026-07-22 17:29:04,414 INFO [__main__:299] Tick 2026-07-20 12:15:00+05:30 -> snapshot_time 2026-07-20 12:12:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:05,624 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:12:00+05:30 total_ms=1201.594 assemble_ms=1108.662 validation_ms=0.262 snapshot_write_ms=12.401 symbol_cache_write_ms=79.743 auction_ms=7.094 structure_ms=96.209
+2026-07-22 17:29:05,628 INFO [__main__:346] Completed tick 2026-07-20 12:15:00+05:30 -> snapshot_time 2026-07-20 12:12:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.217 sec
+2026-07-22 17:29:05,629 INFO [__main__:275] >>> 2026-07-20 12:18:00+05:30
+2026-07-22 17:29:05,631 INFO [__main__:299] Tick 2026-07-20 12:18:00+05:30 -> snapshot_time 2026-07-20 12:15:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:06,777 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:15:00+05:30 total_ms=1134.420 assemble_ms=1036.460 validation_ms=0.351 snapshot_write_ms=14.927 symbol_cache_write_ms=81.988 auction_ms=7.812 structure_ms=74.314
+2026-07-22 17:29:06,781 INFO [__main__:346] Completed tick 2026-07-20 12:18:00+05:30 -> snapshot_time 2026-07-20 12:15:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.153 sec
+2026-07-22 17:29:06,782 INFO [__main__:275] >>> 2026-07-20 12:21:00+05:30
+2026-07-22 17:29:06,785 INFO [__main__:299] Tick 2026-07-20 12:21:00+05:30 -> snapshot_time 2026-07-20 12:18:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:07,928 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:18:00+05:30 total_ms=1134.734 assemble_ms=1039.671 validation_ms=0.375 snapshot_write_ms=14.853 symbol_cache_write_ms=79.018 auction_ms=9.377 structure_ms=86.926
+2026-07-22 17:29:07,931 INFO [__main__:346] Completed tick 2026-07-20 12:21:00+05:30 -> snapshot_time 2026-07-20 12:18:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.149 sec
+2026-07-22 17:29:07,931 INFO [__main__:275] >>> 2026-07-20 12:24:00+05:30
+2026-07-22 17:29:07,933 INFO [__main__:299] Tick 2026-07-20 12:24:00+05:30 -> snapshot_time 2026-07-20 12:21:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:09,158 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:21:00+05:30 total_ms=1218.935 assemble_ms=1064.449 validation_ms=0.305 snapshot_write_ms=23.461 symbol_cache_write_ms=129.813 auction_ms=6.786 structure_ms=73.213
+2026-07-22 17:29:09,163 INFO [__main__:346] Completed tick 2026-07-20 12:24:00+05:30 -> snapshot_time 2026-07-20 12:21:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.232 sec
+2026-07-22 17:29:09,164 INFO [__main__:275] >>> 2026-07-20 12:27:00+05:30
+2026-07-22 17:29:09,167 INFO [__main__:299] Tick 2026-07-20 12:27:00+05:30 -> snapshot_time 2026-07-20 12:24:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:10,434 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:24:00+05:30 total_ms=1257.649 assemble_ms=1105.267 validation_ms=0.324 snapshot_write_ms=57.842 symbol_cache_write_ms=93.515 auction_ms=7.37 structure_ms=89.667
+2026-07-22 17:29:10,440 INFO [__main__:346] Completed tick 2026-07-20 12:27:00+05:30 -> snapshot_time 2026-07-20 12:24:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.276 sec
+2026-07-22 17:29:10,440 INFO [__main__:275] >>> 2026-07-20 12:30:00+05:30
+2026-07-22 17:29:10,443 INFO [__main__:299] Tick 2026-07-20 12:30:00+05:30 -> snapshot_time 2026-07-20 12:27:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:11,921 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:27:00+05:30 total_ms=1467.413 assemble_ms=1340.090 validation_ms=0.360 snapshot_write_ms=18.486 symbol_cache_write_ms=107.638 auction_ms=10.565 structure_ms=111.975
+2026-07-22 17:29:11,927 INFO [__main__:346] Completed tick 2026-07-20 12:30:00+05:30 -> snapshot_time 2026-07-20 12:27:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.487 sec
+2026-07-22 17:29:11,927 INFO [__main__:275] >>> 2026-07-20 12:33:00+05:30
+2026-07-22 17:29:11,929 INFO [__main__:299] Tick 2026-07-20 12:33:00+05:30 -> snapshot_time 2026-07-20 12:30:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:13,259 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:30:00+05:30 total_ms=1321.718 assemble_ms=1171.605 validation_ms=0.363 snapshot_write_ms=17.684 symbol_cache_write_ms=131.097 auction_ms=9.827 structure_ms=102.358
+2026-07-22 17:29:13,265 INFO [__main__:346] Completed tick 2026-07-20 12:33:00+05:30 -> snapshot_time 2026-07-20 12:30:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.338 sec
+2026-07-22 17:29:13,265 INFO [__main__:275] >>> 2026-07-20 12:36:00+05:30
+2026-07-22 17:29:13,268 INFO [__main__:299] Tick 2026-07-20 12:36:00+05:30 -> snapshot_time 2026-07-20 12:33:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:14,563 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:33:00+05:30 total_ms=1282.910 assemble_ms=1176.668 validation_ms=0.352 snapshot_write_ms=16.985 symbol_cache_write_ms=88.008 auction_ms=8.843 structure_ms=74.555
+2026-07-22 17:29:14,569 INFO [__main__:346] Completed tick 2026-07-20 12:36:00+05:30 -> snapshot_time 2026-07-20 12:33:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.303 sec
+2026-07-22 17:29:14,569 INFO [__main__:275] >>> 2026-07-20 12:39:00+05:30
+2026-07-22 17:29:14,572 INFO [__main__:299] Tick 2026-07-20 12:39:00+05:30 -> snapshot_time 2026-07-20 12:36:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:15,856 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:36:00+05:30 total_ms=1275.856 assemble_ms=1135.156 validation_ms=0.342 snapshot_write_ms=17.299 symbol_cache_write_ms=122.263 auction_ms=8.874 structure_ms=104.754
+2026-07-22 17:29:15,864 INFO [__main__:346] Completed tick 2026-07-20 12:39:00+05:30 -> snapshot_time 2026-07-20 12:36:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.295 sec
+2026-07-22 17:29:15,864 INFO [__main__:275] >>> 2026-07-20 12:42:00+05:30
+2026-07-22 17:29:15,867 INFO [__main__:299] Tick 2026-07-20 12:42:00+05:30 -> snapshot_time 2026-07-20 12:39:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:17,161 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:39:00+05:30 total_ms=1284.581 assemble_ms=1164.341 validation_ms=0.356 snapshot_write_ms=20.328 symbol_cache_write_ms=98.536 auction_ms=11.503 structure_ms=108.816
+2026-07-22 17:29:17,166 INFO [__main__:346] Completed tick 2026-07-20 12:42:00+05:30 -> snapshot_time 2026-07-20 12:39:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.302 sec
+2026-07-22 17:29:17,166 INFO [__main__:275] >>> 2026-07-20 12:45:00+05:30
+2026-07-22 17:29:17,170 INFO [__main__:299] Tick 2026-07-20 12:45:00+05:30 -> snapshot_time 2026-07-20 12:42:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:18,322 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:42:00+05:30 total_ms=1144.232 assemble_ms=971.906 validation_ms=0.317 snapshot_write_ms=85.267 symbol_cache_write_ms=85.867 auction_ms=9.78 structure_ms=97.657
+2026-07-22 17:29:18,328 INFO [__main__:346] Completed tick 2026-07-20 12:45:00+05:30 -> snapshot_time 2026-07-20 12:42:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.162 sec
+2026-07-22 17:29:18,328 INFO [__main__:275] >>> 2026-07-20 12:48:00+05:30
+2026-07-22 17:29:18,331 INFO [__main__:299] Tick 2026-07-20 12:48:00+05:30 -> snapshot_time 2026-07-20 12:45:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:19,575 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:45:00+05:30 total_ms=1236.492 assemble_ms=1121.360 validation_ms=0.361 snapshot_write_ms=15.659 symbol_cache_write_ms=98.239 auction_ms=8.961 structure_ms=92.717
+2026-07-22 17:29:19,579 INFO [__main__:346] Completed tick 2026-07-20 12:48:00+05:30 -> snapshot_time 2026-07-20 12:45:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.251 sec
+2026-07-22 17:29:19,579 INFO [__main__:275] >>> 2026-07-20 12:51:00+05:30
+2026-07-22 17:29:19,582 INFO [__main__:299] Tick 2026-07-20 12:51:00+05:30 -> snapshot_time 2026-07-20 12:48:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:20,779 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:48:00+05:30 total_ms=1189.490 assemble_ms=1074.935 validation_ms=0.407 snapshot_write_ms=17.593 symbol_cache_write_ms=95.386 auction_ms=13.496 structure_ms=97.213
+2026-07-22 17:29:20,785 INFO [__main__:346] Completed tick 2026-07-20 12:51:00+05:30 -> snapshot_time 2026-07-20 12:48:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.206 sec
+2026-07-22 17:29:20,786 INFO [__main__:275] >>> 2026-07-20 12:54:00+05:30
+2026-07-22 17:29:20,789 INFO [__main__:299] Tick 2026-07-20 12:54:00+05:30 -> snapshot_time 2026-07-20 12:51:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:22,145 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:51:00+05:30 total_ms=1346.786 assemble_ms=1197.216 validation_ms=0.362 snapshot_write_ms=20.883 symbol_cache_write_ms=127.282 auction_ms=10.626 structure_ms=127.822
+2026-07-22 17:29:22,154 INFO [__main__:346] Completed tick 2026-07-20 12:54:00+05:30 -> snapshot_time 2026-07-20 12:51:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.367 sec
+2026-07-22 17:29:22,154 INFO [__main__:275] >>> 2026-07-20 12:57:00+05:30
+2026-07-22 17:29:22,157 INFO [__main__:299] Tick 2026-07-20 12:57:00+05:30 -> snapshot_time 2026-07-20 12:54:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:23,429 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:54:00+05:30 total_ms=1264.894 assemble_ms=1154.814 validation_ms=0.303 snapshot_write_ms=16.646 symbol_cache_write_ms=92.336 auction_ms=8.567 structure_ms=111.005
+2026-07-22 17:29:23,436 INFO [__main__:346] Completed tick 2026-07-20 12:57:00+05:30 -> snapshot_time 2026-07-20 12:54:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.282 sec
+2026-07-22 17:29:23,436 INFO [__main__:275] >>> 2026-07-20 13:00:00+05:30
+2026-07-22 17:29:23,439 INFO [__main__:299] Tick 2026-07-20 13:00:00+05:30 -> snapshot_time 2026-07-20 12:57:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:24,656 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 12:57:00+05:30 total_ms=1207.251 assemble_ms=1084.302 validation_ms=0.280 snapshot_write_ms=16.533 symbol_cache_write_ms=104.882 auction_ms=9.72 structure_ms=110.099
+2026-07-22 17:29:24,660 INFO [__main__:346] Completed tick 2026-07-20 13:00:00+05:30 -> snapshot_time 2026-07-20 12:57:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.224 sec
+2026-07-22 17:29:24,660 INFO [__main__:275] >>> 2026-07-20 13:03:00+05:30
+2026-07-22 17:29:24,662 INFO [__main__:299] Tick 2026-07-20 13:03:00+05:30 -> snapshot_time 2026-07-20 13:00:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:25,986 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:00:00+05:30 total_ms=1315.399 assemble_ms=1192.046 validation_ms=0.266 snapshot_write_ms=16.926 symbol_cache_write_ms=105.271 auction_ms=9.543 structure_ms=113.238
+2026-07-22 17:29:25,991 INFO [__main__:346] Completed tick 2026-07-20 13:03:00+05:30 -> snapshot_time 2026-07-20 13:00:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.331 sec
+2026-07-22 17:29:25,992 INFO [__main__:275] >>> 2026-07-20 13:06:00+05:30
+2026-07-22 17:29:25,994 INFO [__main__:299] Tick 2026-07-20 13:06:00+05:30 -> snapshot_time 2026-07-20 13:03:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:27,143 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:03:00+05:30 total_ms=1141.802 assemble_ms=1031.948 validation_ms=0.300 snapshot_write_ms=18.569 symbol_cache_write_ms=90.074 auction_ms=7.885 structure_ms=72.983
+2026-07-22 17:29:27,147 INFO [__main__:346] Completed tick 2026-07-20 13:06:00+05:30 -> snapshot_time 2026-07-20 13:03:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.155 sec
+2026-07-22 17:29:27,147 INFO [__main__:275] >>> 2026-07-20 13:09:00+05:30
+2026-07-22 17:29:27,149 INFO [__main__:299] Tick 2026-07-20 13:09:00+05:30 -> snapshot_time 2026-07-20 13:06:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:28,367 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:06:00+05:30 total_ms=1210.324 assemble_ms=1096.219 validation_ms=0.270 snapshot_write_ms=25.017 symbol_cache_write_ms=88.116 auction_ms=9.383 structure_ms=79.149
+2026-07-22 17:29:28,372 INFO [__main__:346] Completed tick 2026-07-20 13:09:00+05:30 -> snapshot_time 2026-07-20 13:06:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.224 sec
+2026-07-22 17:29:28,372 INFO [__main__:275] >>> 2026-07-20 13:12:00+05:30
+2026-07-22 17:29:28,375 INFO [__main__:299] Tick 2026-07-20 13:12:00+05:30 -> snapshot_time 2026-07-20 13:09:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:29,557 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:09:00+05:30 total_ms=1173.603 assemble_ms=1071.371 validation_ms=0.291 snapshot_write_ms=15.122 symbol_cache_write_ms=86.155 auction_ms=7.335 structure_ms=84.297
+2026-07-22 17:29:29,561 INFO [__main__:346] Completed tick 2026-07-20 13:12:00+05:30 -> snapshot_time 2026-07-20 13:09:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.189 sec
+2026-07-22 17:29:29,562 INFO [__main__:275] >>> 2026-07-20 13:15:00+05:30
+2026-07-22 17:29:29,566 INFO [__main__:299] Tick 2026-07-20 13:15:00+05:30 -> snapshot_time 2026-07-20 13:12:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:30,730 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:12:00+05:30 total_ms=1155.529 assemble_ms=1038.713 validation_ms=0.366 snapshot_write_ms=14.291 symbol_cache_write_ms=101.415 auction_ms=7.887 structure_ms=74.158
+2026-07-22 17:29:30,735 INFO [__main__:346] Completed tick 2026-07-20 13:15:00+05:30 -> snapshot_time 2026-07-20 13:12:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.173 sec
+2026-07-22 17:29:30,735 INFO [__main__:275] >>> 2026-07-20 13:18:00+05:30
+2026-07-22 17:29:30,737 INFO [__main__:299] Tick 2026-07-20 13:18:00+05:30 -> snapshot_time 2026-07-20 13:15:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:32,007 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:15:00+05:30 total_ms=1261.403 assemble_ms=1139.873 validation_ms=0.286 snapshot_write_ms=13.374 symbol_cache_write_ms=107.192 auction_ms=6.927 structure_ms=66.778
+2026-07-22 17:29:32,013 INFO [__main__:346] Completed tick 2026-07-20 13:18:00+05:30 -> snapshot_time 2026-07-20 13:15:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.277 sec
+2026-07-22 17:29:32,013 INFO [__main__:275] >>> 2026-07-20 13:21:00+05:30
+2026-07-22 17:29:32,015 INFO [__main__:299] Tick 2026-07-20 13:21:00+05:30 -> snapshot_time 2026-07-20 13:18:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:33,262 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:18:00+05:30 total_ms=1237.363 assemble_ms=1133.213 validation_ms=0.371 snapshot_write_ms=16.045 symbol_cache_write_ms=86.883 auction_ms=9.841 structure_ms=100.197
+2026-07-22 17:29:33,267 INFO [__main__:346] Completed tick 2026-07-20 13:21:00+05:30 -> snapshot_time 2026-07-20 13:18:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.254 sec
+2026-07-22 17:29:33,268 INFO [__main__:275] >>> 2026-07-20 13:24:00+05:30
+2026-07-22 17:29:33,270 INFO [__main__:299] Tick 2026-07-20 13:24:00+05:30 -> snapshot_time 2026-07-20 13:21:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:34,447 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:21:00+05:30 total_ms=1169.558 assemble_ms=1064.395 validation_ms=0.300 snapshot_write_ms=19.916 symbol_cache_write_ms=84.113 auction_ms=7.485 structure_ms=87.433
+2026-07-22 17:29:34,452 INFO [__main__:346] Completed tick 2026-07-20 13:24:00+05:30 -> snapshot_time 2026-07-20 13:21:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.185 sec
+2026-07-22 17:29:34,453 INFO [__main__:275] >>> 2026-07-20 13:27:00+05:30
+2026-07-22 17:29:34,455 INFO [__main__:299] Tick 2026-07-20 13:27:00+05:30 -> snapshot_time 2026-07-20 13:24:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:35,664 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:24:00+05:30 total_ms=1199.888 assemble_ms=1068.211 validation_ms=0.381 snapshot_write_ms=18.107 symbol_cache_write_ms=112.193 auction_ms=8.182 structure_ms=78.25
+2026-07-22 17:29:35,670 INFO [__main__:346] Completed tick 2026-07-20 13:27:00+05:30 -> snapshot_time 2026-07-20 13:24:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.217 sec
+2026-07-22 17:29:35,670 INFO [__main__:275] >>> 2026-07-20 13:30:00+05:30
+2026-07-22 17:29:35,673 INFO [__main__:299] Tick 2026-07-20 13:30:00+05:30 -> snapshot_time 2026-07-20 13:27:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:36,973 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:27:00+05:30 total_ms=1290.693 assemble_ms=1194.764 validation_ms=0.266 snapshot_write_ms=15.141 symbol_cache_write_ms=79.895 auction_ms=8.098 structure_ms=75.642
+2026-07-22 17:29:36,978 INFO [__main__:346] Completed tick 2026-07-20 13:30:00+05:30 -> snapshot_time 2026-07-20 13:27:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.307 sec
+2026-07-22 17:29:36,978 INFO [__main__:275] >>> 2026-07-20 13:33:00+05:30
+2026-07-22 17:29:36,981 INFO [__main__:299] Tick 2026-07-20 13:33:00+05:30 -> snapshot_time 2026-07-20 13:30:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:38,156 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:30:00+05:30 total_ms=1166.725 assemble_ms=1060.798 validation_ms=0.321 snapshot_write_ms=16.684 symbol_cache_write_ms=88.323 auction_ms=6.581 structure_ms=79.736
+2026-07-22 17:29:38,161 INFO [__main__:346] Completed tick 2026-07-20 13:33:00+05:30 -> snapshot_time 2026-07-20 13:30:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.183 sec
+2026-07-22 17:29:38,162 INFO [__main__:275] >>> 2026-07-20 13:36:00+05:30
+2026-07-22 17:29:38,164 INFO [__main__:299] Tick 2026-07-20 13:36:00+05:30 -> snapshot_time 2026-07-20 13:33:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:39,507 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:33:00+05:30 total_ms=1334.255 assemble_ms=1214.719 validation_ms=0.480 snapshot_write_ms=20.516 symbol_cache_write_ms=97.635 auction_ms=10.672 structure_ms=121.381
+2026-07-22 17:29:39,512 INFO [__main__:346] Completed tick 2026-07-20 13:36:00+05:30 -> snapshot_time 2026-07-20 13:33:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.350 sec
+2026-07-22 17:29:39,513 INFO [__main__:275] >>> 2026-07-20 13:39:00+05:30
+2026-07-22 17:29:39,516 INFO [__main__:299] Tick 2026-07-20 13:39:00+05:30 -> snapshot_time 2026-07-20 13:36:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:40,754 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:36:00+05:30 total_ms=1230.641 assemble_ms=1115.932 validation_ms=0.292 snapshot_write_ms=14.391 symbol_cache_write_ms=99.294 auction_ms=8.671 structure_ms=99.409
+2026-07-22 17:29:40,759 INFO [__main__:346] Completed tick 2026-07-20 13:39:00+05:30 -> snapshot_time 2026-07-20 13:36:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.245 sec
+2026-07-22 17:29:40,759 INFO [__main__:275] >>> 2026-07-20 13:42:00+05:30
+2026-07-22 17:29:40,761 INFO [__main__:299] Tick 2026-07-20 13:42:00+05:30 -> snapshot_time 2026-07-20 13:39:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:41,936 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:39:00+05:30 total_ms=1167.685 assemble_ms=1070.213 validation_ms=0.317 snapshot_write_ms=14.953 symbol_cache_write_ms=81.501 auction_ms=7.863 structure_ms=84.05
+2026-07-22 17:29:41,940 INFO [__main__:346] Completed tick 2026-07-20 13:42:00+05:30 -> snapshot_time 2026-07-20 13:39:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.181 sec
+2026-07-22 17:29:41,941 INFO [__main__:275] >>> 2026-07-20 13:45:00+05:30
+2026-07-22 17:29:41,943 INFO [__main__:299] Tick 2026-07-20 13:45:00+05:30 -> snapshot_time 2026-07-20 13:42:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:43,168 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:42:00+05:30 total_ms=1218.152 assemble_ms=1091.196 validation_ms=0.325 snapshot_write_ms=16.660 symbol_cache_write_ms=109.265 auction_ms=7.923 structure_ms=73.153
+2026-07-22 17:29:43,174 INFO [__main__:346] Completed tick 2026-07-20 13:45:00+05:30 -> snapshot_time 2026-07-20 13:42:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.233 sec
+2026-07-22 17:29:43,175 INFO [__main__:275] >>> 2026-07-20 13:48:00+05:30
+2026-07-22 17:29:43,178 INFO [__main__:299] Tick 2026-07-20 13:48:00+05:30 -> snapshot_time 2026-07-20 13:45:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:44,436 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:45:00+05:30 total_ms=1249.268 assemble_ms=1141.261 validation_ms=0.363 snapshot_write_ms=13.938 symbol_cache_write_ms=92.978 auction_ms=8.139 structure_ms=128.597
+2026-07-22 17:29:44,440 INFO [__main__:346] Completed tick 2026-07-20 13:48:00+05:30 -> snapshot_time 2026-07-20 13:45:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.265 sec
+2026-07-22 17:29:44,440 INFO [__main__:275] >>> 2026-07-20 13:51:00+05:30
+2026-07-22 17:29:44,442 INFO [__main__:299] Tick 2026-07-20 13:51:00+05:30 -> snapshot_time 2026-07-20 13:48:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:45,729 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:48:00+05:30 total_ms=1278.221 assemble_ms=1165.588 validation_ms=0.388 snapshot_write_ms=14.518 symbol_cache_write_ms=96.809 auction_ms=7.161 structure_ms=102.521
+2026-07-22 17:29:45,735 INFO [__main__:346] Completed tick 2026-07-20 13:51:00+05:30 -> snapshot_time 2026-07-20 13:48:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.295 sec
+2026-07-22 17:29:45,736 INFO [__main__:275] >>> 2026-07-20 13:54:00+05:30
+2026-07-22 17:29:45,738 INFO [__main__:299] Tick 2026-07-20 13:54:00+05:30 -> snapshot_time 2026-07-20 13:51:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:46,968 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:51:00+05:30 total_ms=1221.955 assemble_ms=1095.188 validation_ms=0.291 snapshot_write_ms=14.874 symbol_cache_write_ms=110.854 auction_ms=6.78 structure_ms=109.919
+2026-07-22 17:29:46,972 INFO [__main__:346] Completed tick 2026-07-20 13:54:00+05:30 -> snapshot_time 2026-07-20 13:51:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.237 sec
+2026-07-22 17:29:46,973 INFO [__main__:275] >>> 2026-07-20 13:57:00+05:30
+2026-07-22 17:29:46,975 INFO [__main__:299] Tick 2026-07-20 13:57:00+05:30 -> snapshot_time 2026-07-20 13:54:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:48,162 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:54:00+05:30 total_ms=1179.643 assemble_ms=1081.210 validation_ms=0.339 snapshot_write_ms=14.894 symbol_cache_write_ms=82.402 auction_ms=6.342 structure_ms=102.801
+2026-07-22 17:29:48,167 INFO [__main__:346] Completed tick 2026-07-20 13:57:00+05:30 -> snapshot_time 2026-07-20 13:54:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.194 sec
+2026-07-22 17:29:48,167 INFO [__main__:275] >>> 2026-07-20 14:00:00+05:30
+2026-07-22 17:29:48,170 INFO [__main__:299] Tick 2026-07-20 14:00:00+05:30 -> snapshot_time 2026-07-20 13:57:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:49,301 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 13:57:00+05:30 total_ms=1124.170 assemble_ms=1014.143 validation_ms=0.348 snapshot_write_ms=16.971 symbol_cache_write_ms=91.847 auction_ms=6.821 structure_ms=92.606
+2026-07-22 17:29:49,306 INFO [__main__:346] Completed tick 2026-07-20 14:00:00+05:30 -> snapshot_time 2026-07-20 13:57:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.139 sec
+2026-07-22 17:29:49,306 INFO [__main__:275] >>> 2026-07-20 14:03:00+05:30
+2026-07-22 17:29:49,309 INFO [__main__:299] Tick 2026-07-20 14:03:00+05:30 -> snapshot_time 2026-07-20 14:00:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:50,506 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:00:00+05:30 total_ms=1189.585 assemble_ms=1069.060 validation_ms=0.319 snapshot_write_ms=16.066 symbol_cache_write_ms=103.412 auction_ms=7.298 structure_ms=70.956
+2026-07-22 17:29:50,512 INFO [__main__:346] Completed tick 2026-07-20 14:03:00+05:30 -> snapshot_time 2026-07-20 14:00:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.206 sec
+2026-07-22 17:29:50,514 INFO [__main__:275] >>> 2026-07-20 14:06:00+05:30
+2026-07-22 17:29:50,517 INFO [__main__:299] Tick 2026-07-20 14:06:00+05:30 -> snapshot_time 2026-07-20 14:03:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:51,705 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:03:00+05:30 total_ms=1178.710 assemble_ms=1073.524 validation_ms=0.352 snapshot_write_ms=12.505 symbol_cache_write_ms=91.635 auction_ms=6.347 structure_ms=93.639
+2026-07-22 17:29:51,710 INFO [__main__:346] Completed tick 2026-07-20 14:06:00+05:30 -> snapshot_time 2026-07-20 14:03:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.196 sec
+2026-07-22 17:29:51,710 INFO [__main__:275] >>> 2026-07-20 14:09:00+05:30
+2026-07-22 17:29:51,712 INFO [__main__:299] Tick 2026-07-20 14:09:00+05:30 -> snapshot_time 2026-07-20 14:06:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:52,897 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:06:00+05:30 total_ms=1177.867 assemble_ms=1078.795 validation_ms=0.273 snapshot_write_ms=13.465 symbol_cache_write_ms=84.825 auction_ms=5.795 structure_ms=99.741
+2026-07-22 17:29:52,902 INFO [__main__:346] Completed tick 2026-07-20 14:09:00+05:30 -> snapshot_time 2026-07-20 14:06:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.192 sec
+2026-07-22 17:29:52,902 INFO [__main__:275] >>> 2026-07-20 14:12:00+05:30
+2026-07-22 17:29:52,904 INFO [__main__:299] Tick 2026-07-20 14:12:00+05:30 -> snapshot_time 2026-07-20 14:09:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:54,163 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:09:00+05:30 total_ms=1251.858 assemble_ms=1117.618 validation_ms=0.278 snapshot_write_ms=16.995 symbol_cache_write_ms=116.103 auction_ms=7.863 structure_ms=105.92
+2026-07-22 17:29:54,168 INFO [__main__:346] Completed tick 2026-07-20 14:12:00+05:30 -> snapshot_time 2026-07-20 14:09:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.266 sec
+2026-07-22 17:29:54,168 INFO [__main__:275] >>> 2026-07-20 14:15:00+05:30
+2026-07-22 17:29:54,171 INFO [__main__:299] Tick 2026-07-20 14:15:00+05:30 -> snapshot_time 2026-07-20 14:12:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:55,468 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:12:00+05:30 total_ms=1290.202 assemble_ms=1058.968 validation_ms=0.396 snapshot_write_ms=99.033 symbol_cache_write_ms=130.772 auction_ms=9.564 structure_ms=112.62
+2026-07-22 17:29:55,476 INFO [__main__:346] Completed tick 2026-07-20 14:15:00+05:30 -> snapshot_time 2026-07-20 14:12:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.308 sec
+2026-07-22 17:29:55,476 INFO [__main__:275] >>> 2026-07-20 14:18:00+05:30
+2026-07-22 17:29:55,480 INFO [__main__:299] Tick 2026-07-20 14:18:00+05:30 -> snapshot_time 2026-07-20 14:15:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:56,690 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:15:00+05:30 total_ms=1198.446 assemble_ms=1087.131 validation_ms=0.379 snapshot_write_ms=18.745 symbol_cache_write_ms=91.326 auction_ms=8.982 structure_ms=69.955
+2026-07-22 17:29:56,695 INFO [__main__:346] Completed tick 2026-07-20 14:18:00+05:30 -> snapshot_time 2026-07-20 14:15:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.218 sec
+2026-07-22 17:29:56,695 INFO [__main__:275] >>> 2026-07-20 14:21:00+05:30
+2026-07-22 17:29:56,698 INFO [__main__:299] Tick 2026-07-20 14:21:00+05:30 -> snapshot_time 2026-07-20 14:18:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:57,953 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:18:00+05:30 total_ms=1246.563 assemble_ms=1130.026 validation_ms=0.298 snapshot_write_ms=16.159 symbol_cache_write_ms=99.428 auction_ms=10.272 structure_ms=69.074
+2026-07-22 17:29:57,959 INFO [__main__:346] Completed tick 2026-07-20 14:21:00+05:30 -> snapshot_time 2026-07-20 14:18:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.264 sec
+2026-07-22 17:29:57,960 INFO [__main__:275] >>> 2026-07-20 14:24:00+05:30
+2026-07-22 17:29:57,962 INFO [__main__:299] Tick 2026-07-20 14:24:00+05:30 -> snapshot_time 2026-07-20 14:21:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:29:59,237 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:21:00+05:30 total_ms=1267.511 assemble_ms=1155.989 validation_ms=0.311 snapshot_write_ms=17.307 symbol_cache_write_ms=93.026 auction_ms=9.166 structure_ms=94.9
+2026-07-22 17:29:59,242 INFO [__main__:346] Completed tick 2026-07-20 14:24:00+05:30 -> snapshot_time 2026-07-20 14:21:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.282 sec
+2026-07-22 17:29:59,242 INFO [__main__:275] >>> 2026-07-20 14:27:00+05:30
+2026-07-22 17:29:59,244 INFO [__main__:299] Tick 2026-07-20 14:27:00+05:30 -> snapshot_time 2026-07-20 14:24:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:00,605 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:24:00+05:30 total_ms=1353.067 assemble_ms=1211.306 validation_ms=0.321 snapshot_write_ms=18.812 symbol_cache_write_ms=121.872 auction_ms=7.276 structure_ms=84.991
+2026-07-22 17:30:00,614 INFO [__main__:346] Completed tick 2026-07-20 14:27:00+05:30 -> snapshot_time 2026-07-20 14:24:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.372 sec
+2026-07-22 17:30:00,615 INFO [__main__:275] >>> 2026-07-20 14:30:00+05:30
+2026-07-22 17:30:00,620 INFO [__main__:299] Tick 2026-07-20 14:30:00+05:30 -> snapshot_time 2026-07-20 14:27:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:03,300 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:27:00+05:30 total_ms=2664.692 assemble_ms=2053.202 validation_ms=0.418 snapshot_write_ms=92.734 symbol_cache_write_ms=516.999 auction_ms=19.463 structure_ms=175.797
+2026-07-22 17:30:03,312 INFO [__main__:346] Completed tick 2026-07-20 14:30:00+05:30 -> snapshot_time 2026-07-20 14:27:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=2.697 sec
+2026-07-22 17:30:03,312 INFO [__main__:275] >>> 2026-07-20 14:33:00+05:30
+2026-07-22 17:30:03,328 INFO [__main__:299] Tick 2026-07-20 14:33:00+05:30 -> snapshot_time 2026-07-20 14:30:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:05,455 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:30:00+05:30 total_ms=2085.544 assemble_ms=1867.933 validation_ms=0.384 snapshot_write_ms=26.810 symbol_cache_write_ms=189.414 auction_ms=9.985 structure_ms=103.318
+2026-07-22 17:30:05,463 INFO [__main__:346] Completed tick 2026-07-20 14:33:00+05:30 -> snapshot_time 2026-07-20 14:30:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=2.150 sec
+2026-07-22 17:30:05,463 INFO [__main__:275] >>> 2026-07-20 14:36:00+05:30
+2026-07-22 17:30:05,467 INFO [__main__:299] Tick 2026-07-20 14:36:00+05:30 -> snapshot_time 2026-07-20 14:33:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:07,053 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:33:00+05:30 total_ms=1576.882 assemble_ms=1412.857 validation_ms=0.345 snapshot_write_ms=22.698 symbol_cache_write_ms=140.219 auction_ms=8.655 structure_ms=90.673
+2026-07-22 17:30:07,059 INFO [__main__:346] Completed tick 2026-07-20 14:36:00+05:30 -> snapshot_time 2026-07-20 14:33:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.596 sec
+2026-07-22 17:30:07,060 INFO [__main__:275] >>> 2026-07-20 14:39:00+05:30
+2026-07-22 17:30:07,069 INFO [__main__:299] Tick 2026-07-20 14:39:00+05:30 -> snapshot_time 2026-07-20 14:36:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:08,825 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:36:00+05:30 total_ms=1735.918 assemble_ms=1548.497 validation_ms=0.447 snapshot_write_ms=30.194 symbol_cache_write_ms=155.477 auction_ms=12.845 structure_ms=114.55
+2026-07-22 17:30:08,834 INFO [__main__:346] Completed tick 2026-07-20 14:39:00+05:30 -> snapshot_time 2026-07-20 14:36:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.774 sec
+2026-07-22 17:30:08,834 INFO [__main__:275] >>> 2026-07-20 14:42:00+05:30
+2026-07-22 17:30:08,842 INFO [__main__:299] Tick 2026-07-20 14:42:00+05:30 -> snapshot_time 2026-07-20 14:39:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:10,414 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:39:00+05:30 total_ms=1561.448 assemble_ms=1433.140 validation_ms=0.510 snapshot_write_ms=21.550 symbol_cache_write_ms=105.332 auction_ms=9.589 structure_ms=88.816
+2026-07-22 17:30:10,423 INFO [__main__:346] Completed tick 2026-07-20 14:42:00+05:30 -> snapshot_time 2026-07-20 14:39:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.588 sec
+2026-07-22 17:30:10,425 INFO [__main__:275] >>> 2026-07-20 14:45:00+05:30
+2026-07-22 17:30:10,429 INFO [__main__:299] Tick 2026-07-20 14:45:00+05:30 -> snapshot_time 2026-07-20 14:42:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:11,772 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:42:00+05:30 total_ms=1319.206 assemble_ms=1186.517 validation_ms=0.259 snapshot_write_ms=16.971 symbol_cache_write_ms=114.857 auction_ms=8.811 structure_ms=134.216
+2026-07-22 17:30:11,777 INFO [__main__:346] Completed tick 2026-07-20 14:45:00+05:30 -> snapshot_time 2026-07-20 14:42:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.352 sec
+2026-07-22 17:30:11,777 INFO [__main__:275] >>> 2026-07-20 14:48:00+05:30
+2026-07-22 17:30:11,780 INFO [__main__:299] Tick 2026-07-20 14:48:00+05:30 -> snapshot_time 2026-07-20 14:45:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:13,395 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:45:00+05:30 total_ms=1603.398 assemble_ms=1419.357 validation_ms=0.375 snapshot_write_ms=42.385 symbol_cache_write_ms=140.513 auction_ms=11.393 structure_ms=123.395
+2026-07-22 17:30:13,399 INFO [__main__:346] Completed tick 2026-07-20 14:48:00+05:30 -> snapshot_time 2026-07-20 14:45:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.622 sec
+2026-07-22 17:30:13,399 INFO [__main__:275] >>> 2026-07-20 14:51:00+05:30
+2026-07-22 17:30:13,402 INFO [__main__:299] Tick 2026-07-20 14:51:00+05:30 -> snapshot_time 2026-07-20 14:48:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:14,969 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:48:00+05:30 total_ms=1556.195 assemble_ms=1401.914 validation_ms=0.362 snapshot_write_ms=26.991 symbol_cache_write_ms=125.959 auction_ms=7.97 structure_ms=133.611
+2026-07-22 17:30:14,976 INFO [__main__:346] Completed tick 2026-07-20 14:51:00+05:30 -> snapshot_time 2026-07-20 14:48:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.577 sec
+2026-07-22 17:30:14,976 INFO [__main__:275] >>> 2026-07-20 14:54:00+05:30
+2026-07-22 17:30:14,979 INFO [__main__:299] Tick 2026-07-20 14:54:00+05:30 -> snapshot_time 2026-07-20 14:51:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:16,343 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:51:00+05:30 total_ms=1356.927 assemble_ms=1250.546 validation_ms=0.263 snapshot_write_ms=13.180 symbol_cache_write_ms=92.325 auction_ms=6.177 structure_ms=96.201
+2026-07-22 17:30:16,348 INFO [__main__:346] Completed tick 2026-07-20 14:54:00+05:30 -> snapshot_time 2026-07-20 14:51:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.371 sec
+2026-07-22 17:30:16,348 INFO [__main__:275] >>> 2026-07-20 14:57:00+05:30
+2026-07-22 17:30:16,350 INFO [__main__:299] Tick 2026-07-20 14:57:00+05:30 -> snapshot_time 2026-07-20 14:54:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:17,708 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:54:00+05:30 total_ms=1349.584 assemble_ms=1212.156 validation_ms=0.346 snapshot_write_ms=18.942 symbol_cache_write_ms=117.385 auction_ms=8.455 structure_ms=129.47
+2026-07-22 17:30:17,718 INFO [__main__:346] Completed tick 2026-07-20 14:57:00+05:30 -> snapshot_time 2026-07-20 14:54:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.370 sec
+2026-07-22 17:30:17,719 INFO [__main__:275] >>> 2026-07-20 15:00:00+05:30
+2026-07-22 17:30:17,724 INFO [__main__:299] Tick 2026-07-20 15:00:00+05:30 -> snapshot_time 2026-07-20 14:57:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:19,138 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 14:57:00+05:30 total_ms=1393.519 assemble_ms=1270.874 validation_ms=0.252 snapshot_write_ms=15.084 symbol_cache_write_ms=106.690 auction_ms=7.732 structure_ms=104.443
+2026-07-22 17:30:19,143 INFO [__main__:346] Completed tick 2026-07-20 15:00:00+05:30 -> snapshot_time 2026-07-20 14:57:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.424 sec
+2026-07-22 17:30:19,143 INFO [__main__:275] >>> 2026-07-20 15:03:00+05:30
+2026-07-22 17:30:19,147 INFO [__main__:299] Tick 2026-07-20 15:03:00+05:30 -> snapshot_time 2026-07-20 15:00:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:20,486 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 15:00:00+05:30 total_ms=1329.332 assemble_ms=1193.507 validation_ms=0.320 snapshot_write_ms=18.246 symbol_cache_write_ms=116.328 auction_ms=8.104 structure_ms=95.427
+2026-07-22 17:30:20,493 INFO [__main__:346] Completed tick 2026-07-20 15:03:00+05:30 -> snapshot_time 2026-07-20 15:00:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.350 sec
+2026-07-22 17:30:20,494 INFO [__main__:275] >>> 2026-07-20 15:06:00+05:30
+2026-07-22 17:30:20,497 INFO [__main__:299] Tick 2026-07-20 15:06:00+05:30 -> snapshot_time 2026-07-20 15:03:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:21,808 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 15:03:00+05:30 total_ms=1299.495 assemble_ms=1184.613 validation_ms=0.309 snapshot_write_ms=17.756 symbol_cache_write_ms=96.150 auction_ms=7.842 structure_ms=109.016
+2026-07-22 17:30:21,814 INFO [__main__:346] Completed tick 2026-07-20 15:06:00+05:30 -> snapshot_time 2026-07-20 15:03:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.320 sec
+2026-07-22 17:30:21,815 INFO [__main__:275] >>> 2026-07-20 15:09:00+05:30
+2026-07-22 17:30:21,817 INFO [__main__:299] Tick 2026-07-20 15:09:00+05:30 -> snapshot_time 2026-07-20 15:06:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:23,048 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 15:06:00+05:30 total_ms=1221.008 assemble_ms=1101.635 validation_ms=0.345 snapshot_write_ms=18.583 symbol_cache_write_ms=99.149 auction_ms=10.243 structure_ms=71.877
+2026-07-22 17:30:23,054 INFO [__main__:346] Completed tick 2026-07-20 15:09:00+05:30 -> snapshot_time 2026-07-20 15:06:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.239 sec
+2026-07-22 17:30:23,054 INFO [__main__:275] >>> 2026-07-20 15:12:00+05:30
+2026-07-22 17:30:23,057 INFO [__main__:299] Tick 2026-07-20 15:12:00+05:30 -> snapshot_time 2026-07-20 15:09:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:24,438 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 15:09:00+05:30 total_ms=1372.570 assemble_ms=1232.641 validation_ms=0.401 snapshot_write_ms=17.606 symbol_cache_write_ms=120.897 auction_ms=9.746 structure_ms=128.752
+2026-07-22 17:30:24,444 INFO [__main__:346] Completed tick 2026-07-20 15:12:00+05:30 -> snapshot_time 2026-07-20 15:09:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.389 sec
+2026-07-22 17:30:24,444 INFO [__main__:275] >>> 2026-07-20 15:15:00+05:30
+2026-07-22 17:30:24,447 INFO [__main__:299] Tick 2026-07-20 15:15:00+05:30 -> snapshot_time 2026-07-20 15:12:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:25,772 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 15:12:00+05:30 total_ms=1317.628 assemble_ms=1207.258 validation_ms=0.363 snapshot_write_ms=18.475 symbol_cache_write_ms=90.727 auction_ms=8.553 structure_ms=99.312
+2026-07-22 17:30:25,777 INFO [__main__:346] Completed tick 2026-07-20 15:15:00+05:30 -> snapshot_time 2026-07-20 15:12:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.333 sec
+2026-07-22 17:30:25,777 INFO [__main__:275] >>> 2026-07-20 15:18:00+05:30
+2026-07-22 17:30:25,780 INFO [__main__:299] Tick 2026-07-20 15:18:00+05:30 -> snapshot_time 2026-07-20 15:15:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:27,032 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 15:15:00+05:30 total_ms=1243.383 assemble_ms=1108.982 validation_ms=0.298 snapshot_write_ms=22.982 symbol_cache_write_ms=110.349 auction_ms=8.658 structure_ms=68.643
+2026-07-22 17:30:27,037 INFO [__main__:346] Completed tick 2026-07-20 15:18:00+05:30 -> snapshot_time 2026-07-20 15:15:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.259 sec
+2026-07-22 17:30:27,037 INFO [__main__:275] >>> 2026-07-20 15:21:00+05:30
+2026-07-22 17:30:27,039 INFO [__main__:299] Tick 2026-07-20 15:21:00+05:30 -> snapshot_time 2026-07-20 15:18:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:28,459 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 15:18:00+05:30 total_ms=1411.583 assemble_ms=1288.055 validation_ms=0.323 snapshot_write_ms=18.840 symbol_cache_write_ms=103.787 auction_ms=8.637 structure_ms=90.284
+2026-07-22 17:30:28,466 INFO [__main__:346] Completed tick 2026-07-20 15:21:00+05:30 -> snapshot_time 2026-07-20 15:18:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.429 sec
+2026-07-22 17:30:28,466 INFO [__main__:275] >>> 2026-07-20 15:24:00+05:30
+2026-07-22 17:30:28,471 INFO [__main__:299] Tick 2026-07-20 15:24:00+05:30 -> snapshot_time 2026-07-20 15:21:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:29,809 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 15:21:00+05:30 total_ms=1328.889 assemble_ms=1165.237 validation_ms=0.355 snapshot_write_ms=25.813 symbol_cache_write_ms=136.258 auction_ms=11.058 structure_ms=108.062
+2026-07-22 17:30:29,817 INFO [__main__:346] Completed tick 2026-07-20 15:24:00+05:30 -> snapshot_time 2026-07-20 15:21:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.350 sec
+2026-07-22 17:30:29,818 INFO [__main__:275] >>> 2026-07-20 15:27:00+05:30
+2026-07-22 17:30:29,821 INFO [__main__:299] Tick 2026-07-20 15:27:00+05:30 -> snapshot_time 2026-07-20 15:24:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:31,182 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 15:24:00+05:30 total_ms=1342.703 assemble_ms=1205.669 validation_ms=0.377 snapshot_write_ms=21.734 symbol_cache_write_ms=113.799 auction_ms=13.794 structure_ms=112.505
+2026-07-22 17:30:31,189 INFO [__main__:346] Completed tick 2026-07-20 15:27:00+05:30 -> snapshot_time 2026-07-20 15:24:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.371 sec
+2026-07-22 17:30:31,189 INFO [__main__:275] >>> 2026-07-20 15:30:00+05:30
+2026-07-22 17:30:31,192 INFO [__main__:299] Tick 2026-07-20 15:30:00+05:30 -> snapshot_time 2026-07-20 15:27:00+05:30: total=1 missing=1 skipped_existing=0
+2026-07-22 17:30:32,525 INFO [services.snapshot.snapshot_generator:714] snapshot_timing symbol=COFORGE snapshot_time=2026-07-20 15:27:00+05:30 total_ms=1320.750 assemble_ms=1174.718 validation_ms=0.359 snapshot_write_ms=23.264 symbol_cache_write_ms=121.340 auction_ms=9.941 structure_ms=112.959
+2026-07-22 17:30:32,534 INFO [__main__:346] Completed tick 2026-07-20 15:30:00+05:30 -> snapshot_time 2026-07-20 15:27:00+05:30: created=1 created_different_time=0 skipped_existing=0 worker_skipped=0 no_snapshot=0 not_written=0 failed=0 elapsed=1.344 sec
+2026-07-22 17:30:32,569 INFO [__main__:362] Finished replay_snapshots
