@@ -481,9 +481,14 @@ class SnapshotSchema(BaseModel):
     # the whole session on every 3m tick. Consumers should use structure and
     # state_context; this is only generation state.
     state_memory: Dict[str, Any] = Field(default_factory=dict)
+    # Bounded 3m/15m candle ring used only to advance structure from the
+    # immediately previous snapshot. This prevents repeated structure-frame
+    # discovery from the full fetched session on consecutive ticks.
+    structure_memory: Dict[str, Any] = Field(default_factory=dict)
     events: List[EventBlock] = Field(default_factory=list)
     derivatives: Dict[str, Any] = Field(default_factory=dict)
     auction: AuctionSnapshotBlock = Field(default_factory=AuctionSnapshotBlock)
+    generation_diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
     def to_db_dict(self) -> Dict[str, Any]:
         raw = self.model_dump(

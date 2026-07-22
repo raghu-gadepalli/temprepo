@@ -90,7 +90,20 @@ class AuctionSnapshotStateTests(unittest.TestCase):
             separators=(",", ":"),
             default=str,
         ).encode("utf-8")
-        self.assertLess(len(encoded), 150_000)
+        self.assertLess(len(encoded), 60_000)
+        self.assertNotIn("__kind__", carried_state)
+        self.assertNotIn("services.auction_engine", encoded.decode("utf-8"))
+
+
+    def test_snapshot_generator_uses_single_snapshot_write(self):
+        from pathlib import Path
+
+        source = Path("services/snapshot/snapshot_generator.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("SnapshotSchema.create_snapshot(snapshot)", source)
+        self.assertNotIn("SnapshotSchema.update_snapshot(", source)
+        self.assertIn("STRUCTURE_INCREMENTAL_MEMORY_V1", source)
 
     def test_snapshot_adapter_uses_previous_snapshot_continuity(self):
         previous = None

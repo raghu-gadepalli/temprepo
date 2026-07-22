@@ -207,7 +207,11 @@ def previous_auction_continuity_usable(
         return False
     if auction.get("config_hash") != AUCTION_ENGINE_CONFIG.stable_hash():
         return False
-    return isinstance(auction.get("continuity"), Mapping)
+    continuity = auction.get("continuity")
+    return bool(
+        isinstance(continuity, Mapping)
+        and continuity.get("state_schema") == "AUCTION_INCREMENTAL_STATE_V2"
+    )
 
 
 def _auction_input(payload: Mapping[str, Any]) -> Dict[str, Any]:

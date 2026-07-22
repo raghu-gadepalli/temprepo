@@ -19,6 +19,7 @@ import json
 import os
 import sys
 import logging
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any, Tuple
@@ -475,6 +476,94 @@ def _payload_state_memory(payload: Dict[str, Any]) -> Dict[str, Any]:
     return memory if isinstance(memory, dict) else {}
 
 
+def _payload_structure_memory(payload: Dict[str, Any]) -> Dict[str, Any]:
+    memory = (payload or {}).get("structure_memory")
+    if not isinstance(memory, dict):
+        return {}
+    if memory.get("schema") != "STRUCTURE_INCREMENTAL_MEMORY_V1":
+        return {}
+    return memory
+
+
+def _frame_to_structure_rows(frame: pd.DataFrame, *, limit: int) -> list[Dict[str, Any]]:
+    if frame is None or frame.empty:
+        return []
+    d = frame.copy()
+    d["date"] = pd.to_datetime(d["date"])
+    if d["date"].dt.tz is None:
+        d["date"] = d["date"].dt.tz_localize(IST)
+    else:
+        d["date"] = d["date"].dt.tz_convert(IST)
+    rows: list[Dict[str, Any]] = []
+    for _, row in d.sort_values("date").drop_duplicates("date", keep="last").tail(limit).iterrows():
+        rows.append({
+            "date": pd.to_datetime(row["date"]).isoformat(),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row.get("volume") or 0.0),
+        })
+    return rows
+
+
+def _structure_rows_to_frame(rows: Any) -> pd.DataFrame:
+    if not isinstance(rows, list) or not rows:
+        return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+    d = pd.DataFrame(rows)
+    if d.empty or "date" not in d.columns:
+        return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+    d["date"] = pd.to_datetime(d["date"])
+    if d["date"].dt.tz is None:
+        d["date"] = d["date"].dt.tz_localize(IST)
+    else:
+        d["date"] = d["date"].dt.tz_convert(IST)
+    return d.sort_values("date").drop_duplicates("date", keep="last").reset_index(drop=True)
+
+
+def _append_structure_current(
+    previous_rows: Any,
+    current_frame: pd.DataFrame,
+    *,
+    snap_time: datetime,
+    limit: int,
+) -> pd.DataFrame:
+    previous = _structure_rows_to_frame(previous_rows)
+    current = pd.DataFrame()
+    if current_frame is not None and not current_frame.empty:
+        current = current_frame.copy()
+        current["date"] = pd.to_datetime(current["date"])
+        if current["date"].dt.tz is None:
+            current["date"] = current["date"].dt.tz_localize(IST)
+        else:
+            current["date"] = current["date"].dt.tz_convert(IST)
+        current = current[current["date"] <= snap_time].tail(1)
+    combined = pd.concat([previous, current], ignore_index=True)
+    if combined.empty:
+        return combined
+    return (
+        combined.sort_values("date")
+        .drop_duplicates("date", keep="last")
+        .tail(limit)
+        .reset_index(drop=True)
+    )
+
+
+def _build_structure_memory(
+    df3: pd.DataFrame,
+    df15: pd.DataFrame,
+    *,
+    snapshot_time: datetime,
+    lookback_bars: int,
+) -> Dict[str, Any]:
+    return {
+        "schema": "STRUCTURE_INCREMENTAL_MEMORY_V1",
+        "snapshot_time": snapshot_time.isoformat(),
+        "bars_3m": _frame_to_structure_rows(df3, limit=lookback_bars),
+        "bars_15m": _frame_to_structure_rows(df15, limit=3),
+    }
+
+
 def _usable_previous_snapshot_for_structure(
     payload: Dict[str, Any],
     snap_time: datetime,
@@ -505,7 +594,10 @@ def _usable_previous_snapshot_for_structure(
         return False
 
     state_memory = _payload_state_memory(payload)
-    if not state_memory:
+    structure_memory = _payload_structure_memory(payload)
+    if not state_memory or not structure_memory:
+        return False
+    if not structure_memory.get("bars_3m"):
         return False
 
     max_gap_minutes = float(SNAPSHOT_CONFIG.service.tick_minutes) + 0.5
@@ -562,16 +654,23 @@ class SnapshotGenerator:
         end_date: Optional[datetime] = None,
         persist_snapshot: bool = True,
     ) -> Optional[SnapshotSchema]:
+        total_started = time.perf_counter()
         if end_date is None:
             end_date = datetime.now(IST)
 
+        assemble_started = time.perf_counter()
         snap_dict = self._assemble(end_date)
+        assemble_ms = (time.perf_counter() - assemble_started) * 1000.0
 
         if not snap_dict:
             return None
 
+        validation_started = time.perf_counter()
         snapshot = SnapshotSchema.model_validate(snap_dict)
+        validation_ms = (time.perf_counter() - validation_started) * 1000.0
 
+        snapshot_write_ms = 0.0
+        symbol_cache_write_ms = 0.0
         if persist_snapshot:
             try:
                 last_snap_payload = snapshot.model_dump(mode="json", by_alias=True)
@@ -579,19 +678,17 @@ class SnapshotGenerator:
                 logger.exception("Failed to serialize snapshot payload for %s", snapshot.symbol)
                 last_snap_payload = {}
 
+            write_started = time.perf_counter()
             try:
+                # Single idempotent persistence path. create_snapshot already
+                # updates an existing (symbol, snapshot_time) row with the full
+                # current payload, so a second update/commit is redundant.
                 SnapshotSchema.create_snapshot(snapshot)
-
-                # For weekend/backfill/retest: create_snapshot may skip duplicates.
-                # Force update payload so latest schema/state_context is persisted.
-                SnapshotSchema.update_snapshot(
-                    snapshot.symbol,
-                    snapshot.snapshot_time,
-                    snapshot.to_db_dict(),
-                )
             except Exception:
-                logger.exception("Failed to persist/update snapshot row for %s", snapshot.symbol)
+                logger.exception("Failed to persist snapshot row for %s", snapshot.symbol)
+            snapshot_write_ms = (time.perf_counter() - write_started) * 1000.0
 
+            cache_started = time.perf_counter()
             try:
                 ltp_val = getattr(snapshot, "ltp", None)
                 if ltp_val is None:
@@ -611,10 +708,29 @@ class SnapshotGenerator:
                 )
             except Exception:
                 logger.exception("Failed to update symbol cache for %s", snapshot.symbol)
+            symbol_cache_write_ms = (time.perf_counter() - cache_started) * 1000.0
 
+        total_ms = (time.perf_counter() - total_started) * 1000.0
+        logger.info(
+            "snapshot_timing symbol=%s snapshot_time=%s total_ms=%.3f "
+            "assemble_ms=%.3f validation_ms=%.3f snapshot_write_ms=%.3f "
+            "symbol_cache_write_ms=%.3f auction_ms=%s structure_ms=%s",
+            snapshot.symbol,
+            snapshot.snapshot_time,
+            total_ms,
+            assemble_ms,
+            validation_ms,
+            snapshot_write_ms,
+            symbol_cache_write_ms,
+            (snapshot.auction.elapsed_ms if snapshot.auction else None),
+            (snapshot.generation_diagnostics or {}).get("structure_ms"),
+        )
         return snapshot
 
     def _assemble(self, end: datetime) -> Optional[Dict[str, Any]]:
+        assemble_started = time.perf_counter()
+        generation_timings: Dict[str, Any] = {}
+        fetch_started = time.perf_counter()
         try:
             raw = self.fetcher.fetch(
                 self.token,
@@ -627,7 +743,11 @@ class SnapshotGenerator:
         except Exception:
             logger.exception("Historical fetch failed for %s", self.symbol)
             return None
+        generation_timings["historical_fetch_ms"] = round(
+            (time.perf_counter() - fetch_started) * 1000.0, 3
+        )
 
+        market_started = time.perf_counter()
         df1 = pd.DataFrame(raw)
 
         if df1.empty or "date" not in df1.columns:
@@ -839,7 +959,11 @@ class SnapshotGenerator:
             df3i[df3i["date"] <= snap_time].copy(),
             snap_time,
         )
+        generation_timings["market_assembly_ms"] = round(
+            (time.perf_counter() - market_started) * 1000.0, 3
+        )
 
+        structure_started = time.perf_counter()
         sym = None
         last_snapshot_payload: Dict[str, Any] = {}
         try:
@@ -879,30 +1003,30 @@ class SnapshotGenerator:
             symbol_payload=last_snapshot_payload,
         )
         previous_state_memory = _payload_state_memory(previous_structure_payload)
-        use_cached_structure = bool(previous_state_memory)
+        previous_structure_memory = _payload_structure_memory(previous_structure_payload)
+        use_cached_structure = bool(previous_state_memory and previous_structure_memory)
+        structure_df3_used = pd.DataFrame()
+        structure_df15_used = pd.DataFrame()
 
         if use_cached_structure:
-            current_df3_stable = (
-                df3[
-                    (df3["date"] <= snap_time)
-                    & (df3["date"].dt.date == snap_time.date())
-                ]
-                .tail(lookback_bars)
-                .reset_index(drop=True)
-                if not df3.empty
-                else df3_stable
+            # Advance the bounded candle ring carried by the immediately
+            # previous snapshot.  Structure no longer rediscovers its working
+            # frame from the freshly fetched session history on every tick.
+            structure_df3_used = _append_structure_current(
+                previous_structure_memory.get("bars_3m"),
+                df3,
+                snap_time=snap_time,
+                limit=lookback_bars,
+            )
+            structure_df15_used = _append_structure_current(
+                previous_structure_memory.get("bars_15m"),
+                df15,
+                snap_time=snap_time,
+                limit=3,
             )
 
-            current_df15_stable = (
-                df15[
-                    (df15["date"] <= snap_time)
-                    & (df15["date"].dt.date == snap_time.date())
-                ]
-                .tail(3)
-                .reset_index(drop=True)
-                if not df15.empty
-                else df15_stable
-            )
+            current_df3_stable = structure_df3_used
+            current_df15_stable = structure_df15_used
 
             structure, state_memory = compute_structure_state_from_memory(
                 px=close_now,
@@ -1117,6 +1241,35 @@ class SnapshotGenerator:
                 prev_state_memory={},
             )
 
+        if structure_df3_used.empty:
+            structure_df3_used = (
+                df3[
+                    (df3["date"] <= snap_time)
+                    & (df3["date"].dt.date == snap_time.date())
+                ]
+                .tail(lookback_bars)
+                .reset_index(drop=True)
+                if not df3.empty
+                else df3_stable
+            )
+        if structure_df15_used.empty:
+            structure_df15_used = (
+                df15[
+                    (df15["date"] <= snap_time)
+                    & (df15["date"].dt.date == snap_time.date())
+                ]
+                .tail(3)
+                .reset_index(drop=True)
+                if not df15.empty
+                else df15_stable
+            )
+        structure_memory = _build_structure_memory(
+            structure_df3_used,
+            structure_df15_used,
+            snapshot_time=snap_time,
+            lookback_bars=lookback_bars,
+        )
+
         try:
             structure.diagnostics.setdefault(
                 "structure_update_mode",
@@ -1134,6 +1287,9 @@ class SnapshotGenerator:
             structure,
             current_volume_band=volume.get("bar_rvol_band"),
         )
+        generation_timings["structure_ms"] = round(
+            (time.perf_counter() - structure_started) * 1000.0, 3
+        )
 
         curr_for_events = {
             "indicators": indicators,
@@ -1144,6 +1300,7 @@ class SnapshotGenerator:
 
         events = build_events(curr_for_events, prev_for_events)
 
+        derivatives_started = time.perf_counter()
         derivatives_spot_price = None
         derivatives_future = None
         derivatives_options_lite = None
@@ -1206,6 +1363,9 @@ class SnapshotGenerator:
 
         except Exception:
             logger.exception("Derivatives attach failed for %s", self.symbol)
+        generation_timings["derivatives_ms"] = round(
+            (time.perf_counter() - derivatives_started) * 1000.0, 3
+        )
 
         try:
             gen_signals = bool(getattr(sym, "generate_signals", False)) if sym else False
@@ -1229,6 +1389,7 @@ class SnapshotGenerator:
             "structure": structure.model_dump(mode="python"),
             "state_context": state_context,
             "state_memory": state_memory,
+            "structure_memory": structure_memory,
             "events": events,
             "derivatives": {
                 "spot_price": derivatives_spot_price,
@@ -1238,6 +1399,7 @@ class SnapshotGenerator:
                 "option_sentiment_windows": options_sentiment_windows,
                 "future_sentiment_windows": future_sentiment_windows,
             },
+            "generation_diagnostics": generation_timings,
         }
 
         # ------------------------------------------------------------
@@ -1248,9 +1410,17 @@ class SnapshotGenerator:
         # opportunity-table write, Advisor call, signal lookup, or processed
         # acknowledgement occurs during snapshot assembly.
         # ------------------------------------------------------------
+        auction_started = time.perf_counter()
         snap["auction"] = enrich_snapshot_with_auction(
             snap,
             previous_payload=previous_structure_payload,
         )
+        generation_timings["auction_adapter_ms"] = round(
+            (time.perf_counter() - auction_started) * 1000.0, 3
+        )
+        generation_timings["assemble_total_ms"] = round(
+            (time.perf_counter() - assemble_started) * 1000.0, 3
+        )
+        snap["generation_diagnostics"] = generation_timings
 
         return snap

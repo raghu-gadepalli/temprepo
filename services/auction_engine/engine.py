@@ -9,8 +9,8 @@ Advisor policy, create signal payloads, or perform database writes.
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta
 import hashlib
 import json
 from typing import Any, Deque, Dict, Iterable, List, Mapping, Optional
@@ -21,20 +21,23 @@ from services.auction_engine.contracts import (
     EvidenceSnapshot,
     ManagerAction,
 )
-from services.auction_engine.boundary_engine import BoundaryEpisodeEngine
+from services.auction_engine.boundary_engine import BoundaryEpisodeEngine, _EpisodeMemory
 from services.auction_engine.evidence import EvidenceBuilder
 from services.auction_engine.state_engine import (
     AuctionStateChronologyError,
     AuctionStateEngine,
+    _StateMemory,
 )
-from services.auction_engine.setup_engine import SetupCandidateEngine
-from services.auction_engine.opportunity_ledger import OpportunityLedger
+from services.auction_engine.setup_engine import SetupCandidateEngine, _FailedWatch, _InitiationWatch
+from services.auction_engine.opportunity_ledger import OpportunityLedger, OpportunityRecord
 from services.auction_engine.setup_manager import SetupManager
 from services.auction_engine.decision_engine import DecisionEngine
 from services.auction_engine.checkpoint_codec import (
     decode_checkpoint_value,
     encode_checkpoint_value,
 )
+from services.auction_engine.compact_state import restore_dataclass, to_plain
+from services.auction_engine.contracts import BarEvidence, SetupCandidate
 
 
 @dataclass(frozen=True)
@@ -250,67 +253,124 @@ class AuctionEngine:
         return result
 
     def export_incremental_state(self, symbol: str) -> Dict[str, Any]:
-        """Export compact state carried by the enriched snapshot.
+        """Export bounded, plain-JSON state for the next snapshot only.
 
-        Unlike the legacy restart checkpoint, this payload excludes the full
-        last result and the ever-growing ledger event history. The chronological
-        snapshot rows are the history; only state required by the next Auction
-        evaluation is carried forward.
+        The snapshot is the chronological record.  This continuity block keeps
+        only memory required to advance one more candle: bounded evidence
+        history, current state/boundary/setup watches and live or recently
+        selected opportunities.  It deliberately excludes ``last_evaluation``,
+        ledger event history, terminal unselected records and generic Python
+        type wrappers.
         """
         key = str(symbol or "").strip().upper()
         if not key:
             raise ValueError("Auction incremental-state symbol is required")
-        payload = {
-            "state_schema": "AUCTION_INCREMENTAL_STATE_V1",
+
+        state_memory = self.state_engine._memory.get(key)
+        compact_state_memory = (
+            replace(state_memory, last_evaluation=None)
+            if state_memory is not None
+            else None
+        )
+        now = state_memory.last_snapshot_time if state_memory is not None else None
+        rotation_window = timedelta(
+            minutes=float(self.config.decision.rotation_lookback_minutes)
+        )
+        terminal_states = {"INELIGIBLE", "EXPIRED", "SUPERSEDED", "CONSUMED"}
+        ledger_records: Dict[str, Any] = {}
+        for opportunity_key, record in self.opportunity_ledger._records.items():
+            if record.symbol != key:
+                continue
+            selected_recently = bool(
+                record.selected_time is not None
+                and now is not None
+                and record.selected_time <= now
+                and now - record.selected_time <= rotation_window
+            )
+            if record.lifecycle_state in terminal_states and not selected_recently:
+                continue
+
+            kept_candidates = {
+                candidate_id: candidate
+                for candidate_id, candidate in record.candidates.items()
+                if (
+                    not candidate.terminal
+                    or candidate_id == record.primary_candidate.candidate_id
+                    or candidate_id == record.selected_candidate_id
+                )
+            }
+            if record.primary_candidate.candidate_id not in kept_candidates:
+                kept_candidates[record.primary_candidate.candidate_id] = record.primary_candidate
+            compact_record = replace(
+                record,
+                candidates=kept_candidates,
+                candidate_ids=list(record.candidate_ids),
+                supporting_candidate_ids=list(record.supporting_candidate_ids),
+            )
+            ledger_records[opportunity_key] = to_plain(compact_record)
+
+        history = []
+        for item in self._history.get(key, ()):
+            history.append(
+                {
+                    "close": float(item.close),
+                    "bar": to_plain(item.bar),
+                    "trend": to_plain(item.trend),
+                }
+            )
+
+        boundary_sequences = [
+            {
+                "structural_key": structural_key,
+                "sequence": int(value),
+            }
+            for (sequence_symbol, structural_key), value
+            in self.boundary_engine._sequences.items()
+            if sequence_symbol == key
+        ]
+
+        return {
+            "state_schema": "AUCTION_INCREMENTAL_STATE_V2",
             "engine_name": self.config.engine.engine_name,
             "engine_version": self.config.engine.engine_version,
             "config_version": self.config.engine.config_version,
             "config_hash": self.config.stable_hash(),
             "symbol": key,
-            "history": list(self._history.get(key, ())),
-            "state_memory": self.state_engine._memory.get(key),
-            "boundary_current": self.boundary_engine._current.get(key),
-            "boundary_last_time": self.boundary_engine._last_time.get(key),
-            "boundary_sequences": {
-                seq_key: value
-                for seq_key, value in self.boundary_engine._sequences.items()
-                if seq_key[0] == key
-            },
-            "boundary_last_terminal": self.boundary_engine._last_terminal.get(key),
+            "history": history,
+            "state_memory": to_plain(compact_state_memory),
+            "boundary_current": to_plain(self.boundary_engine._current.get(key)),
+            "boundary_last_time": to_plain(self.boundary_engine._last_time.get(key)),
+            "boundary_sequences": boundary_sequences,
+            "boundary_last_terminal": to_plain(
+                self.boundary_engine._last_terminal.get(key)
+            ),
             "setup_initiation": {
-                item_key: value
+                item_key: to_plain(value)
                 for item_key, value in self.setup_engine._initiation.items()
                 if value.symbol == key
             },
             "setup_failed": {
-                item_key: value
+                item_key: to_plain(value)
                 for item_key, value in self.setup_engine._failed.items()
                 if value.symbol == key
             },
-            "setup_emitted_once": set(self.setup_engine._emitted_once),
-            "setup_completed": set(self.setup_engine._completed),
-            "setup_last_time": self.setup_engine._last_time.get(key),
-            "ledger_records": {
-                item_key: value
-                for item_key, value in self.opportunity_ledger._records.items()
-                if value.symbol == key
-            },
-            "ledger_last_day": self.opportunity_ledger._last_day.get(key),
+            "setup_emitted_once": sorted(self.setup_engine._emitted_once),
+            "setup_completed": sorted(self.setup_engine._completed),
+            "setup_last_time": to_plain(self.setup_engine._last_time.get(key)),
+            "ledger_records": ledger_records,
+            "ledger_last_day": to_plain(self.opportunity_ledger._last_day.get(key)),
         }
-        return encode_checkpoint_value(payload)
 
     def restore_incremental_state(
         self,
         symbol: str,
         payload: Mapping[str, Any],
     ) -> None:
-        """Restore state produced by :meth:`export_incremental_state`."""
+        """Restore plain-JSON state produced by ``export_incremental_state``."""
         key = str(symbol or "").strip().upper()
-        decoded = decode_checkpoint_value(dict(payload))
-        if not isinstance(decoded, dict):
-            raise ValueError("Auction incremental state root must be a mapping")
+        decoded = dict(payload)
         expected = {
-            "state_schema": "AUCTION_INCREMENTAL_STATE_V1",
+            "state_schema": "AUCTION_INCREMENTAL_STATE_V2",
             "engine_name": self.config.engine.engine_name,
             "engine_version": self.config.engine.engine_version,
             "config_version": self.config.engine.config_version,
@@ -325,45 +385,76 @@ class AuctionEngine:
                 )
 
         self.reset()
-        history = decoded.get("history") or []
+        restored_history = []
+        for item in decoded.get("history") or []:
+            restored_history.append(
+                _HistoryEvidence(
+                    close=float(item["close"]),
+                    bar=BarEvidence.model_validate(item["bar"]),
+                    trend=restore_dataclass(_HistoryTrend, item["trend"]),
+                )
+            )
         self._history[key] = deque(
-            history,
+            restored_history,
             maxlen=self.config.state.history_bars,
         )
+
         state_memory = decoded.get("state_memory")
-        if state_memory is not None:
-            self.state_engine._memory[key] = state_memory
+        if state_memory:
+            self.state_engine._memory[key] = restore_dataclass(
+                _StateMemory,
+                state_memory,
+            )
+
         boundary_current = decoded.get("boundary_current")
-        if boundary_current is not None:
-            self.boundary_engine._current[key] = boundary_current
+        if boundary_current:
+            self.boundary_engine._current[key] = restore_dataclass(
+                _EpisodeMemory,
+                boundary_current,
+                overrides={"trading_day": date},
+            )
         boundary_last_time = decoded.get("boundary_last_time")
-        if boundary_last_time is not None:
-            self.boundary_engine._last_time[key] = boundary_last_time
-        self.boundary_engine._sequences = dict(
-            decoded.get("boundary_sequences") or {}
-        )
+        if boundary_last_time:
+            self.boundary_engine._last_time[key] = datetime.fromisoformat(
+                str(boundary_last_time)
+            )
+        self.boundary_engine._sequences = {
+            (key, str(item["structural_key"])): int(item["sequence"])
+            for item in (decoded.get("boundary_sequences") or [])
+        }
         boundary_last_terminal = decoded.get("boundary_last_terminal")
-        if boundary_last_terminal is not None:
-            self.boundary_engine._last_terminal[key] = boundary_last_terminal
-        self.setup_engine._initiation = dict(
-            decoded.get("setup_initiation") or {}
-        )
-        self.setup_engine._failed = dict(decoded.get("setup_failed") or {})
+        if boundary_last_terminal:
+            self.boundary_engine._last_terminal[key] = dict(boundary_last_terminal)
+
+        self.setup_engine._initiation = {
+            item_key: restore_dataclass(_InitiationWatch, value)
+            for item_key, value in (decoded.get("setup_initiation") or {}).items()
+        }
+        self.setup_engine._failed = {
+            item_key: restore_dataclass(_FailedWatch, value)
+            for item_key, value in (decoded.get("setup_failed") or {}).items()
+        }
         self.setup_engine._emitted_once = set(
-            decoded.get("setup_emitted_once") or set()
+            decoded.get("setup_emitted_once") or []
         )
         self.setup_engine._completed = set(
-            decoded.get("setup_completed") or set()
+            decoded.get("setup_completed") or []
         )
         setup_last_time = decoded.get("setup_last_time")
-        if setup_last_time is not None:
-            self.setup_engine._last_time[key] = setup_last_time
-        self.opportunity_ledger._records = dict(
-            decoded.get("ledger_records") or {}
-        )
+        if setup_last_time:
+            self.setup_engine._last_time[key] = datetime.fromisoformat(
+                str(setup_last_time)
+            )
+
+        self.opportunity_ledger._records = {
+            item_key: restore_dataclass(OpportunityRecord, value)
+            for item_key, value in (decoded.get("ledger_records") or {}).items()
+        }
         ledger_last_day = decoded.get("ledger_last_day")
-        if ledger_last_day is not None:
-            self.opportunity_ledger._last_day[key] = ledger_last_day
+        if ledger_last_day:
+            self.opportunity_ledger._last_day[key] = date.fromisoformat(
+                str(ledger_last_day)
+            )
 
     def export_checkpoint(self, symbol: str) -> Dict[str, Any]:
         """Export complete recoverable state for one symbol.
