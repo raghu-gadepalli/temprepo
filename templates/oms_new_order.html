@@ -1,0 +1,196 @@
+{% extends "oms_base.html" %}
+
+{% block oms_content %}
+
+<div class="border-bottom pb-2 mb-2">
+    <h4 class="mb-1">Direct Broker Order</h4>
+    <div class="text-muted small">Sent directly to Zerodha; not created as an AutoTrades managed trade.</div>
+</div>
+
+<style>
+.oms-new-order .side-btn {
+    min-width: 74px;
+    font-weight: 600;
+}
+
+.oms-new-order .side-btn.active-side {
+    color: #fff !important;
+    background-color: var(--bs-success) !important;
+    border-color: var(--bs-success) !important;
+}
+
+.oms-new-order .side-btn.inactive-side {
+    color: var(--bs-body-color);
+    background: transparent;
+    border: 1px solid var(--bs-border-color);
+}
+
+.client-list {
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+.client-row {
+    padding: 4px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.readonly-field {
+    background: #f5f5f5;
+    font-weight: 600;
+}
+</style>
+
+<div class="oms-new-order">
+<div class="row g-2">
+
+<div class="col-md-3">
+    <div class="card p-2">
+
+        <div class="d-flex justify-content-between mb-2">
+            <strong>Clients</strong>
+            <input type="checkbox" id="selectAllClients">
+        </div>
+
+        <input id="client-search"
+               class="form-control form-control-sm mb-2"
+               placeholder="Search client">
+
+        <div id="client-list" class="client-list small"></div>
+
+    </div>
+</div>
+
+<div class="col-md-9">
+<div class="card p-3">
+
+<div class="d-flex justify-content-between mb-3">
+
+    <div>
+        <label class="me-3">
+            <input type="radio" name="segment" value="equity" checked> Equity
+        </label>
+        <label>
+            <input type="radio" name="segment" value="fo"> F&amp;O
+        </label>
+    </div>
+
+    <div class="d-flex gap-2">
+        <button id="buyBtn" class="side-btn btn btn-sm inactive-side" type="button">BUY</button>
+        <button id="sellBtn" class="side-btn btn btn-sm inactive-side" type="button">SELL</button>
+    </div>
+
+</div>
+
+<div class="row mb-3">
+
+    <div class="col-md-6">
+        <label>Order Type</label>
+        <select id="order-type" class="form-control form-control-sm">
+            <option value="MARKET">Market</option>
+            <option value="LIMIT">Limit</option>
+        </select>
+    </div>
+
+    <div class="col-md-6">
+        <label>Product</label>
+        <select id="product" class="form-control form-control-sm"></select>
+    </div>
+
+</div>
+
+<div id="equityFields" class="mb-3">
+    <label>Instrument</label>
+    <select id="eq-symbol" class="form-control form-control-sm"></select>
+</div>
+
+<div id="foFields" style="display:none">
+
+<div class="row mb-3">
+    <div class="col-md-3">
+        <label>Underlying</label>
+        <select id="fo-underlying" class="form-control form-control-sm"></select>
+    </div>
+
+    <div class="col-md-3">
+        <label>Expiry</label>
+        <select id="fo-expiry" class="form-control form-control-sm"></select>
+    </div>
+
+    <div class="col-md-3">
+        <label>Type</label>
+        <select id="fo-type" class="form-control form-control-sm">
+            <option value="FUT">FUT</option>
+            <option value="CE">CE</option>
+            <option value="PE">PE</option>
+        </select>
+    </div>
+
+    <div class="col-md-3">
+        <label>Strike</label>
+        <select id="fo-strike" class="form-control form-control-sm"></select>
+    </div>
+</div>
+
+<div class="row mb-2">
+    <div class="col-md-4" id="fo-symbol-container" style="display:none">
+        <label>Instrument</label>
+        <input id="fo-symbol" class="form-control form-control-sm readonly-field" readonly>
+    </div>
+
+    <div class="col-md-2" id="lots-container" style="display:none">
+        <label>Lots</label>
+        <div class="input-group input-group-sm">
+            <button type="button" class="btn btn-outline-secondary btn-lots-dec">-</button>
+            <input id="lots" class="form-control text-center readonly-field" value="1" readonly>
+            <button type="button" class="btn btn-outline-secondary btn-lots-inc">+</button>
+        </div>
+    </div>
+</div>
+
+</div>
+
+<div class="row mb-2">
+
+    <div class="col-md-2">
+        <label>Qty</label>
+        <input id="qty" class="form-control form-control-sm">
+    </div>
+
+    <div class="col-md-2">
+        <label>Price</label>
+        <input id="price" class="form-control form-control-sm">
+    </div>
+
+    <div class="col-md-2">
+        <label>Capital</label>
+        <input id="capital" class="form-control form-control-sm readonly-field" value="₹ 0.00" readonly>
+    </div>
+
+</div>
+
+<div class="d-flex justify-content-end">
+    <button id="cancelBtn" class="btn btn-secondary btn-sm me-2" type="button">Cancel</button>
+    <button id="placeOrderBtn" class="btn btn-primary btn-sm" disabled type="button">Place Order</button>
+</div>
+
+</div>
+</div>
+
+</div>
+</div>
+
+{% endblock %}
+
+{% block page_scripts %}
+{{ super() }}
+
+<script>
+window.OMS_NEW_ORDER_CONFIG = {
+    clientsUrl: "/dashboard/users/tradeable"
+};
+</script>
+
+<script src="{{ url_for('static', filename='js/oms_new_order.js') }}"></script>
+
+{% endblock %}

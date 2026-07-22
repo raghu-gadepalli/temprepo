@@ -1,0 +1,56 @@
+<!-- AUDIT TIMELINE MODAL -->
+<div class="modal fade" id="auditTimelineModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <div>
+          <div class="fw-bold">
+            Audit Timeline
+            <span class="text-muted small" id="auditTimelineTitle">—</span>
+          </div>
+          <div class="text-muted small" id="auditTimelineSubtitle">—</div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <div id="auditTimelineLoading" class="text-muted small py-2 d-none">Loading audit timeline...</div>
+        <div id="auditTimelineEmpty" class="alert alert-secondary py-2 d-none">No audit entries found for this item.</div>
+        <div id="auditTimelineError" class="alert alert-danger py-2 d-none">Failed to load audit timeline.</div>
+
+        <div class="border rounded bg-light mb-2">
+          <details id="auditTimelinePayloadDetails">
+            <summary class="small text-muted px-2 py-1">
+              Selected row payload JSON
+              <span id="auditTimelineSelectedLabel" class="ms-2 text-dark">—</span>
+            </summary>
+            <pre id="auditTimelinePayload"
+                 class="small border-top bg-white p-2 mb-0"
+                 style="max-height:240px; overflow:auto;">{}</pre>
+          </details>
+        </div>
+
+        <div class="table-responsive border rounded" style="max-height:520px; overflow:auto;">
+          <table class="table table-sm table-bordered table-hover align-middle mb-0" id="auditTimelineTable">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th style="width:80px;">Time</th>
+                <th style="width:120px;">Stage</th>
+                <th style="width:110px;">Action</th>
+                <th style="width:150px;">State</th>
+                <th style="width:160px;">Reason</th>
+                <th>Details</th>
+                <th style="width:90px;">Conf.</th>
+              </tr>
+            </thead>
+            <tbody id="auditTimelineBody"></tbody>
+          </table>
+        </div>
+
+        <div class="text-muted small mt-2">Click any row to view its payload JSON.</div>
+      </div>
+
+    </div>
+  </div>
+</div>

@@ -1,0 +1,169 @@
+<div class="modal fade" id="snapdervModal" tabindex="-1" aria-labelledby="snapdervModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title mb-1" id="snapdervModalLabel">Snapshot Derivatives</h5>
+          <div class="text-muted small" id="snapdervMetaLine">—</div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+
+        <div class="row g-3 mb-3">
+          <div class="col-lg-6">
+            <div class="border rounded overflow-hidden h-100">
+              <div class="px-3 py-2 border-bottom bg-light fw-semibold">Futures</div>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle">
+                  <tbody>
+                    <tr>
+                      <th style="width: 180px;">Instrument</th>
+                      <td id="sdFutureInstrument">—</td>
+                    </tr>
+                    <tr>
+                      <th>LTP</th>
+                      <td id="sdFutureLtp">—</td>
+                    </tr>
+                    <tr>
+                      <th>OI</th>
+                      <td id="sdFutureOi">—</td>
+                    </tr>
+                    <tr>
+                      <th>Volume</th>
+                      <td id="sdFutureVolume">—</td>
+                    </tr>
+                    <tr>
+                      <th>Expiry</th>
+                      <td id="sdFutureExpiry">—</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-6">
+            <div class="border rounded overflow-hidden h-100">
+              <div class="px-3 py-2 border-bottom bg-light fw-semibold">Options Summary</div>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle">
+                  <tbody id="sdOptionsSummaryBody">
+                    <tr><td colspan="2" class="text-center text-muted">—</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="p-3">
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <div class="fw-semibold mb-2">Top Calls</div>
+                    <div class="table-responsive">
+                      <table class="table table-sm table-bordered mb-0">
+                        <thead>
+                          <tr>
+                            <th>Strike</th>
+                            <th>OI</th>
+                            <th>LTP</th>
+                          </tr>
+                        </thead>
+                        <tbody id="sdTopCallsBody">
+                          <tr><td colspan="3" class="text-center text-muted">—</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div class="col-md-6">
+                    <div class="fw-semibold mb-2">Top Puts</div>
+                    <div class="table-responsive">
+                      <table class="table table-sm table-bordered mb-0">
+                        <thead>
+                          <tr>
+                            <th>Strike</th>
+                            <th>OI</th>
+                            <th>LTP</th>
+                          </tr>
+                        </thead>
+                        <tbody id="sdTopPutsBody">
+                          <tr><td colspan="3" class="text-center text-muted">—</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <div class="border rounded overflow-hidden mb-3">
+          <div class="px-3 py-2 border-bottom bg-light fw-semibold">Futures Sentiment Windows</div>
+          <div class="table-responsive">
+            <table class="table table-sm mb-0 align-middle">
+              <thead>
+                <tr>
+                  <th>Window</th>
+                  <th>Label</th>
+                  <th>ΔLTP</th>
+                  <th>ΔOI</th>
+                </tr>
+              </thead>
+              <tbody id="sdFutureWindowsBody">
+                <tr><td colspan="4" class="text-center text-muted">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="border rounded overflow-hidden mb-3">
+          <div class="px-3 py-2 border-bottom bg-light fw-semibold">Options Sentiment Windows</div>
+          <div class="table-responsive">
+            <table class="table table-sm mb-0 align-middle">
+              <thead>
+                <tr>
+                  <th>Window</th>
+                  <th>Indication</th>
+                  <th>Strength</th>
+                  <th>Driver</th>
+                  <th>PCR</th>
+                  <th>ΔPCR</th>
+                </tr>
+              </thead>
+              <tbody id="sdOptionWindowsBody">
+                <tr><td colspan="6" class="text-center text-muted">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="border rounded overflow-hidden">
+          <div class="px-3 py-2 border-bottom bg-light fw-semibold">5m Flow Breakdown</div>
+          <div class="table-responsive">
+            <table class="table table-sm mb-0 align-middle">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody id="sdFlowBreakdownBody">
+                <tr><td colspan="2" class="text-center text-muted">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="btnBackToSnapshot">Back</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+
+    </div>
+  </div>
+</div>

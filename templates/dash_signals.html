@@ -1,0 +1,374 @@
+{% extends "base.html" %}
+{% block title %}Signals – AutoTrades{% endblock %}
+
+{% block content %}
+
+<div id="signals-controls" class="dt-control-bar mb-2">
+  <div class="dt-row d-flex align-items-center gap-2 flex-wrap">
+
+    <div class="me-2">
+      <span class="fw-semibold">Signals</span>
+    </div>
+
+    <div style="min-width:180px;">
+      <label for="sig-setup" class="visually-hidden">Setup</label>
+      <select id="sig-setup" class="form-select form-select-sm" aria-label="Setup filter">
+        <option value="">All Setups</option>
+      </select>
+    </div>
+
+    <div style="min-width:160px;">
+      <label for="sig-status" class="visually-hidden">Status</label>
+      <select id="sig-status" class="form-select form-select-sm" aria-label="Status filter">
+        <option value="" selected>All Statuses</option>
+        <option value="OPEN">OPEN</option>
+        <option value="REPLACED">REPLACED</option>
+        <option value="INVALIDATED">INVALIDATED</option>
+        <option value="EXPIRED">EXPIRED</option>
+        <option value="CANCELLED">CANCELLED</option>
+        <option value="CLOSED">CLOSED</option>
+        <option value="BLOCKED">BLOCKED</option>
+      </select>
+    </div>
+
+    <div class="flex-grow-1" style="min-width:220px;">
+      <label for="sig-search" class="visually-hidden">Search signals</label>
+      <input id="sig-search" type="search" class="form-control form-control-sm" placeholder="Search…">
+    </div>
+
+    <div>
+      <label for="sig-length" class="visually-hidden">Rows per page</label>
+      <select id="sig-length" class="form-select form-select-sm" aria-label="Rows per page">
+        <option value="20" selected>Show 20</option>
+        <option value="50">Show 50</option>
+        <option value="100">Show 100</option>
+      </select>
+    </div>
+
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header py-2 d-flex align-items-center justify-content-between">
+    <div>
+      <strong>SELL</strong>
+      <span class="text-muted" style="font-size:12px;">(Signals)</span>
+    </div>
+    <div class="text-muted" style="font-size:12px;">
+      Count: <span id="sig-sell-count">0</span>
+    </div>
+  </div>
+
+  <div class="card-body p-0">
+    <table id="signals-sell-table" class="table table-bordered dash-watchlist-table w-100 mb-0">
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Setup</th>
+          <th>Stage</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Last</th>
+          <th>Closed</th>
+          <th>VWAP</th>
+          <th>RSI</th>
+          <th>BB</th>
+          <th style="width:90px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header py-2 d-flex align-items-center justify-content-between">
+    <div>
+      <strong>BUY</strong>
+      <span class="text-muted" style="font-size:12px;">(Signals)</span>
+    </div>
+    <div class="text-muted" style="font-size:12px;">
+      Count: <span id="sig-buy-count">0</span>
+    </div>
+  </div>
+
+  <div class="card-body p-0">
+    <table id="signals-buy-table" class="table table-bordered dash-watchlist-table w-100 mb-0">
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Setup</th>
+          <th>Stage</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Last</th>
+          <th>Closed</th>
+          <th>VWAP</th>
+          <th>RSI</th>
+          <th>BB</th>
+          <th style="width:90px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+{% include "partials/_trade_create_modal.html" %}
+{% include "partials/_audit_timeline_modal.html" %}
+
+<div class="modal fade" id="signalDetailsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <div class="w-100 d-flex align-items-center justify-content-between gap-2 flex-wrap">
+          <div class="fw-bold d-flex align-items-center gap-2 flex-wrap">
+            <span id="sigm-symbol">—</span>
+            <span id="sigm-side">—</span>
+            <span class="text-muted fw-normal" id="sigm-setup-inline">—</span>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+      </div>
+
+      <div class="modal-body">
+
+        <style>
+          #signalDetailsModal {
+            font-size: 12px;
+          }
+
+          #signalDetailsModal table {
+            font-size: 12px;
+          }
+
+          #signalDetailsModal pre {
+            font-size: 12px;
+          }
+
+          #signalDetailsModal .sig-badge {
+            font-size: 11px;
+            padding: 0.22rem 0.45rem;
+          }
+
+          #signalDetailsModal .sig-sub {
+            font-size: 11px;
+            color: #6c757d;
+          }
+
+          #signalDetailsModal .sig-panel {
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+            overflow: hidden;
+            margin-bottom: 0.75rem;
+            background: #fff;
+          }
+
+          #signalDetailsModal .sig-panel-head {
+            padding: 0.45rem 0.75rem;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            font-weight: 600;
+          }
+
+          #signalDetailsModal .sig-panel-body {
+            padding: 0;
+          }
+
+          #signalDetailsModal .sig-story {
+            white-space: pre-line;
+            line-height: 1.35;
+            padding: 0.75rem;
+          }
+
+          #signalDetailsModal .sig-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0;
+          }
+
+          #signalDetailsModal .sig-table th,
+          #signalDetailsModal .sig-table td {
+            border: 1px solid #e9ecef;
+            padding: 0.42rem 0.6rem;
+            vertical-align: top;
+          }
+
+          #signalDetailsModal .sig-table th {
+            width: 150px;
+            min-width: 150px;
+            background: #fcfcfc;
+            color: #6c757d;
+            font-weight: 500;
+          }
+        </style>
+
+        <div class="row g-3">
+
+          <div class="col-lg-4">
+            <div class="sig-panel h-100">
+              <div class="sig-panel-head">Signal</div>
+              <div class="sig-panel-body">
+                <table class="sig-table">
+                  <tbody id="sigm-signal-body">
+                    <tr>
+                      <td colspan="2" class="text-center text-muted">—</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-4">
+            <div class="sig-panel h-100">
+              <div class="sig-panel-head">Setup</div>
+              <div class="sig-panel-body">
+                <div id="sigm-setup-view" class="sig-story">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-4">
+            <div class="sig-panel h-100">
+              <div class="sig-panel-head">Current Context</div>
+              <div class="sig-panel-body">
+                <table class="sig-table">
+                  <tbody id="sigm-context-body">
+                    <tr>
+                      <td colspan="2" class="text-center text-muted">—</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="row g-3">
+
+          <div class="col-12">
+            <div class="sig-panel">
+              <div class="sig-panel-head">Momentum Context</div>
+
+              <div class="sig-panel-body">
+                <table class="sig-table">
+                  <tbody id="sigm-momentum-context-body">
+                    <tr>
+                      <td colspan="4" class="text-center text-muted">—</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+        <div class="row g-3">
+          <div class="col-12">
+            <div class="sig-panel">
+              <div class="sig-panel-head">Status</div>
+              <div class="sig-panel-body">
+                <div class="text-muted px-3 pt-3 mb-2" id="sigm-status-desc">—</div>
+                <table class="sig-table">
+                  <tbody id="sigm-status-body">
+                    <tr>
+                      <td colspan="2" class="text-center text-muted">—</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sig-panel">
+          <div class="sig-panel-head d-flex align-items-center justify-content-between">
+            <strong>Raw Details</strong>
+            <span class="text-muted" style="font-size:12px;">JSON (read-only)</span>
+          </div>
+
+          <div class="p-3">
+
+            <ul class="nav nav-tabs" id="sigmTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="sigm-meta-tab" data-bs-toggle="tab" data-bs-target="#sigm-meta-pane"
+                  type="button" role="tab" aria-controls="sigm-meta-pane" aria-selected="true">Meta</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="sigm-criteria-tab" data-bs-toggle="tab"
+                  data-bs-target="#sigm-criteria-pane" type="button" role="tab" aria-controls="sigm-criteria-pane"
+                  aria-selected="false">Criteria</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="sigm-snapshot-tab" data-bs-toggle="tab"
+                  data-bs-target="#sigm-snapshot-pane" type="button" role="tab" aria-controls="sigm-snapshot-pane"
+                  aria-selected="false">Snapshot</button>
+              </li>
+            </ul>
+
+            <div class="tab-content border border-top-0 rounded-bottom p-2" style="max-height:420px; overflow:auto;"
+              id="sigmTabsContent">
+
+              <div class="tab-pane fade show active" id="sigm-meta-pane" role="tabpanel"
+                aria-labelledby="sigm-meta-tab">
+                <pre class="mb-0" id="sigm-meta">—</pre>
+              </div>
+
+              <div class="tab-pane fade" id="sigm-criteria-pane" role="tabpanel" aria-labelledby="sigm-criteria-tab">
+                <pre class="mb-0" id="sigm-criteria">—</pre>
+              </div>
+
+              <div class="tab-pane fade" id="sigm-snapshot-pane" role="tabpanel" aria-labelledby="sigm-snapshot-tab">
+                <pre class="mb-0" id="sigm-snapshot">—</pre>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+
+        <input type="hidden" id="sigm-signal-id" value="">
+
+      </div>
+
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block page_scripts %}
+{{ super() }}
+
+<script>
+  window.AUDIT_TIMELINE_CONFIG = {
+    dataUrl: "/dashboard/audit/timeline",
+    limit: 300
+  };
+
+  window.SIGNALS_CONFIG = {
+    dataUrl: {{ signals_config.data_url|tojson }},
+    planUrl: "/dashboard/trading/create_plan",
+    createUrl: "/dashboard/trading/create_trade",
+    submitUrl: "/dashboard/trading/submit_trade",
+    usersUrl: "/dashboard/users/tradeable",
+    showUsers: JSON.parse('{{ is_operator() | tojson }}'),
+    refreshMs: {{ signals_config.refresh_ms|tojson }},
+    defaultStatus: {{ signals_config.default_status|tojson }},
+    defaultLimit: {{ signals_config.default_limit|tojson }},
+    defaultProduct: "MIS",
+    lockProduct: false,
+    modalId: "tradeCreateModal",
+    modalLabelId: "tradeCreateModalLabel",
+    refreshTargets: ["orders", "positions"]
+  };
+</script>
+
+<script src="{{ url_for('static', filename='js/audit_timeline.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/trade_create.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/signals.js') }}" defer></script>
+{% endblock %}

@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Performance{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+
+  <!-- Control bar (match Signals/Watchlist structure) -->
+  <div id="performance-controls" class="dt-control-bar">
+    <div class="dt-row">
+
+      {% if is_operator() %}
+      <div class="d-flex align-items-center gap-2">
+        <label for="perf-user-filter" class="mb-0 small">User</label>
+        <select id="perf-user-filter" class="form-select form-select-sm" style="width: 150px;">
+          <option value="ALL" selected>All users</option>
+        </select>
+      </div>
+      {% endif %}
+
+      <div class="perf-mode-wrap d-flex align-items-center gap-2">
+        <label for="perf-mode" class="mb-0 small">Mode</label>
+        <select id="perf-mode" class="form-select form-select-sm" style="width: 130px;">
+          <option value="all" selected>All modes</option>
+          <option value="virtual">VIRTUAL</option>
+          <option value="real">REAL</option>
+        </select>
+      </div>
+
+      <!-- Search box -->
+      <div id="perf-search" class="flex-grow-1 d-flex justify-content-end">
+        <input type="search" class="form-control form-control-sm" placeholder="Search trades…">
+      </div>
+
+      <!-- Summary trigger -->
+      <div class="d-flex align-items-center">
+        <button id="perf-summary-btn" type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal"
+          data-bs-target="#perfSummaryModal">
+          <i class="bi bi-graph-up"></i> Summary
+        </button>
+      </div>
+
+      <!-- Page length -->
+      <div id="perf-length">
+        <select id="perf-length-select" class="form-select form-select-sm" style="width:110px;">
+          <option value="20" selected>Show 20</option>
+          <option value="50">Show 50</option>
+          <option value="100">Show 100</option>
+        </select>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="row g-2 mt-2" id="pf-summary-cards">
+    <div class="col-6 col-md-3">
+      <div class="card summary-card">
+        <div class="card-body py-2">
+          <div class="summary-title">Trades (completed)</div>
+          <div class="summary-value" id="pf-total">0</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card summary-card">
+        <div class="card-body py-2">
+          <div class="summary-title">Wins</div>
+          <div class="summary-value dash-text-success" id="pf-wins">0</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card summary-card">
+        <div class="card-body py-2">
+          <div class="summary-title">Losses</div>
+          <div class="summary-value dash-text-danger" id="pf-losses">0</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card summary-card">
+        <div class="card-body py-2">
+          <div class="summary-title">Net P&L</div>
+          <div class="summary-value" id="pf-net">₹0</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="dash-table-container mt-2">
+    <table id="performance-table" class="table table-striped table-hover dash-performance-table w-100">
+      <thead>
+        <tr>
+          <th>Entry Time</th>
+          <th>User</th>
+          <th>Symbol</th>
+          <th>Type</th>
+          <th>Mode</th>
+          <th>Side</th>
+          <th>Qty</th>
+          <th>Entry</th>
+          <th>Exit</th>
+          <th>P&amp;L</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- Summary / Analysis modal -->
+<div class="modal fade" id="perfSummaryModal" tabindex="-1" aria-labelledby="perfSummaryLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable dash-modal-lg">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title" id="perfSummaryLabel">Performance Summary (<span id="pf-modal-mode">ALL MODES</span>)</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <!-- (unchanged metrics markup) -->
+        <!-- High level -->
+        <div class="row g-2">
+          <div class="col-6 col-md-3">
+            <div class="mini-stat">
+              <div class="mini-stat-title">Win Rate</div>
+              <div id="pf-winrate" class="mini-stat-value">0%</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="mini-stat">
+              <div class="mini-stat-title">Avg Win</div>
+              <div id="pf-avgwin" class="mini-stat-value dash-text-success">₹0</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="mini-stat">
+              <div class="mini-stat-title">Avg Loss</div>
+              <div id="pf-avgloss" class="mini-stat-value dash-text-danger">₹0</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="mini-stat">
+              <div class="mini-stat-title">Avg P&amp;L</div>
+              <div id="pf-avgpnl" class="mini-stat-value">₹0</div>
+            </div>
+          </div>
+        </div>
+        <hr>
+        <div class="row g-2">
+          <div class="col-6 col-md-3">
+            <div class="mini-stat">
+              <div class="mini-stat-title">Avg Hold (mins)</div>
+              <div id="pf-avghold" class="mini-stat-value">0</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="mini-stat">
+              <div class="mini-stat-title">Gross Profit</div>
+              <div id="pf-gp" class="mini-stat-value dash-text-success">₹0</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="mini-stat">
+              <div class="mini-stat-title">Gross Loss</div>
+              <div id="pf-gl" class="mini-stat-value dash-text-danger">₹0</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="mini-stat">
+              <div class="mini-stat-title">Max Drawdown</div>
+              <div id="pf-mdd" class="mini-stat-value">₹0</div>
+            </div>
+          </div>
+        </div>
+        <hr>
+        <div class="row">
+          <div class="col-md-6">
+            <h6 class="mb-2">By Side</h6>
+            <table class="table table-sm table-striped">
+              <thead>
+                <tr>
+                  <th>Side</th>
+                  <th>Trades</th>
+                  <th>Net P&amp;L</th>
+                </tr>
+              </thead>
+              <tbody id="pf-by-side"></tbody>
+            </table>
+          </div>
+          <div class="col-md-6">
+            <h6 class="mb-2">By Instrument</h6>
+            <table class="table table-sm table-striped">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Trades</th>
+                  <th>Net P&amp;L</th>
+                </tr>
+              </thead>
+              <tbody id="pf-by-type"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+{{ super() }}
+<script>
+  window.PERFORMANCE_CONFIG = {
+    dataUrl: "/dashboard/performance/data",
+    managedUsersUrl: "/dashboard/users/managed",
+    showUsers: JSON.parse('{{ is_operator() | tojson }}'),
+    currentUserid: {{ (userid or '') | tojson }},
+    refreshMs: 30000
+  };
+</script>
+<script src="{{ url_for('static', filename='js/performance.js', v='20260714-account-scope-1') }}" defer></script>
+{% endblock %}

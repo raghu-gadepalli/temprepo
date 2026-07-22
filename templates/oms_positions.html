@@ -1,0 +1,58 @@
+{% extends "oms_base.html" %}
+
+{% block oms_content %}
+
+<div class="border-bottom pb-2 mb-2">
+    <div class="d-flex justify-content-between align-items-end flex-wrap gap-3">
+        <div>
+            <h4 class="mb-1">Broker Positions</h4>
+            <div class="text-muted small">Latest OMS positions grouped by client</div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <input
+                id="oms-positions-search"
+                type="search"
+                class="form-control form-control-sm"
+                placeholder="Search positions..."
+                style="width: 220px;"
+            >
+
+            <button id="toggleSelectAllBtn" class="btn btn-sm btn-outline-primary" type="button">
+                Select All Open
+            </button>
+
+            <button id="oms-exit-selected-global" class="btn btn-sm btn-outline-danger" type="button">
+                Exit Selected
+            </button>
+
+            <button id="oms-positions-refresh" class="btn btn-sm btn-outline-primary" type="button">
+                Refresh
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="oms-positions-alert" class="alert alert-danger d-none" role="alert"></div>
+
+<div class="card p-2">
+    <div id="oms-positions-container"></div>
+</div>
+
+{% endblock %}
+
+{% block page_scripts %}
+{{ super() }}
+
+<script>
+    window.OMS_POSITIONS_CONFIG = {
+        dataUrl: "{{ url_for('oms.oms_positions_data') }}",
+        exitUrl: "{{ url_for('oms.exit_single_position') }}",
+        bulkExitUrl: "{{ url_for('oms.bulk_exit_positions') }}",
+        refreshMs: 30000
+    };
+</script>
+
+<script src="{{ url_for('static', filename='js/oms_positions.js') }}"></script>
+
+{% endblock %}

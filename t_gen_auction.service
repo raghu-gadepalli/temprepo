@@ -1,0 +1,18 @@
+[Unit]
+Description=autotrades Auction Signal Generator
+After=network.target
+# Fail closed until the final cutover is explicitly armed on the server.
+ConditionPathExists=/var/www/autotrades/.enable_auction_signal_cutover
+
+[Service]
+Type=simple
+User=autotrades
+Group=www-data
+UMask=0002
+WorkingDirectory=/var/www/autotrades/scripts
+ExecStart=/var/www/autotrades/venv/bin/python /var/www/autotrades/scripts/gen_auction.py --confirm-live-cutover --write-checkpoints --write-opportunities --write-signals --mark-processed
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

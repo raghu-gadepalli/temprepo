@@ -1,0 +1,422 @@
+/* GLOBAL */
+body {
+    margin: 0;
+    font-family: Inter, system-ui, sans-serif;
+    background: #f5f7fa;
+    color: #1f2937;
+    font-size: 14px;
+}
+
+/* KPI ROW */
+.kpi-row {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+/* KPI CARD */
+.kpi-card {
+    flex: 1;
+    min-width: 220px;
+    min-height: 110px;
+    background: #ffffff;
+    border: 1px solid #e6eaf0;
+    border-radius: 6px;
+    padding: 22px;
+    box-shadow: 2px 2px 0px #f3f4f6;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.kpi-card .label {
+    font-size: 13px;
+    color: #6b7280;
+}
+
+.kpi-card .value {
+    font-size: 22px;
+    font-weight: 600;
+}
+
+/* COLORS */
+
+.kpi-card.positive {
+    border-left: 4px solid #16a34a;
+}
+
+.kpi-card.negative {
+    border-left: 4px solid #dc2626;
+}
+
+.kpi-card.system {
+    border-left: 4px solid #2563eb;
+}
+
+.kpi-card:hover {
+    transform: translateY(-2px);
+    transition: 0.2s ease;
+}
+
+.sub-value {
+    font-size: 12px;
+    margin-top: 6px;
+    opacity: 0.85;
+}
+
+.oms-card {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    margin-top: 20px;
+}
+
+.oms-card-header {
+    border-bottom: 1px solid #eee;
+    margin-bottom: 15px;
+}
+
+.oms-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.oms-table th {
+    background: #f6f7fb;
+    padding: 10px;
+    text-align: left;
+}
+
+.oms-table td {
+    padding: 10px;
+    border-top: 1px solid #eee;
+}
+
+.lot-control{
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+
+.lot-control button{
+    width:30px;
+    height:30px;
+    border:1px solid #e6eaf0;
+    background:#ffffff;
+    border-radius:4px;
+    font-size:18px;
+    cursor:pointer;
+}
+
+.lot-control button:hover{
+    background:#f3f4f6;
+}
+
+.lot-control input{
+    width:50px;
+    text-align:center;
+    border:1px solid #e6eaf0;
+    border-radius:4px;
+}
+
+.side-toggle{
+display:flex;
+gap:10px;
+}
+
+.side-btn{
+
+padding:6px 18px;
+border-radius:6px;
+border:1px solid #d0d5dd;
+background:#f3f4f6;
+color:#333;
+font-weight:600;
+cursor:pointer;
+
+}
+
+.side-btn:hover{
+background:#e5e7eb;
+}
+
+/* ACTIVE BUY */
+
+.side-btn.buy-active{
+background:#16a34a;
+color:white;
+border:none;
+}
+
+/* ACTIVE SELL */
+
+.side-btn.sell-active{
+background:#dc2626;
+color:white;
+border:none;
+}
+
+#instrument {
+    font-weight:600;
+    height:36px;
+}
+
+
+/* Orders, Status */
+/* Status badge styling */
+.status {
+    text-align: center;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    min-width: 90px;
+}
+
+/* Completed orders */
+.status-completed {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+/* Other statuses */
+.status-other {
+    background-color: #e2e3e5;
+    color: #383d41;
+}
+
+/* Alignment helpers */
+.text-right {
+    text-align: right;
+}
+
+.text-center {
+    text-align: center;
+}
+
+/* Generic badge */
+.badge {
+    padding: 3px 10px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 600;
+    display: inline-block;
+}
+
+/* Order type badges */
+.badge-buy {
+    background-color: #e6f4ea;
+    color: #1e7e34;
+}
+
+.badge-sell {
+    background-color: #f8d7da;
+    color: #c82333;
+}
+
+/* Status badges */
+.badge-complete {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.badge-cancelled {
+    background-color: #e2e3e5;
+    color: #495057;
+}
+
+/* Table alignment */
+.text-right {
+    text-align: right;
+}
+
+.text-center {
+    text-align: center;
+}
+
+/* OMS table header (Kite-like) */
+
+.oms-table-header th {
+
+    background: #f5f7fa;
+    color: #6b7280;
+
+    font-weight: 600;
+    font-size: 12px;
+
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.oms-table-header th:hover {
+    background: #eef1f5;
+}
+
+/* Remove vertical borders */
+
+.table-bordered td,
+.table-bordered th {
+    border-left: none;
+    border-right: none;
+}
+
+/* Row separators like trading terminals */
+
+.table tbody tr {
+    border-bottom: 1px solid #eef1f5;
+}
+
+
+/* ---------- OMS TABLE STYLE (Kite-like) ---------- */
+
+/* ---------------------------------------------------
+   OMS ORDERS TABLE (Kite-style)
+--------------------------------------------------- */
+
+.orders-table {
+    border-collapse: collapse;
+}
+
+/* Header styling */
+
+.orders-table thead th {
+
+    background: #f7f9fb;
+    color: #6b7280;
+
+    font-size: 12.5px;
+    font-weight: 600;
+
+    text-transform: none;
+
+    border-bottom: 1px solid #e5e7eb;
+
+    cursor: pointer;
+}
+
+/* Row separator */
+
+.orders-table tbody tr {
+    border-bottom: 1px solid #eef1f5;
+}
+
+/* Row hover highlight */
+
+.orders-table tbody tr:hover td {
+    background-color: #eef2f7;
+}
+
+/* Remove vertical borders */
+
+.orders-table td,
+.orders-table th {
+    border-left: none !important;
+    border-right: none !important;
+    padding: 6px 10px;
+}
+
+/* Numeric alignment */
+
+.text-right {
+    text-align: right;
+}
+
+.text-center {
+    text-align: center;
+}
+
+/* Order type badges */
+
+.badge {
+    padding: 3px 10px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-buy {
+    background-color: #e6f4ea;
+    color: #1e7e34;
+}
+
+.badge-sell {
+    background-color: #f8d7da;
+    color: #c82333;
+}
+
+/* Status badges */
+
+.badge-complete {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.badge-cancelled {
+    background-color: #e2e3e5;
+    color: #495057;
+}
+
+/* Exchange label */
+
+.exchange {
+    color: #9ca3af;
+    font-size: 11px;
+}
+
+/* CLIENT PANEL */
+
+.client-list {
+    max-height: 420px;
+    overflow-y: auto;
+}
+
+.client-row {
+    padding: 6px 4px;
+    border-bottom: 1px solid #eee;
+}
+
+.client-row:hover {
+    background: #f5f7fb;
+}
+
+.client-name {
+    font-size: 14px;
+}
+
+/* ORDER STATUS BADGES */
+
+.badge-open {
+    background-color: #0d6efd;
+    color: white;
+}
+
+.badge-complete {
+    background-color: #198754;
+    color: white;
+}
+
+.badge-cancelled {
+    background-color: #6c757d;
+    color: white;
+}
+
+.badge-rejected {
+    background-color: #dc3545;
+    color: white;
+    font-weight: 600;
+}
+
+.fo-type-box {
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    height: 38px;
+    background: #fff;
+}
+
+.fo-type-group .btn {
+    font-weight: 500;
+}
+

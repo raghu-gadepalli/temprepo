@@ -1,0 +1,98 @@
+<div class="modal fade" id="snapshotModal" tabindex="-1" aria-labelledby="snapshotModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title" id="snapshotModalLabel">Snapshot Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+
+        <div class="border rounded mb-3 overflow-hidden">
+          <div class="table-responsive">
+            <table class="table table-sm mb-0 align-middle">
+              <tbody>
+                <tr>
+                  <th style="width: 18%;">Symbol</th>
+                  <td id="smSymbol" style="width: 22%;">—</td>
+                  <th style="width: 18%;">Last Time</th>
+                  <td id="smTime" style="width: 42%;">—</td>
+                </tr>
+                <tr>
+                  <th>Price</th>
+                  <td id="smPrice">—</td>
+                  <th>VWAP Δ</th>
+                  <td id="smVwapDelta">—</td>
+                </tr>
+                <tr>
+                  <th>State</th>
+                  <td id="smState">—</td>
+                  <th>Strength</th>
+                  <td id="smStrength">—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-lg-6">
+            <div class="border rounded overflow-hidden h-100">
+              <div class="px-3 py-2 border-bottom bg-light fw-semibold">Indicators (Minute)</div>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle">
+                  <tbody id="smIndicatorsBody">
+                    <tr><td colspan="2" class="text-center text-muted">—</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-6">
+            <div class="border rounded overflow-hidden mb-3">
+              <div class="px-3 py-2 border-bottom bg-light fw-semibold">Futures Sentiment (5m)</div>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle">
+                  <tbody id="smFutureBody">
+                    <tr><td colspan="2" class="text-center text-muted">—</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="border rounded overflow-hidden mb-3">
+              <div class="px-3 py-2 border-bottom bg-light fw-semibold">Options Sentiment (5m)</div>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle">
+                  <tbody id="smOptionBody">
+                    <tr><td colspan="2" class="text-center text-muted">—</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="border rounded overflow-hidden">
+              <div class="px-3 py-2 border-bottom bg-light fw-semibold">Derivatives Summary</div>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle">
+                  <tbody id="smDerivSummaryBody">
+                    <tr><td colspan="2" class="text-center text-muted">—</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-primary" id="btnOpenSnapDerv">More</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+
+    </div>
+  </div>
+</div>

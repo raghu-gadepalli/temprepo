@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Watchlist – AutoTrades{% endblock %}
+
+{% block content %}
+
+<!-- Watchlist toolbar -->
+<div id="watchlist-controls" class="dt-control-bar mb-2">
+  <div class="dt-row d-flex align-items-center gap-2 flex-wrap">
+
+    <div style="min-width:220px;">
+      <label for="wl-breakout-filter" class="visually-hidden">Breakout filter</label>
+      <select id="wl-breakout-filter" class="form-select form-select-sm" aria-label="Breakout filter">
+        <option value="ALL" selected>All stocks</option>
+        <option value="ANY_BREAKOUT">Any breakout</option>
+        <option value="ABOVE_PDH">Above PDH</option>
+        <option value="BELOW_PDL">Below PDL</option>
+        <option value="ABOVE_ORB">Above ORB High</option>
+        <option value="BELOW_ORB">Below ORB Low</option>
+      </select>
+    </div>
+
+    <div class="form-check form-switch m-0 d-flex align-items-center" style="min-width:170px;">
+      <input class="form-check-input me-2" type="checkbox" id="wl-shortlisted-only" checked>
+      <label class="form-check-label small" for="wl-shortlisted-only">Shortlisted only</label>
+    </div>
+
+    <div class="flex-grow-1" style="min-width:220px;">
+      <label for="wl-search" class="visually-hidden">Search watchlist</label>
+      <input id="wl-search" type="search" class="form-control form-control-sm" placeholder="Search…">
+    </div>
+
+    <div>
+      <label for="wl-length" class="visually-hidden">Rows per page</label>
+      <select id="wl-length" class="form-select form-select-sm" aria-label="Rows per page">
+        <option value="20" selected>Show 20</option>
+        <option value="50">Show 50</option>
+        <option value="100">Show 100</option>
+      </select>
+    </div>
+
+  </div>
+</div>
+
+<!-- Watchlist table -->
+<table id="watchlist-table" class="table table-bordered dash-watchlist-table w-100">
+  <thead>
+    <tr>
+      <th class="d-none">Shortlisted</th>
+      <th>Symbol</th>
+      <th>LTP</th>
+      <th>Gap %</th>
+      <th>Move %</th>
+      <th>State</th>
+      <th>Strength</th>
+      <th>VWAP</th>
+      <th>RVOL</th>
+      <th>ADX</th>
+      <th>ATR</th>
+      <th>RSI</th>
+      <th>BB</th>
+      <th>Price Structure</th>
+      <th>Opt Sent</th>
+      <th>LTP Time <span class="text-muted" style="font-size:11px;">IST</span></th>
+      <th style="width:90px;">Actions</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+{% include "partials/_signals_modal.html" %}
+{% include "partials/_snapshot_modal.html" %}
+{% include "partials/_snapderv_modal.html" %}
+{% include "partials/_trade_create_modal.html" %}
+
+{% endblock %}
+
+{% block page_scripts %}
+{{ super() }}
+
+<script>
+  window.WATCHLIST_CONFIG = {
+    dataUrl: "/dashboard/watchlist/data",
+    planUrl: "/dashboard/trading/create_plan",
+    createUrl: "/dashboard/trading/create_trade",
+    submitUrl: "/dashboard/trading/submit_trade",
+    usersUrl: "/dashboard/users/tradeable",
+    showUsers: JSON.parse('{{ is_operator() | tojson }}'),
+    defaultProduct: "MIS",
+    lockProduct: false,
+    refreshMs: 30000,
+    refreshTargets: ["orders", "positions"]
+  };
+</script>
+
+<script src="{{ url_for('static', filename='js/signalsmodal.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/snapshot.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/trade_create.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/watchlist.js') }}" defer></script>
+{% endblock %}

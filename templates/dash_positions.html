@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}Managed Positions – AutoTrades{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+
+  <div class="card mb-2">
+    <div class="card-body py-2">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div class="fw-bold">
+          Managed Positions <span class="text-muted small">(AutoTrades trade rows)</span>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          {% if is_operator() %}
+          <select id="pos-user-filter" class="form-select form-select-sm" aria-label="Managed user" style="width:150px;">
+            <option value="ALL" selected>All users</option>
+            <option value="{{ userid|upper }}">{{ userid|upper }}</option>
+          </select>
+          {% endif %}
+
+          <select id="pos-mode-filter" class="form-select form-select-sm" aria-label="Execution mode" style="width:130px;">
+            <option value="ALL" selected>All modes</option>
+            <option value="VIRTUAL">Virtual</option>
+            <option value="REAL">Real</option>
+          </select>
+
+          <input id="pos-search" type="search" class="form-control form-control-sm"
+                 placeholder="Search..." style="width:260px;">
+          <select id="pos-length" class="form-select form-select-sm"
+                  aria-label="Rows per page" style="width:120px;">
+            <option value="100">Show 100</option>
+            <option value="150">Show 150</option>
+            <option value="200">Show 200</option>
+            <option value="-1" selected>Show all</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header py-2 d-flex align-items-center justify-content-between">
+      <div>
+        <strong>Open / Closed Managed Positions</strong>
+      </div>
+      <div class="small text-muted">
+        Total P&amp;L: <span id="positions-total-pnl">0.00</span>
+      </div>
+    </div>
+
+    <div class="card-body p-0">
+      <table id="positions-table" class="table table-bordered dash-watchlist-table w-100 mb-0">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Entry Time</th>
+            <th>Symbol</th>
+            <th>Type</th>
+            <th>Side</th>
+            <th>Avg Price</th>
+            <th>Net Qty</th>
+            <th>Last Price</th>
+            <th>P&amp;L</th>
+            <th>Status</th>
+            <th style="width:110px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- POSITION INFO MODAL -->
+<div class="modal fade" id="positionInfoModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <div>
+          <div class="fw-bold">
+            <span id="pi-userid">—</span>
+            <span class="text-muted">•</span>
+            <span id="pi-symbol">—</span>
+            <span class="text-muted">•</span>
+            <span id="pi-type">—</span>
+            <span class="text-muted">•</span>
+            <span id="pi-side">—</span>
+          </div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="row g-2">
+
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header py-2"><strong>Summary</strong></div>
+              <div class="card-body">
+
+                <div class="d-flex justify-content-between mb-1">
+                  <span class="text-muted">Entry Time</span>
+                  <span id="pi-exec-time">—</span>
+                </div>
+
+                <div class="d-flex justify-content-between mb-1">
+                  <span class="text-muted">Last Time</span>
+                  <span id="pi-last-time">—</span>
+                </div>
+
+                <div class="d-flex justify-content-between mb-1">
+                  <span class="text-muted">Last Price</span>
+                  <span id="pi-last-price">—</span>
+                </div>
+
+                <div class="d-flex justify-content-between mb-1">
+                  <span class="text-muted">P&amp;L</span>
+                  <span id="pi-pnl">—</span>
+                </div>
+
+                <div class="d-flex justify-content-between mb-1">
+                  <span class="text-muted">Execution Mode</span>
+                  <span id="pi-execution-mode">—</span>
+                </div>
+
+                <div class="d-flex justify-content-between">
+                  <span class="text-muted">Status</span>
+                  <span id="pi-status">—</span>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header py-2"><strong>Breakdown</strong></div>
+              <div class="card-body">
+
+                <div class="table-responsive">
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>Qty</th>
+                        <th>Avg</th>
+                        <th>Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <th>Buy</th>
+                        <td id="pi-buy-qty">—</td>
+                        <td id="pi-buy-avg">—</td>
+                        <td id="pi-buy-value">—</td>
+                      </tr>
+                      <tr>
+                        <th>Sell</th>
+                        <td id="pi-sell-qty">—</td>
+                        <td id="pi-sell-avg">—</td>
+                        <td id="pi-sell-value">—</td>
+                      </tr>
+                      <tr>
+                        <th>Net</th>
+                        <td id="pi-net-qty">—</td>
+                        <td id="pi-net-avg">—</td>
+                        <td id="pi-net-value">—</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+{% include "partials/_trade_exit_modal.html" %}
+{% include "partials/_trade_create_modal.html" %}
+{% include "partials/_audit_timeline_modal.html" %}
+
+{% endblock %}
+
+{% block page_scripts %}
+{{ super() }}
+<script>
+  window.AUDIT_TIMELINE_CONFIG = {
+    dataUrl: "/dashboard/audit/timeline",
+    limit: 300
+  };
+
+  window.POSITIONS_CONFIG = {
+    dataUrl: "/dashboard/positions/data?limit=5000",
+    exitPlanUrl: "/dashboard/trading/exit_plan",
+    exitIntentUrl: "/dashboard/trading/exit_trade",
+    exitModalId: "tradeExitModal",
+    exitModalLabelId: "tradeExitModalLabel",
+    planUrl: "/dashboard/trading/create_plan",
+    createUrl: "/dashboard/trading/create_trade",
+    submitUrl: "/dashboard/trading/submit_trade",
+    usersUrl: "/dashboard/users/tradeable",
+    managedUsersUrl: "/dashboard/users/managed",
+    refreshTargets: ["orders", "positions"],
+    showUsers: JSON.parse('{{ is_operator() | tojson }}'),
+    currentUserid: {{ (userid or '') | tojson }},
+    defaultProduct: "MIS",
+    lockProduct: false,
+    modalId: "tradeCreateModal",
+    modalLabelId: "tradeCreateModalLabel"
+  };
+</script>
+<script src="{{ url_for('static', filename='js/audit_timeline.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/trade_create.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/trade_exit.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/positions.js', v='20260714-account-scope-1') }}" defer></script>
+{% endblock %}

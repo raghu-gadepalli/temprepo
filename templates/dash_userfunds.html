@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+{% block title %}Account Funds - AutoTrades{% endblock %}
+
+{% block head %}
+<style>
+  .user-dashboard-container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 15px;
+  }
+
+  .card {
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  .card-header {
+    background-color: #f8f9fa;
+    padding: 10px 15px;
+  }
+
+  .card-header h5 {
+    font-size: 18px !important;
+    font-weight: bold !important;
+    margin: 0;
+    text-align: left;
+  }
+
+  .field-label {
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 4px;
+    font-size: 12px;
+  }
+
+  .field-value {
+    padding: .375rem .75rem;
+    background-color: #e9ecef;
+    border-radius: .25rem;
+    display: block;
+    min-height: 32px;
+    font-size: 12px;
+  }
+
+  #funds-table td,
+  #funds-table th {
+    vertical-align: middle;
+    font-size: 12px;
+  }
+
+  .funds-modal-label {
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 4px;
+    font-size: 12px;
+  }
+
+  .funds-modal-value {
+    background: #f1f3f5;
+    border-radius: .25rem;
+    padding: .4rem .6rem;
+    min-height: 32px;
+    font-size: 12px;
+  }
+
+  .funds-subtable th,
+  .funds-subtable td {
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="user-dashboard-container">
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">Account Funds</h5>
+      <div class="d-flex align-items-center gap-2">
+        {% if is_operator() %}
+        <span class="badge bg-secondary">Multi User</span>
+        {% endif %}
+        <button type="button" id="funds-refresh-btn" class="btn btn-outline-primary btn-sm">
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <!-- Single-user direct render -->
+      <div id="funds-single-view" class="d-none">
+        <div class="row mb-3">
+          <div class="col-md-4">
+            <div class="field-label">User ID</div>
+            <div class="field-value" id="sf-userid">—</div>
+          </div>
+          <div class="col-md-4">
+            <div class="field-label">Name</div>
+            <div class="field-value" id="sf-name">—</div>
+          </div>
+          <div class="col-md-4">
+            <div class="field-label">Broker</div>
+            <div class="field-value" id="sf-broker-name">—</div>
+          </div>
+        </div>
+
+        <div class="row mb-3">
+          <div class="col-md-3">
+            <div class="field-label">Status</div>
+            <div class="field-value" id="sf-status">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="field-label">Funds Status</div>
+            <div class="field-value" id="sf-funds-status">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="field-label">Live</div>
+            <div class="field-value" id="sf-live">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="field-label">Logged Time</div>
+            <div class="field-value" id="sf-logged-time">—</div>
+          </div>
+        </div>
+
+        <div class="row mb-3">
+          <div class="col-md-3">
+            <div class="field-label">Total Balance</div>
+            <div class="field-value" id="sf-total-balance">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="field-label">Available Margin</div>
+            <div class="field-value" id="sf-available-margin">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="field-label">Opening Balance</div>
+            <div class="field-value" id="sf-opening-balance">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="field-label">Live Balance</div>
+            <div class="field-value" id="sf-live-balance">—</div>
+          </div>
+        </div>
+
+        <div class="row mb-4">
+          <div class="col-md-3">
+            <div class="field-label">Intraday Payin</div>
+            <div class="field-value" id="sf-intraday-payin">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="field-label">Collateral</div>
+            <div class="field-value" id="sf-collateral">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="field-label">Adhoc Margin</div>
+            <div class="field-value" id="sf-adhoc-margin">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="field-label">Utilized Margin</div>
+            <div class="field-value" id="sf-utilized-margin-total">—</div>
+          </div>
+        </div>
+
+        <div id="sf-utilized-wrap" class="d-none">
+          <hr>
+          <h6 class="mb-2 fw-bold">Utilized Margin Details</h6>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered funds-subtable">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody id="sf-utilized-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Multi-user table render -->
+      <div id="funds-multi-view" class="d-none">
+        <div class="table-responsive">
+          <table id="funds-table" class="table table-bordered table-striped w-100">
+            <thead>
+              <tr>
+                <th>User ID</th>
+                <th>Name</th>
+                <th>Broker</th>
+                <th>Status</th>
+                <th>Funds</th>
+                <th>Total Balance</th>
+                <th>Available Margin</th>
+                <th>Live</th>
+                <th>Logged Time</th>
+                <th style="width:70px;" class="text-center">Action</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="row mt-3">
+        <div class="col text-end">
+          <a href="{{ url_for('main.dashboard_home') }}" class="btn btn-secondary btn-sm">Close</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Funds details modal -->
+<div class="modal fade" id="fundsDetailsModal" tabindex="-1" aria-labelledby="fundsDetailsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold" id="fundsDetailsModalLabel">User Funds Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <div class="funds-modal-label">User ID</div>
+            <div class="funds-modal-value" id="mf-userid">—</div>
+          </div>
+          <div class="col-md-4">
+            <div class="funds-modal-label">Name</div>
+            <div class="funds-modal-value" id="mf-name">—</div>
+          </div>
+          <div class="col-md-4">
+            <div class="funds-modal-label">Broker</div>
+            <div class="funds-modal-value" id="mf-broker-name">—</div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="funds-modal-label">Status</div>
+            <div class="funds-modal-value" id="mf-status">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="funds-modal-label">Funds Status</div>
+            <div class="funds-modal-value" id="mf-funds-status">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="funds-modal-label">Live</div>
+            <div class="funds-modal-value" id="mf-live">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="funds-modal-label">Logged Time</div>
+            <div class="funds-modal-value" id="mf-logged-time">—</div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="funds-modal-label">Total Balance</div>
+            <div class="funds-modal-value" id="mf-total-balance">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="funds-modal-label">Available Margin</div>
+            <div class="funds-modal-value" id="mf-available-margin">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="funds-modal-label">Opening Balance</div>
+            <div class="funds-modal-value" id="mf-opening-balance">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="funds-modal-label">Live Balance</div>
+            <div class="funds-modal-value" id="mf-live-balance">—</div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="funds-modal-label">Intraday Payin</div>
+            <div class="funds-modal-value" id="mf-intraday-payin">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="funds-modal-label">Collateral</div>
+            <div class="funds-modal-value" id="mf-collateral">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="funds-modal-label">Adhoc Margin</div>
+            <div class="funds-modal-value" id="mf-adhoc-margin">—</div>
+          </div>
+          <div class="col-md-3">
+            <div class="funds-modal-label">Utilized Margin</div>
+            <div class="funds-modal-value" id="mf-utilized-margin-total">—</div>
+          </div>
+        </div>
+
+        <div id="mf-utilized-wrap" class="d-none mt-3">
+          <hr>
+          <h6 class="mb-2 fw-bold">Utilized Margin Details</h6>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered funds-subtable">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody id="mf-utilized-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+{{ super() }}
+
+<script>
+  window.USER_FUNDS_CONFIG = {
+    dataUrl: "/user/funds/data",
+    showUsers: JSON.parse('{{ is_operator() | tojson }}')
+  };
+</script>
+
+<script src="{{ url_for('static', filename='js/user_funds.js', v='20260714-account-scope-1') }}" defer></script>
+{% endblock %}

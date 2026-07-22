@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Expression → JSON-AST</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Montserrat', sans-serif; margin: 20px; }
+    textarea { width: 100%; box-sizing: border-box; font-family: monospace; font-size: 0.9rem; padding: 8px; margin-bottom: 10px; }
+    #error { color: red; margin-bottom: 10px; }
+    label { font-weight: bold; display: block; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <h2>Rule Editor</h2>
+
+  <label for="expr">Type your expression:</label>
+  <textarea id="expr" rows="3" placeholder="e.g. STATE_MIN == BUY AND (STATE_10MIN == BUY OR STATE_15MIN == BUY)"></textarea>
+  <div id="error"></div>
+
+  <label for="jsonAst">Parsed JSON-AST:</label>
+  <textarea id="jsonAst" rows="8" readonly></textarea>
+
+  <script>
+    // list of allowed fields
+    const FIELDS = ["STATE_MIN","STATE_3MIN","STATE_5MIN","STATE_10MIN","STATE_15MIN"];
+    const OPERATORS = ["==","!=",">=","<=","<",">"];
+
+    // simple recursive-descent parser
+    function tokenize(input) {
+      const tokens = [];
+      const re = /\s*(\(|\)|AND|OR|==|!=|<=|>=|<|>|\w+)\s*/g;
+      let m;
+      while ((m = re.exec(input)) !== null) {
+        tokens.push(m[1]);
+      }
+      return tokens;
+    }
+
+    function parseExpression(tokens) {
+      let pos = 0;
+
+      function peek() { return tokens[pos]; }
+      function consume(t) { if (peek() === t) pos++; else throw `Expected "${t}" but got "${peek()}"`; }
+
+      function parseFactor() {
+        if (peek() === '(') {
+          consume('(');
+          const node = parseExpr();
+          consume(')');
+          return node;
+        }
+        // parse FIELD OP VALUE
+        const fld = peek(); 
+        if (!FIELDS.includes(fld)) throw `Unknown field "${fld}"`;
+        pos++;
+        const op = peek();
+        if (!OPERATORS.includes(op)) throw `Expected operator but got "${op}"`;
+        pos++;
+        const val = peek();
+        if (!/^[A-Za-z0-9_]+$/.test(val)) throw `Invalid value "${val}"`;
+        pos++;
+        return { field: fld, op, value: val };
+      }
+
+      function parseExpr() {
+        let left = parseFactor();
+        while (peek() === 'AND' || peek() === 'OR') {
+          const cond = peek().toLowerCase();
+          pos++;
+          const right = parseFactor();
+          left = { op: cond, rules: Array.isArray(left.rules) ? left.rules.concat(right) : [left, right] };
+        }
+        return left;
+      }
+
+      const ast = parseExpr();
+      if (pos < tokens.length) throw `Unexpected token "${peek()}"`;
+      return ast;
+    }
+
+    // on input, re-parse and render
+    document.getElementById('expr').addEventListener('input', () => {
+      const expr = document.getElementById('expr').value.trim();
+      const errDiv = document.getElementById('error');
+      const out = document.getElementById('jsonAst');
+      if (!expr) {
+        errDiv.textContent = '';
+        out.value = '';
+        return;
+      }
+      try {
+        const tokens = tokenize(expr);
+        const ast = parseExpression(tokens);
+        errDiv.textContent = '';
+        out.value = JSON.stringify(ast, null, 2);
+      } catch (e) {
+        errDiv.textContent = 'Parse error: ' + e;
+        out.value = '';
+      }
+    });
+  </script>
+</body>
+</html>

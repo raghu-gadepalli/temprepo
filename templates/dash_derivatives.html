@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+{% block title %}Derivatives – AutoTrades{% endblock %}
+
+{% block content %}
+
+<!-- Page-local CSS (kept scoped) -->
+<style>
+  /* Keep fonts consistent and compact */
+  #derivativesPage { font-size: 12px; }
+  #derivativesPage table { font-size: 12px; }
+  #derivativesPage .card-body { font-size: 12px; }
+
+  /* OI chart (same idea as contra modal) */
+  #deriv-oi-chart { width: 100%; }
+
+  .oi-chart {
+    width: 100%;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 8px;
+  }
+
+  .oi-chart-grid {
+    display: grid;
+    grid-template-columns: 70px 1fr;
+    gap: 8px;
+    align-items: start;
+  }
+
+  .oi-ylabels {
+    font-size: 12px;
+    color: #6c757d;
+    line-height: 1.2;
+  }
+
+  .oi-plot {
+    position: relative;
+    height: 260px;
+    border-left: 1px solid #e9ecef;
+    border-bottom: 1px solid #e9ecef;
+    overflow: hidden;
+  }
+
+  .oi-axis-zero {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    border-top: 1px dashed #6c757d;
+    opacity: 0.7;
+  }
+
+  .oi-bars {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    padding: 6px 8px 22px 8px;
+  }
+
+  .oi-col {
+    flex: 1 1 0;
+    min-width: 24px;
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+  }
+
+  .oi-strike {
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 11px;
+    color: #6c757d;
+    white-space: nowrap;
+  }
+
+  .oi-bar {
+    position: absolute;
+    width: 40%;
+    border-radius: 3px;
+    opacity: 0.95;
+  }
+
+  /* CALL = red, PUT = green */
+  .oi-call { background: #dc3545; left: 8%; }
+  .oi-put  { background: #198754; left: 52%; }
+
+  .oi-pos { top: 50%; transform: translateY(-100%); }
+  .oi-neg { top: 50%; }
+
+  .oi-legend {
+    display: flex;
+    gap: 14px;
+    font-size: 12px;
+    color: #495057;
+    margin-bottom: 6px;
+  }
+
+  .oi-dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    margin-right: 6px;
+    vertical-align: -1px;
+  }
+
+  /* OI table area height so it doesn't push the page too much */
+  #deriv-oi-table-wrap {
+    max-height: 260px;
+    overflow: auto;
+  }
+
+  /* Tabs: keep subtle, no styling changes beyond spacing */
+  .deriv-tabs { gap: 6px; }
+</style>
+
+<div id="derivativesPage">
+
+  <!-- Controls -->
+  <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+    <input id="deriv-symbol" class="form-control form-control-sm" style="max-width:200px;"
+           placeholder="Symbol (e.g. INFY)" value="{{ request.args.get('symbol','INFY') }}">
+    <input id="deriv-asof" class="form-control form-control-sm" style="max-width:320px;"
+           placeholder="asof ISO (optional)" value="{{ request.args.get('asof','') }}">
+    <button id="deriv-load" class="btn btn-sm btn-primary">Load</button>
+
+    <div class="text-muted" style="font-size:12px;">
+      Snapshot: <span id="deriv-snapshot">—</span>
+    </div>
+  </div>
+
+  <!-- Row 1: Summary + Future -->
+  <div class="row g-2 mb-2">
+    <!-- Summary -->
+    <div class="col-lg-4">
+      <div class="card h-100">
+        <div class="card-header py-2 d-flex align-items-center justify-content-between">
+          <strong>Summary</strong>
+          <span class="text-muted" style="font-size:12px;" id="deriv-snapshot-small"></span>
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-bordered mb-0">
+            <tbody id="deriv-summary-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Future (includes windows table) -->
+    <div class="col-lg-8">
+      <div class="card h-100">
+        <div class="card-header py-2"><strong>Future</strong></div>
+        <div class="card-body p-0">
+          <div class="row g-0">
+            <div class="col-md-6">
+              <table class="table table-bordered mb-0">
+                <tbody id="deriv-future-body"></tbody>
+              </table>
+            </div>
+            <div class="col-md-6">
+              <table class="table table-bordered mb-0">
+                <thead>
+                  <tr>
+                    <th style="width:56px;">Win</th>
+                    <th>Label</th>
+                    <th style="width:90px;">ΔLTP</th>
+                    <th style="width:90px;">ΔOI</th>
+                  </tr>
+                </thead>
+                <tbody id="deriv-fut-windows"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2: Option Sentiment (full width) -->
+  <div class="card mb-2">
+    <div class="card-header py-2"><strong>Option Sentiment</strong></div>
+    <div class="card-body">
+      <div class="mb-2">
+        <div class="d-flex align-items-center gap-2">
+          <div class="text-muted" style="width:110px;">Overall</div>
+          <div id="deriv-sent-overall">—</div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <div class="text-muted" style="width:110px;">Driver</div>
+          <div id="deriv-sent-driver">—</div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <div class="text-muted" style="width:110px;">PCR (now / Δ)</div>
+          <div id="deriv-sent-pcr">—</div>
+        </div>
+      </div>
+
+      <div class="fw-semibold mb-1" style="font-size:12px;">Sentiment by Window</div>
+      <div style="overflow:auto;">
+        <table class="table table-bordered mb-0">
+          <thead>
+            <tr>
+              <th style="width:56px;">Win</th>
+              <th style="width:60px;">Bias</th>
+              <th style="width:80px;">Strength</th>
+              <th>Driver</th>
+              <th style="width:80px;">PCR</th>
+              <th style="width:80px;">Δ</th>
+            </tr>
+          </thead>
+          <tbody id="deriv-sent-windows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- OI Change: Tabs (Table / Chart) -->
+  <div class="card mb-2">
+    <div class="card-header py-2 d-flex align-items-center justify-content-between">
+      <div>
+        <strong>OI Change</strong>
+        <span class="text-muted" style="font-size:12px;">(ATM ± strikes, ΔOI)</span>
+        <span class="text-muted ms-2" style="font-size:12px;">Window: <span id="deriv-oi-window">—</span></span>
+      </div>
+      <div class="text-muted" style="font-size:12px;">
+        CE Δ: <span id="deriv-oi-ce-delta">—</span>
+        <span class="mx-2">|</span>
+        PE Δ: <span id="deriv-oi-pe-delta">—</span>
+      </div>
+    </div>
+
+    <div class="card-body p-2">
+      <!-- Tabs -->
+      <div class="d-flex align-items-center deriv-tabs mb-2">
+        <button class="btn btn-sm btn-outline-secondary" id="deriv-tab-table" type="button">Table</button>
+        <button class="btn btn-sm btn-outline-secondary" id="deriv-tab-chart" type="button">Chart</button>
+      </div>
+
+      <!-- Table view -->
+      <div id="deriv-oi-view-table">
+        <div id="deriv-oi-table-wrap" class="border rounded">
+          <table class="table table-bordered mb-0">
+            <thead>
+              <tr>
+                <th style="width:80px;">Strike</th>
+                <th style="width:70px;">CE LTP</th>
+                <th style="width:90px;">CE OI</th>
+                <th style="width:90px;">CE ΔOI</th>
+                <th style="width:70px;">PE LTP</th>
+                <th style="width:90px;">PE OI</th>
+                <th style="width:90px;">PE ΔOI</th>
+              </tr>
+            </thead>
+            <tbody id="deriv-oi-rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Chart view -->
+      <div id="deriv-oi-view-chart" class="d-none">
+        <div id="deriv-oi-chart"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Debug JSON (collapsed by default) -->
+  <div class="d-flex align-items-center justify-content-between mt-2">
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse"
+      data-bs-target="#derivJsonWrap" aria-expanded="false" aria-controls="derivJsonWrap">
+      Toggle JSON
+    </button>
+  </div>
+
+  <div class="collapse mt-2" id="derivJsonWrap">
+    <pre id="deriv-json" class="border rounded p-2 mb-0"
+         style="max-height:40vh; overflow:auto; font-size:12px;">—</pre>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+{{ super() }}
+<script src="{{ url_for('static', filename='js/derivatives.js') }}" defer></script>
+{% endblock %}

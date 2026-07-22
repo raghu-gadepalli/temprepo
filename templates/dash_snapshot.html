@@ -1,0 +1,73 @@
+{% extends "dash_userpref.html" %}   {# reuses your user‑pref styling #}
+
+{% block title %}Snapshot Explorer{% endblock %}
+
+{% block content %}
+<div class="user-dashboard-container">
+  <div class="card">
+    <div class="card-header">
+      <h5>Snapshot Explorer</h5>
+    </div>
+    <div class="card-body">
+      <form method="POST">
+        <div class="row mb-3">
+          <div class="col-md-4">
+            <label class="form-label">Symbol</label>
+            <select name="symbol" class="form-control">
+              {% for s in symbols %}
+                <option value="{{ s.symbol }}">{{ s.symbol }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Date &amp; Time (IST)</label>
+            <input
+              type="datetime-local"
+              name="snapshot_time"
+              class="form-control"
+              value="{{ request.form.snapshot_time or '' }}"
+              step="60"
+            />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Operation</label>
+            <select name="operation" class="form-control">
+              <option value="historical">Historical Bar</option>
+              <option value="frequency">Frequency Snapshot</option>
+              <option value="full">Full Snapshot</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row mb-3">
+          <div class="col-md-4">
+            <label class="form-label">Frequency (if needed)</label>
+            <select name="frequency" class="form-control">
+              {% for f in frequencies %}
+                <option value="{{ f }}">{{ f }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div class="text-end">
+          <button type="submit" class="btn btn-primary btn-sm">Fetch</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {% if result is not none %}
+    <div class="card">
+      <div class="card-header">
+        <h5>Result (JSON)</h5>
+      </div>
+      <div class="card-body">
+        <pre style="white-space:pre-wrap; word-break:break-all;">
+{{ result | tojson(indent=2) }}
+        </pre>
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

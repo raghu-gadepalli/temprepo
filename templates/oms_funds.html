@@ -1,0 +1,69 @@
+{% extends "oms_base.html" %}
+
+{% block oms_content %}
+
+<div class="border-bottom pb-2 mb-2">
+    <div class="d-flex justify-content-between align-items-end flex-wrap gap-3">
+        <div>
+            <h4 class="mb-1">Broker Funds & Balances</h4>
+            <div class="text-muted small">Latest OMS funds snapshot across active real broker clients</div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <input
+                id="oms-funds-search"
+                type="search"
+                class="form-control form-control-sm"
+                placeholder="Search funds..."
+                style="width: 220px;"
+            >
+
+            <select id="oms-funds-length" class="form-select form-select-sm" style="width: auto;">
+                <option value="10" selected>Show 10</option>
+                <option value="20">Show 20</option>
+                <option value="50">Show 50</option>
+            </select>
+
+            <button id="oms-funds-refresh" class="btn btn-sm btn-outline-primary" type="button">
+                Refresh
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="oms-funds-alert" class="alert alert-danger d-none" role="alert"></div>
+
+<div class="card p-2">
+    <table id="oms-funds-table" class="table table-hover align-middle w-100 mb-0">
+        <thead>
+            <tr>
+                <th>Client</th>
+                <th>Funds</th>
+                <th>Net Balance</th>
+                <th>Available Cash</th>
+                <th>Utilised Margin</th>
+                <th>Option Premium</th>
+                <th>Realised M2M</th>
+                <th>Unrealised M2M</th>
+                <th>Last Updated</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block page_scripts %}
+{{ super() }}
+
+<script>
+    window.OMS_FUNDS_CONFIG = {
+        dataUrl: "{{ url_for('oms.oms_funds_data') }}",
+        refreshMs: 30000
+    };
+</script>
+
+<script src="{{ url_for('static', filename='js/oms_funds.js') }}"></script>
+
+{% endblock %}

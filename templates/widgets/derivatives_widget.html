@@ -1,0 +1,100 @@
+{# templates/widgets/derivatives_widget.html #}
+
+<div id="deriv-widget" class="deriv-widget" data-mode="{{ mode|default('page') }}">
+  <!-- Summary + Future + Sentiment -->
+  <div class="row g-2 mb-2">
+    <div class="col-lg-3">
+      <div class="card h-100">
+        <div class="card-header py-2 d-flex align-items-center justify-content-between">
+          <strong>Summary</strong>
+          <span class="text-muted" style="font-size:12px;" id="deriv-snapshot-small">—</span>
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-bordered mb-0">
+            <tbody id="deriv-summary-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-3">
+      <div class="card h-100">
+        <div class="card-header py-2"><strong>Future</strong></div>
+        <div class="card-body p-0">
+          <table class="table table-bordered mb-0">
+            <tbody id="deriv-future-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-header py-2"><strong>Option Sentiment</strong></div>
+        <div class="card-body">
+          <div class="mb-2">
+            <div class="d-flex align-items-center gap-2">
+              <div class="text-muted" style="width:110px;">Overall</div>
+              <div id="deriv-sent-overall">—</div>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <div class="text-muted" style="width:110px;">Driver</div>
+              <div id="deriv-sent-driver">—</div>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <div class="text-muted" style="width:110px;">PCR (now / Δ)</div>
+              <div id="deriv-sent-pcr">—</div>
+            </div>
+          </div>
+
+          <div class="fw-semibold mb-1" style="font-size:12px;">Sentiment by Window</div>
+          <div style="max-height:220px; overflow:hidden;">
+            <table class="table table-bordered mb-0">
+              <thead>
+                <tr>
+                  <th>Win</th>
+                  <th>Bias</th>
+                  <th>Strength</th>
+                  <th>Driver</th>
+                  <th>PCR</th>
+                  <th>Δ</th>
+                </tr>
+              </thead>
+              <tbody id="deriv-sent-windows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OI Change Chart -->
+  <div class="card mb-2">
+    <div class="card-header py-2 d-flex align-items-center justify-content-between">
+      <div>
+        <strong>OI Change</strong>
+        <span class="text-muted" style="font-size:12px;">(ATM ± strikes, ΔOI)</span>
+      </div>
+      <div class="text-muted" style="font-size:12px;">
+        CE Δ: <span id="deriv-oi-ce-delta">—</span>
+        <span class="mx-2">|</span>
+        PE Δ: <span id="deriv-oi-pe-delta">—</span>
+      </div>
+    </div>
+    <div class="card-body p-2">
+      <div id="deriv-oi-chart"></div>
+    </div>
+  </div>
+
+  <!-- Raw JSON (optional) -->
+  <div class="d-flex align-items-center justify-content-between mt-2">
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse"
+      data-bs-target="#derivJsonWrap" aria-expanded="false" aria-controls="derivJsonWrap">
+      Toggle JSON
+    </button>
+  </div>
+  <div class="collapse mt-2" id="derivJsonWrap">
+    <pre class="border rounded p-2 mb-0" style="max-height:260px; overflow:auto; font-size:12px;"
+      id="deriv-json">—</pre>
+  </div>
+</div>

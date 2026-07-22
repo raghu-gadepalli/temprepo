@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Feedback – AutoTrades{% endblock %}
+
+{% block head %}
+<style>
+  .feedback-container { max-width: 800px; margin: 0 auto; }
+  .feedback-container .form-label { font-weight: 700; color:#222; margin-bottom:6px; }
+  .feedback-container .form-control { padding: 6px 10px; font-size: 12px; line-height: 1.3; }
+  .small-muted { font-size: 11px; color: #666; }
+  @media (max-width: 576px) {
+    .feedback-container { padding-left: 10px; padding-right: 10px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="feedback-container">
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">Send Feedback / Report a Bug</h5>
+      <span class="small-muted text-truncate">
+        Logged in as {{ session.get('name') }} &lt;{{ session.get('email') }}&gt;
+      </span>
+    </div>
+
+    <div class="card-body">
+
+      {# Flash messages #}
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, msg in messages %}
+            <div class="alert alert-{{ 'success' if category=='success' else ('danger' if category=='error' else category) }} py-2 px-3 small">
+              {{ msg }}
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <form id="feedback-form" method="POST" action="{{ url_for('main.feedback') }}">
+        {% if csrf_token is defined %}
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {% endif %}
+
+        <label class="form-label" for="message">Your message</label>
+        <textarea
+          id="message"
+          name="message"
+          class="form-control"
+          rows="6"
+          maxlength="2000"
+          aria-describedby="messageHelp charCount"
+          placeholder="Tell us what you liked, found confusing, or any bug you hit…"
+          required>{{ message or '' }}</textarea>
+
+        <div class="d-flex justify-content-between align-items-center mt-1">
+          <small id="messageHelp" class="small-muted">Be as specific as possible. Max 2000 characters.</small>
+          <small id="charCount" class="small-muted">0 / 2000</small>
+        </div>
+
+        {# Optional: include the page the user came from #}
+        <input type="hidden" name="referer" value="{{ request.referrer or '' }}">
+
+        <div class="d-flex justify-content-end mt-3">
+          <a href="{{ url_for('main.dashboard_home') }}" class="btn btn-secondary btn-sm me-2">Cancel</a>
+          <button type="submit" id="feedback-submit" class="btn btn-primary btn-sm">
+            Submit
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+  {{ super() }}
+  <script>
+    (function () {
+      const form   = document.getElementById('feedback-form');
+      const ta     = document.getElementById('message');
+      const count  = document.getElementById('charCount');
+      const submit = document.getElementById('feedback-submit');
+      if (!form || !ta || !count || !submit) return;
+
+      const max = ta.maxLength > 0 ? ta.maxLength : 2000;
+
+      function updateCount() {
+        const len = (ta.value || '').length;
+        count.textContent = len + ' / ' + max;
+      }
+      updateCount();
+      ta.addEventListener('input', updateCount);
+
+      form.addEventListener('submit', function () {
+        submit.disabled = true;
+        submit.innerText = 'Sending…';
+      });
+    })();
+  </script>
+{% endblock %}

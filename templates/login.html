@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+
+{% block title %}Login - AutoTrades{% endblock %}
+
+{% block head %}
+<style>
+  /* Remove fixed-navbar offset on the login page */
+  body { padding-top: 0 !important; }
+
+  /* Make provider icons obviously clickable and keyboard-focusable */
+  .oauth-icons a { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; }
+  .oauth-icons a:focus { outline: 2px solid #0d6efd; outline-offset: 2px; border-radius: 6px; }
+
+  /* Subtle beta badge */
+  .beta-badge {
+    font-size: 0.65rem;
+    letter-spacing: .04em;
+    vertical-align: middle;
+    margin-left: .35rem;
+  }
+</style>
+{% endblock %}
+
+{% block navbar %}{% endblock %}
+
+{% block content %}
+<div class="row min-vh-100 align-items-center">
+  <!-- Left Column: Description -->
+  <div class="col-lg-5 mb-4 mb-lg-0" style="font-size:0.95rem; color:#666;">
+    <h1 class="h4 mb-3">
+      Welcome to AutoTrades
+      <span class="badge bg-secondary beta-badge">BETA</span>
+    </h1>
+
+    <p class="mb-2">AutoTrades is currently in beta and under active development.</p>
+    <p class="mb-2">Features and functionality may evolve over time.</p>
+    <p class="mb-0">This is an early-access build intended for evaluation.</p>
+  </div>
+
+  <!-- Right Column: Compact Login Form -->
+  <div class="col-lg-7 d-flex justify-content-center">
+    <div class="card shadow-sm w-100" style="max-width:520px;">
+      <div class="card-body p-4">
+        <h2 class="h4 text-center mb-3">Login</h2>
+
+        {# Flash messages #}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, msg in messages %}
+              <div class="alert alert-{{ 'danger' if category == 'error' else category }} py-2" role="alert" style="font-size:0.9rem;">
+                {{ msg }}
+              </div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        {# Resolve current mode from POST-back; default to userid #}
+        {% set selected_mode = (request.form.get('login_mode') or 'userid') | lower %}
+
+        <form method="POST" action="{{ url_for('main.login') }}" novalidate>
+          {# CSRF (if using Flask-WTF or similar) #}
+          {% if csrf_token is defined %}
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {% endif %}
+
+          <!-- Mode toggle -->
+          <div class="mb-3">
+            <div class="btn-group w-100" role="group" aria-label="Login mode">
+              <input type="radio" class="btn-check" name="login_mode" id="mode-userid" value="userid"
+                     autocomplete="off" {{ 'checked' if selected_mode != 'phone' else '' }}>
+              <label class="btn btn-outline-primary" for="mode-userid">
+                <i class="bi bi-person-badge"></i> User ID
+              </label>
+
+              <input type="radio" class="btn-check" name="login_mode" id="mode-phone" value="phone"
+                     autocomplete="off" {{ 'checked' if selected_mode == 'phone' else '' }}>
+              <label class="btn btn-outline-primary" for="mode-phone">
+                <i class="bi bi-telephone"></i> Phone
+              </label>
+            </div>
+          </div>
+
+          <!-- User ID input -->
+          <div class="mb-3 {{ 'd-none' if selected_mode == 'phone' else '' }}" id="field-userid">
+            <label for="userid" class="form-label visually-hidden">User ID</label>
+            <input id="userid"
+                   name="userid"
+                   type="text"
+                   class="form-control"
+                   placeholder="User ID"
+                   {% if selected_mode != 'phone' %}required{% endif %}
+                   autofocus
+                   autocomplete="username"
+                   inputmode="text"
+                   autocapitalize="none"
+                   autocorrect="off"
+                   spellcheck="false"
+                   value="{{ request.form.userid or '' }}">
+          </div>
+
+          <!-- Phone input -->
+          <div class="mb-3 {{ '' if selected_mode == 'phone' else 'd-none' }}" id="field-phone">
+            <label for="mobile" class="form-label visually-hidden">Phone (10-digit)</label>
+            <input id="mobile"
+                   name="mobile"
+                   type="text"
+                   class="form-control"
+                   placeholder="10-digit phone"
+                   inputmode="numeric"
+                   pattern="\\d{10}"
+                   maxlength="10"
+                   autocomplete="tel-national"
+                   {% if selected_mode == 'phone' %}required{% endif %}
+                   value="{{ request.form.mobile or '' }}">
+            <div class="form-text">Only Indian 10-digit numbers (no country code).</div>
+          </div>
+
+          <!-- Password -->
+          <div class="mb-3">
+            <label for="password" class="form-label visually-hidden">Password</label>
+            <div class="input-group">
+              <input id="password"
+                     name="password"
+                     type="password"
+                     class="form-control"
+                     placeholder="Password"
+                     required
+                     autocomplete="current-password"
+                     autocapitalize="none"
+                     autocorrect="off"
+                     spellcheck="false">
+              <button class="btn btn-outline-secondary" type="button" id="toggle-password" aria-label="Show password">Show</button>
+            </div>
+          </div>
+
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="remember" name="remember" value="1">
+              <label class="form-check-label" for="remember" style="font-size:0.9rem;">Remember me</label>
+            </div>
+            <a href="{{ url_for('main.register') }}" class="small text-decoration-none">Request access / Register</a>
+          </div>
+
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary">Login</button>
+          </div>
+        </form>
+
+        <div class="text-center mt-4">
+          <small class="text-muted d-block mb-2">Or continue with</small>
+          <div class="oauth-icons d-flex justify-content-center gap-3">
+            <a href="{{ (oauth_urls.google if oauth_enabled and oauth_urls is defined else None) or '#' }}"
+               aria-label="Continue with Google" role="button" rel="noopener">
+              <img src="{{ url_for('static', filename='images/google-icon.png') }}" alt="" width="36" height="36">
+            </a>
+            <a href="{{ (oauth_urls.facebook if oauth_enabled and oauth_urls is defined else None) or '#' }}"
+               aria-label="Continue with Facebook" role="button" rel="noopener">
+              <img src="{{ url_for('static', filename='images/facebook-icon.png') }}" alt="" width="36" height="36">
+            </a>
+            <a href="{{ (oauth_urls.broker if oauth_enabled and oauth_urls is defined else None) or '#' }}"
+               aria-label="Continue with Broker" role="button" rel="noopener">
+              <img src="{{ url_for('static', filename='images/broker-icon.png') }}" alt="" width="36" height="36">
+            </a>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+  {{ super() }}
+  <script>
+    (function () {
+      function applyMode(clearOther) {
+        var usingPhone = document.getElementById('mode-phone').checked;
+        var fldUser  = document.getElementById('field-userid');
+        var fldPhone = document.getElementById('field-phone');
+        var inpUser  = document.getElementById('userid');
+        var inpPhone = document.getElementById('mobile');
+
+        // Show/hide
+        fldUser.classList.toggle('d-none',  usingPhone);
+        fldPhone.classList.toggle('d-none', !usingPhone);
+
+        // Required flags
+        if (inpUser)  inpUser.required  = !usingPhone;
+        if (inpPhone) inpPhone.required =  usingPhone;
+
+        // When switching modes, clear the other field and reset validity
+        if (clearOther) {
+          if (usingPhone) {
+            if (inpUser) { inpUser.value = ''; inpUser.setCustomValidity(''); inpUser.blur(); }
+          } else {
+            if (inpPhone) { inpPhone.value = ''; inpPhone.setCustomValidity(''); inpPhone.blur(); }
+          }
+        }
+
+        // Field-specific attributes & focus
+        if (usingPhone) {
+          inpPhone?.setAttribute('pattern', '\\d{10}');
+          inpPhone?.setAttribute('maxlength', '10');
+          inpPhone?.setAttribute('inputmode', 'numeric');
+          inpPhone?.focus({ preventScroll: true });
+        } else {
+          inpUser?.removeAttribute('pattern');
+          inpUser?.removeAttribute('maxlength');
+          inpUser?.focus({ preventScroll: true });
+        }
+      }
+
+      document.addEventListener('DOMContentLoaded', function () {
+        var modeUser  = document.getElementById('mode-userid');
+        var modePhone = document.getElementById('mode-phone');
+
+        // Initial paint (don’t clear on first load; preserves POST-back values)
+        applyMode(false);
+
+        // On mode changes, clear the opposite field
+        modeUser?.addEventListener('change', function () { applyMode(true); });
+        modePhone?.addEventListener('change', function () { applyMode(true); });
+
+        // Show/Hide password
+        var btn = document.getElementById('toggle-password');
+        var pwd = document.getElementById('password');
+        if (btn && pwd) {
+          btn.addEventListener('click', function () {
+            var showing = pwd.type === 'text';
+            pwd.type = showing ? 'password' : 'text';
+            btn.textContent = showing ? 'Show' : 'Hide';
+            btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+            pwd.focus({ preventScroll: true });
+          });
+        }
+      });
+    })();
+  </script>
+{% endblock %}

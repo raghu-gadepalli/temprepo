@@ -1,0 +1,86 @@
+{
+  "intraday": {
+    "EQ": {
+      "product_type": "MIS",
+      "exchange": "NSE",
+      "order_type": "MARKET",
+      "order_variety": "REGULAR",
+      "allow": {
+        "BUY": true,
+        "SELL": true
+      }
+    },
+    "FUT": {
+      "product_type": "MIS",
+      "exchange": "NFO",
+      "order_type": "MARKET",
+      "order_variety": "REGULAR",
+      "allow": {
+        "BUY": true,
+        "SELL": true
+      }
+    },
+    "CE": {
+      "product_type": "NRML",
+      "exchange": "NFO",
+      "order_type": "LIMIT",
+      "order_variety": "REGULAR",
+      "allow": {
+        "BUY": true,
+        "SELL": false
+      }
+    },
+    "PE": {
+      "product_type": "NRML",
+      "exchange": "NFO",
+      "order_type": "LIMIT",
+      "order_variety": "REGULAR",
+      "allow": {
+        "BUY": true,
+        "SELL": false
+      }
+    }
+  },
+  "carryforward": {
+    "EQ": {
+      "product_type": "CNC",
+      "exchange": "NSE",
+      "order_type": "MARKET",
+      "order_variety": "REGULAR",
+      "allow": {
+        "BUY": true,
+        "SELL": false
+      }
+    },
+    "FUT": {
+      "product_type": "NRML",
+      "exchange": "NFO",
+      "order_type": "MARKET",
+      "order_variety": "REGULAR",
+      "allow": {
+        "BUY": true,
+        "SELL": true
+      }
+    },
+    "CE": {
+      "product_type": "NRML",
+      "exchange": "NFO",
+      "order_type": "LIMIT",
+      "order_variety": "REGULAR",
+      "allow": {
+        "BUY": true,
+        "SELL": false
+      }
+    },
+    "PE": {
+      "product_type": "NRML",
+      "exchange": "NFO",
+      "order_type": "LIMIT",
+      "order_variety": "REGULAR",
+      "allow": {
+        "BUY": true,
+        "SELL": false
+      }
+    }
+  }
+}

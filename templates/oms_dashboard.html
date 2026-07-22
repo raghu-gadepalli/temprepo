@@ -1,0 +1,74 @@
+{% extends "oms_base.html" %}
+
+{% block oms_content %}
+
+<div class="border-bottom pb-3 mb-4">
+   <div class="d-flex justify-content-between align-items-center">
+      <div>
+         <h4 class="mb-1">OMS Dashboard</h4>
+         <div class="text-muted small">Operational summary across broker-enabled OMS clients</div>
+      </div>
+
+      <div class="d-flex gap-2">
+         <button id="oms-dashboard-refresh" class="btn btn-sm btn-outline-primary" type="button">
+            Refresh
+         </button>
+      </div>
+   </div>
+</div>
+
+<div id="oms-dashboard-alert" class="alert alert-danger d-none" role="alert"></div>
+
+<div class="kpi-row">
+
+   <div class="kpi-card system" data-href="{{ url_for('oms.oms_clients') }}" style="cursor:pointer">
+      <div class="label">Active Clients</div>
+      <div class="value" id="active_clients">—</div>
+   </div>
+
+   <div class="kpi-card system">
+      <div class="label">Total Clients</div>
+      <div class="value" id="total_clients">—</div>
+   </div>
+
+   <div class="kpi-card positive" data-href="{{ url_for('oms.oms_funds') }}" style="cursor:pointer">
+      <div class="label">Total Fund Balance</div>
+      <div class="value">
+         <span id="total_funds" class="text-success">₹ —</span>
+      </div>
+   </div>
+
+</div>
+
+<div class="kpi-row">
+
+   <div class="kpi-card system" data-href="{{ url_for('oms.oms_orders') }}" style="cursor:pointer">
+      <div class="label">Broker Orders</div>
+      <div class="value" id="open_orders">—</div>
+   </div>
+
+   <div class="kpi-card system" data-href="{{ url_for('oms.oms_positions') }}" style="cursor:pointer">
+      <div class="label">Broker Positions</div>
+
+      <div class="value" id="total_positions">—</div>
+
+      <div class="sub-value">
+         Open Positions: <span id="open_positions">—</span>
+      </div>
+   </div>
+
+   <div class="kpi-card system" data-href="{{ url_for('oms.oms_positions') }}" style="cursor:pointer">
+      <div class="label">Today's PnL</div>
+      <div class="value">
+         <span id="today_pnl" class="text-success">₹ —</span>
+      </div>
+   </div>
+
+</div>
+
+{% endblock %}
+
+{% block page_scripts %}
+{{ super() }}
+<script src="{{ url_for('static', filename='js/oms_dashboard.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>{% block title %}AutoTrades{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- PWA -->
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#f8f9fa" />
+
+  <!-- iOS Home Screen icons -->
+  <link rel="apple-touch-icon" sizes="180x180"
+    href="{{ url_for('static', filename='images/apple-touch-icon-180.png', v='1') }}">
+  <link rel="apple-touch-icon" sizes="167x167"
+    href="{{ url_for('static', filename='images/apple-touch-icon-167.png', v='1') }}">
+  <link rel="apple-touch-icon" sizes="152x152"
+    href="{{ url_for('static', filename='images/apple-touch-icon-152.png', v='1') }}">
+  <link rel="apple-touch-icon" sizes="120x120"
+    href="{{ url_for('static', filename='images/apple-touch-icon-120.png', v='1') }}">
+
+  <!-- Preconnects -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="preconnect" href="https://code.jquery.com" crossorigin />
+  <link rel="preconnect" href="https://cdn.datatables.net" crossorigin />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+
+  <!-- Bootstrap CSS + Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" />
+
+  <!-- App CSS -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260330-nav-admin2') }}">
+
+  <!-- DataTables CSS -->
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css" />
+  <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.2.9/css/responsive.dataTables.min.css" />
+
+  <!-- RowGroup CSS -->
+  <link rel="stylesheet" href="https://cdn.datatables.net/rowgroup/1.5.0/css/rowGroup.dataTables.min.css" />
+
+  <!-- SweetAlert2 -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11" defer></script>
+
+  <!-- OMS CSS -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/oms.css') }}">
+
+  <style>
+    html {
+      scrollbar-gutter: stable both-edges;
+    }
+
+    body {
+      font-family: Montserrat, sans-serif;
+      padding-top: var(--nav-offset, 72px);
+    }
+
+    .navbar.fixed-top {
+      border-bottom: 1px solid #dee2e6;
+      background: #f8f9fa;
+    }
+
+    .navbar .navbar-brand {
+      max-width: 60vw;
+      text-align: center;
+    }
+
+    .navbar-nav .nav-link:hover,
+    .dropdown-item:hover {
+      text-decoration: underline;
+    }
+
+    .navbar-nav .nav-link.active,
+    .dropdown-item.active {
+      font-weight: bold;
+      color: #007bff !important;
+    }
+
+    .user-icon {
+      width: 30px;
+      height: 30px;
+      object-fit: cover;
+      border-radius: 50%;
+      margin-right: 5px;
+      border: 1px solid #ccc;
+    }
+
+    .container-content {
+      margin-top: 0;
+    }
+
+    .section-switch-link {
+      font-weight: 600;
+      white-space: nowrap;
+    }
+  </style>
+
+  {% block head %}{% endblock %}
+</head>
+
+<body
+  data-active-tab="{{ active if active in ['watchlist','signals','orders','positions','oms'] else '' }}">
+  {% set _is_operator = is_operator() if is_operator is defined else false %}
+  {% set _is_admin = is_admin() if is_admin is defined else false %}
+  {% set _nav_section = nav_section if nav_section is defined and nav_section else 'dashboard' %}
+
+  {% block navbar %}
+  <nav class="navbar navbar-expand-lg navbar-light bg-light fixed-top">
+    <div class="container-fluid position-relative">
+
+      <!-- Centered brand -->
+      <a class="navbar-brand position-absolute start-50 translate-middle-x text-truncate"
+        href="{{ url_for('main.dashboard_home') }}">
+        AutoTrades
+      </a>
+
+      <!-- Left: Collapsible navigation -->
+      <button class="navbar-toggler me-2" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav"
+        aria-controls="mainNav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse" id="mainNav">
+
+        {% if _nav_section == 'admin' %}
+        <!-- ADMIN NAV -->
+        <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+          <li class="nav-item">
+            <a class="nav-link {% if active == 'admin' and not page %}active{% endif %}"
+              href="{{ url_for('admin.admin_home') }}">
+              Admin
+            </a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link {% if page == 'users' %}active{% endif %}" href="{{ url_for('admin.admin_users') }}">
+              Users
+            </a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link {% if page == 'system' %}active{% endif %}" href="{{ url_for('admin.admin_system') }}">
+              System
+            </a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link {% if page == 'snapshot' %}active{% endif %}"
+              href="{{ url_for('admin.admin_snapshot') }}">
+              Snapshot
+            </a>
+          </li>
+        </ul>
+        {% else %}
+        <!-- DASHBOARD NAV -->
+        <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+
+          <li class="nav-item">
+            <a class="nav-link {% if active == 'watchlist' %}active{% endif %}" href="{{ url_for('dash.watchlist') }}">
+              Watchlist
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {% if active == 'signals' %}active{% endif %}" href="{{ url_for('dash.signals') }}">
+              Signals
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {% if active == 'orders' %}active{% endif %}" href="{{ url_for('dash.orders') }}">
+              Orders
+            </a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link {% if active == 'positions' %}active{% endif %}" href="{{ url_for('dash.positions') }}">
+              Positions
+            </a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link {% if active == 'performance' %}active{% endif %}"
+              href="{{ url_for('dash.performance') }}">
+              Performance
+            </a>
+          </li>
+
+          {% if _is_operator %}
+          <li class="nav-item">
+            <a class="nav-link {% if active == 'oms' %}active{% endif %}" href="{{ url_for('oms.dashboard') }}">
+              OMS
+            </a>
+          </li>
+          {% endif %}
+
+        </ul>
+        {% endif %}
+
+      </div>
+
+      <!-- Right: Notifications + User + Section Switch -->
+      <div class="d-flex align-items-center ms-auto">
+        <ul class="navbar-nav mb-2 mb-lg-0 align-items-lg-center">
+
+          <!-- Notifications -->
+          <li class="nav-item dropdown me-3">
+            <a class="nav-link dropdown-toggle position-relative" href="#" id="notificationsDropdown" role="button"
+              data-bs-toggle="dropdown" aria-expanded="false" aria-label="Notifications">
+              <i class="bi bi-bell" style="font-size:1.2rem;"></i>
+              <span id="notification-badge"
+                class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                0 <span class="visually-hidden">unread notifications</span>
+              </span>
+            </a>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="notificationsDropdown" id="notifications-menu">
+              <li>
+                <h6 class="dropdown-header">Notifications</h6>
+              </li>
+              <li>
+                <hr class="dropdown-divider" />
+              </li>
+              <li class="notification-item text-center px-3">No new notifications</li>
+            </ul>
+          </li>
+
+          <!-- User -->
+          <li class="nav-item dropdown me-3">
+            <a class="nav-link dropdown-toggle d-flex align-items-center" href="#" id="userDropdown" role="button"
+              data-bs-toggle="dropdown" aria-expanded="false">
+              <img src="{{ url_for('static', filename='images/user-icon.png') }}" alt="User Icon" class="user-icon" />
+              {{ session['name'].split()[0] if session.get('name') else 'User' }}
+            </a>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+              <li><a class="dropdown-item" href="{{ url_for('user.user_profile') }}">Profile</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('user.user_funds') }}">Account Funds</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('user.user_preferences') }}">Preferences</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('main.feedback') }}">Feedback</a></li>
+              <li>
+                <hr class="dropdown-divider" />
+              </li>
+              <li><a class="dropdown-item" href="{{ url_for('main.logout') }}">Logout</a></li>
+            </ul>
+          </li>
+
+          <!-- Extreme right: section switch -->
+          {% if _is_admin %}
+          {% if _nav_section == 'admin' %}
+          <li class="nav-item">
+            <a class="nav-link section-switch-link" href="{{ url_for('main.dashboard_home') }}">
+              Dashboard
+            </a>
+          </li>
+          {% else %}
+          <li class="nav-item">
+            <a class="nav-link section-switch-link" href="{{ url_for('admin.admin_home') }}">
+              Admin
+            </a>
+          </li>
+          {% endif %}
+          {% endif %}
+
+        </ul>
+      </div>
+
+    </div>
+  </nav>
+  {% endblock %}
+
+  <!-- Flash messages -->
+  {% set messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div class="container mt-3" role="region" aria-live="polite" aria-atomic="true">
+    {% for category, message in messages %}
+    <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show"
+      role="alert">
+      {{ message }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Main content -->
+  <div class="container container-content">
+    {% block content %}{% endblock %}
+  </div>
+
+  <!-- Footer -->
+  {% block footer %}
+  <footer class="site-footer">
+    <div class="container text-center">
+      <p class="mb-0">
+        Powered by
+        <a href="https://raingush.com" target="_blank" rel="noopener">
+          Raingush Technologies Pvt. Ltd.
+        </a>
+      </p>
+    </div>
+  </footer>
+  {% endblock %}
+
+  {% block scripts %}
+  <!-- jQuery -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <!-- Bootstrap -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" defer></script>
+  <!-- DataTables core -->
+  <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js" defer></script>
+  <!-- Responsive -->
+  <script src="https://cdn.datatables.net/responsive/2.2.9/js/dataTables.responsive.min.js" defer></script>
+  <!-- RowGroup JS -->
+  <script src="https://cdn.datatables.net/rowgroup/1.5.0/js/dataTables.rowGroup.min.js" defer></script>
+  <!-- Global JS -->
+  <script src="{{ url_for('static', filename='js/default.js') }}" defer></script>
+  {% block page_scripts %}{% endblock %}
+
+  <!-- Auto-close mobile menu on link click -->
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const navLinks = document.querySelectorAll('.navbar-nav .nav-link');
+      const navCollapse = document.getElementById('mainNav');
+      if (navCollapse) {
+        const bsCollapse = new bootstrap.Collapse(navCollapse, { toggle: false });
+        navLinks.forEach(link => {
+          link.addEventListener('click', () => {
+            if (navCollapse.classList.contains('show')) bsCollapse.hide();
+          });
+        });
+      }
+    });
+  </script>
+
+  <!-- Dynamic navbar offset -->
+  <script>
+    (function () {
+      function setOffset() {
+        var nav = document.querySelector('.navbar.fixed-top');
+        if (!nav) return;
+        var h = Math.ceil(nav.getBoundingClientRect().height);
+        var offset = h + 4;
+        document.documentElement.style.setProperty('--nav-offset', offset + 'px');
+      }
+      window.addEventListener('load', setOffset);
+      window.addEventListener('resize', setOffset);
+      document.addEventListener('shown.bs.collapse', setOffset, true);
+      document.addEventListener('hidden.bs.collapse', setOffset, true);
+    })();
+  </script>
+
+  <!-- Service worker -->
+  <script defer>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/static/js/sw.js").catch(() => { });
+      });
+    }
+  </script>
+  {% endblock %}
+</body>
+
+</html>

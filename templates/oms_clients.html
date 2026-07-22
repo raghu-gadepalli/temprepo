@@ -1,0 +1,68 @@
+{% extends "oms_base.html" %}
+
+{% block oms_content %}
+
+<div class="border-bottom pb-2 mb-2">
+    <div class="d-flex justify-content-between align-items-end flex-wrap gap-3">
+        <div>
+            <h4 class="mb-1">Clients</h4>
+            <div class="text-muted small">Broker-enabled OMS clients currently available to operations</div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <input
+                id="oms-clients-search"
+                type="search"
+                class="form-control form-control-sm"
+                placeholder="Search clients..."
+                style="width: 220px;"
+            >
+
+            <select id="oms-clients-length" class="form-select form-select-sm" style="width: auto;">
+                <option value="10">Show 10</option>
+                <option value="20" selected>Show 20</option>
+                <option value="50">Show 50</option>
+                <option value="100">Show 100</option>
+            </select>
+
+            <button id="oms-clients-refresh" class="btn btn-sm btn-outline-primary" type="button">
+                Refresh
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="oms-clients-alert" class="alert alert-danger d-none" role="alert"></div>
+
+<div class="card p-2">
+    <table id="oms-clients-table" class="table table-hover align-middle w-100 mb-0">
+        <thead>
+            <tr>
+                <th>Client ID</th>
+                <th>Name</th>
+                <th>Execution</th>
+                <th>Broker Login</th>
+                <th>Logged In</th>
+                <th>Login Time</th>
+                <th>Active</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block page_scripts %}
+{{ super() }}
+
+<script>
+    window.OMS_CLIENTS_CONFIG = {
+        dataUrl: "{{ url_for('oms.oms_clients_data') }}",
+        refreshMs: 30000
+    };
+</script>
+
+<script src="{{ url_for('static', filename='js/oms_clients.js') }}"></script>
+
+{% endblock %}

@@ -1,0 +1,16 @@
+[Unit]
+Description=autotrades Broker Reconcile Service
+After=network.target
+
+[Service]
+Type=simple
+User=autotrades
+Group=www-data
+UMask=0002
+WorkingDirectory=/var/www/autotrades/scripts
+ExecStart=/var/www/autotrades/venv/bin/python /var/www/autotrades/scripts/run_broker_reconcile.py
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

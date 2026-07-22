@@ -1,0 +1,46 @@
+{
+  "name": "autotrades",
+  "short_name": "autotrades",
+  "description": "Live signals, trades, positions and performance.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "lang": "en-IN",
+  "theme_color": "#f8f9fa",
+  "background_color": "#ffffff",
+  "categories": ["finance", "trading", "productivity"],
+
+  "icons": [
+    { "src": "/static/images/favicon-16.png",  "sizes": "16x16",  "type": "image/png" },
+    { "src": "/static/images/favicon-32.png",  "sizes": "32x32",  "type": "image/png" },
+    { "src": "/static/images/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/images/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/images/maskable-512x512.png",       "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+
+  "shortcuts": [
+    { "name": "Watchlist",   "url": "/watchlist" },
+    { "name": "Signals",     "url": "/signals" },
+    { "name": "Trades",      "url": "/trades" },
+    { "name": "Positions",   "url": "/positions" },
+    { "name": "Performance", "url": "/performance" }
+  ],
+
+  "screenshots": [
+    { "src": "/static/images/scrshot_1.png",   "type": "image/png", "sizes": "1280x720", "form_factor": "wide", "label": "Watchlist — table" },
+    { "src": "/static/images/scrshot_1_1.png", "type": "image/png", "sizes": "1280x720", "form_factor": "wide", "label": "Watchlist — modal" },
+    { "src": "/static/images/scrshot_2.png",   "type": "image/png", "sizes": "1280x720", "form_factor": "wide", "label": "Signals — table" },
+    { "src": "/static/images/scrshot_2_1.png", "type": "image/png", "sizes": "1280x720", "form_factor": "wide", "label": "Signals — modal" },
+    { "src": "/static/images/scrshot_3.png",   "type": "image/png", "sizes": "1280x720", "form_factor": "wide", "label": "Trades — table" },
+    { "src": "/static/images/scrshot_3_1.png", "type": "image/png", "sizes": "1280x720", "form_factor": "wide", "label": "Trades — modal" },
+    { "src": "/static/images/scrshot_4.png",   "type": "image/png", "sizes": "1280x720", "form_factor": "wide", "label": "Positions — table" },
+    { "src": "/static/images/scrshot_4_1.png", "type": "image/png", "sizes": "1280x720", "form_factor": "wide", "label": "Positions — modal" },
+    { "src": "/static/images/scrshot_5.png",   "type": "image/png", "sizes": "1280x720", "form_factor": "wide", "label": "Performance — table" },
+    { "src": "/static/images/scrshot_6.png",   "type": "image/png", "sizes": "1280x720", "form_factor": "wide", "label": "User trading preferences" }
+  ],
+
+  "prefer_related_applications": false
+}

@@ -1,0 +1,677 @@
+/* =============================== */
+/*           Index Page            */
+/* =============================== */
+
+.index-body {
+  font: 20px Montserrat, sans-serif;
+  line-height: 1.8;
+  color: #000;
+}
+
+.index-container-wrapper {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  padding: 20px;
+}
+
+.index-content-box {
+  width: 80%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.index-panel-box {
+  width: 100%;
+  padding: 20px;
+  margin-bottom: 20px;
+  border-radius: 5px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+  background: #fff;
+  text-align: center;
+}
+
+.index-login-section-wrapper { width: 50%; }
+
+.index-social-icons {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+  margin-top: 10px;
+}
+.index-social-icons img { width: 40px; height: 40px; cursor: pointer; opacity: .8; }
+.index-social-icons img:hover { opacity: 1; }
+
+.index-form-control { width: 80%; margin: auto; }
+.index-btn-login    { width: 50%; margin-top: 10px; }
+
+/* =============================== */
+/*        Dashboard & Layout       */
+/* =============================== */
+
+.dash-body { font-size: 12px; color: #333; overflow-x: hidden !important; }
+
+.dash-container-fluid {
+  width: 100%;
+  padding: 20px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-header-title { text-align: center; font-size: 20px; font-weight: bold; letter-spacing: 5px; }
+
+.dash-top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+
+/* Navigation Tabs */
+.dash-nav-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  overflow-x: auto;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.dash-nav-tabs li { list-style: none; }
+.dash-nav-tabs .dash-nav-link,
+.dash-nav-tabs .nav-link { font-size: 12px !important; padding: 6px 10px !important; white-space: nowrap; }
+.dash-nav-tabs .dash-nav-link.active { color: #064635 !important; font-weight: bold; }
+
+/* Table Container */
+.dash-table-container {
+  width: 100%;
+  flex-grow: 1;
+  overflow: auto;
+  border: 1px solid #ddd;
+  padding: 5px;
+  box-sizing: border-box;
+}
+
+.dash-active-tab  { display: block; }
+
+/* =============================== */
+/*           Modal Tables          */
+/* =============================== */
+
+.dash-modal-table th,
+.dash-modal-table td {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  text-align: center;
+  font-size: 14px;
+  width: 25%;
+}
+
+.dash-modal-table tr:nth-child(1) th,
+.dash-modal-table tr:nth-child(1) td,
+.dash-modal-table tr:nth-child(2) th,
+.dash-modal-table tr:nth-child(2) td { width: 20%; }
+
+.dash-modal-table tr:nth-child(1) th:nth-child(3),
+.dash-modal-table tr:nth-child(1) td:nth-child(3),
+.dash-modal-table tr:nth-child(1) th:nth-child(4),
+.dash-modal-table tr:nth-child(1) td:nth-child(4),
+.dash-modal-table tr:nth-child(2) th:nth-child(3),
+.dash-modal-table tr:nth-child(2) td:nth-child(3),
+.dash-modal-table tr:nth-child(2) th:nth-child(4),
+.dash-modal-table tr:nth-child(2) td:nth-child(4) { width: 30%; }
+
+.dash-modal-table tr:nth-child(3),
+.dash-modal-table tr:nth-child(4),
+.dash-modal-table tr:nth-child(5),
+.dash-modal-table tr:nth-child(6),
+.dash-modal-table tr:nth-child(7) { width: 25%; }
+
+.dash-modal-table tr:nth-child(3) th:nth-child(3),
+.dash-modal-table tr:nth-child(3) td:nth-child(3),
+.dash-modal-table tr:nth-child(4) th:nth-child(3),
+.dash-modal-table tr:nth-child(4) td:nth-child(3),
+.dash-modal-table tr:nth-child(5) th:nth-child(3),
+.dash-modal-table tr:nth-child(5) td:nth-child(3),
+.dash-modal-table tr:nth-child(6) th:nth-child(3),
+.dash-modal-table tr:nth-child(6) td:nth-child(3),
+.dash-modal-table tr:nth-child(7) th:nth-child(3),
+.dash-modal-table tr:nth-child(7) td:nth-child(3) { width: 50%; }
+
+.dash-text-success { color: green !important; font-weight: bold; }
+.dash-text-danger  { color: red !important;   font-weight: bold; }
+
+/* =============================== */
+/*         Common Styling          */
+/* =============================== */
+
+p { font-size: 16px; }
+
+/* Traffic Lights */
+.traffic-light {
+  display: inline-block; width: 12px; height: 12px;
+  border-radius: 50%; vertical-align: middle;
+}
+.traffic-light-green1,
+.traffic-light-green2,
+.traffic-light-green3 { background-color: #66e066 !important; }
+.traffic-light-red1,
+.traffic-light-red2,
+.traffic-light-red3  { background-color: #cc0000 !important; }
+.traffic-light-grey  { background-color: #555 !important; }
+
+/* =============================== */
+/*  Dashboard Tables               */
+/* =============================== */
+
+.dash-watchlist-table,
+.dash-signals-table,
+.dash-trades-table,
+.dash-positions-table { width: 100% !important; table-layout: auto; }
+
+.dash-watchlist-table th, .dash-watchlist-table td,
+.dash-signals-table  th, .dash-signals-table  td,
+.dash-trades-table   th, .dash-trades-table   td,
+.dash-positions-table th, .dash-positions-table td {
+  padding: 6px !important;
+  line-height: 1.1 !important;
+  font-size: 12px !important;
+  white-space: nowrap;
+  border: 1px solid #ddd;
+}
+
+/* =============================== */
+/* Row interaction (safe version)  */
+/* =============================== */
+
+/* Only affect watchlist body rows (not header / layout) */
+.dash-watchlist-table tbody tr {
+  cursor: pointer;
+}
+
+/* Active highlight (no layout impact) */
+.dash-watchlist-table tbody tr.wl-row-active td {
+  background-color: #eef5ff !important;
+}
+
+/* Press effect (very subtle, no height impact) */
+.dash-watchlist-table tbody tr.wl-row-press {
+  transform: scale(0.998);
+}
+
+/* Derivatives Modal Tables */
+#tab-derivatives table { font-size: .875rem; }
+#tab-derivatives table th, #tab-derivatives table td { font-weight: normal; }
+#tab-derivatives table th:first-child,
+#tab-derivatives table td:first-child { font-weight: bold; }
+
+/* Watchlist Modal — same width as Signals modal */
+.dash-modal-lg { max-width: 900px; }
+#detailsModal .modal-body table { width: 100%; font-size: 12px; }
+#detailsModal .modal-body th, #detailsModal .modal-body td {
+  padding: 4px; border: 1px solid #ddd; text-align: center;
+}
+
+/* =============================== */
+/* Global DataTables Overrides     */
+/* =============================== */
+
+.dataTables_wrapper { font-size: 12px !important; }
+
+/* Keep trades rows compact when buttons/badges present */
+.dash-trades-table .btn, .dash-trades-table .badge { margin: 0; }
+.dash-trades-table .btn-trade-review { padding: 2px 6px; line-height: 1; font-size: 12px; height: auto; }
+
+/* =============================== */
+/* Unified Control Bar             */
+/* =============================== */
+
+.dt-control-bar {
+  border: 1px solid #dee2e6;
+  border-radius: .5rem;
+  padding: 6px 10px;
+  margin: .25rem 0;
+  background: #fff;
+}
+
+/* Control card containers */
+#watchlist-controls,
+#signals-controls { width: 100%; margin-bottom: .25rem; }
+
+/* =============================== */
+/*  RESPONSIVE TUNING              */
+/* =============================== */
+
+/* NOTE: We intentionally do NOT set body padding-top in media queries anymore.
+   The fixed navbar offset is managed by --nav-offset calculated in base.html. */
+
+@media (max-width: 992px) {
+  .navbar.fixed-top { padding-top: 6px !important; padding-bottom: 6px !important; }
+  .navbar .navbar-toggler { padding: 2px 8px; font-size: .95rem; }
+  .user-icon { width: 26px; height: 26px; margin-right: 4px; }
+
+  .container, .container-content { padding-left: 10px !important; padding-right: 10px !important; }
+
+  .dash-nav-tabs { justify-content: flex-start; }
+  .dash-nav-tabs .dash-nav-link, .dash-nav-tabs .nav-link {
+    white-space: normal !important;
+    padding: 4px 8px !important;
+    font-size: 10px !important;
+    text-align: left;
+  }
+
+  .dash-watchlist-table th, .dash-watchlist-table td,
+  .dash-signals-table  th, .dash-signals-table  td,
+  .dash-trades-table   th, .dash-trades-table   td,
+  .dash-positions-table th, .dash-positions-table td {
+    padding: 4px !important;
+    font-size: 11px !important;
+    line-height: 1.1 !important;
+  }
+}
+
+@media (max-width: 576px) {
+  .navbar.fixed-top { min-height: 48px !important; }
+  .user-icon { width: 24px; height: 24px; }
+  .container, .container-content { padding-left: 8px !important; padding-right: 8px !important; }
+  .dropdown-menu { padding: .25rem 0; }
+  .dropdown-item { padding: .25rem .75rem; }
+}
+
+/* =============================== */
+/* Watchlist & Signals: wrapper alignment + landscape full-bleed */
+/* =============================== */
+
+#watchlist-table_wrapper > .row,
+#signals-table_wrapper   > .row { margin-left: 0 !important; margin-right: 0 !important; }
+#watchlist-table_wrapper > .row > [class^="col-"],
+#watchlist-table_wrapper > .row > [class*=" col-"],
+#signals-table_wrapper   > .row > [class^="col-"],
+#signals-table_wrapper   > .row > [class*=" col-"] { padding-left: 0 !important; padding-right: 0 !important; }
+
+@media (orientation: landscape) and (max-width: 992px) {
+  #watchlist-controls.dt-control-bar,
+  #signals-controls.dt-control-bar {
+    margin-left: -10px !important;
+    margin-right: -10px !important;
+  }
+}
+
+/* =============================== */
+/* Trades: wrapper alignment + one-line toolbar */
+/* =============================== */
+
+#trades-controls,
+#trades-table_wrapper {
+  width: 100%;
+  box-sizing: border-box;
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+#trades-table_wrapper > .row { margin-left: 0 !important; margin-right: 0 !important; }
+#trades-table_wrapper > .row > [class^="col-"],
+#trades-table_wrapper > .row > [class*=" col-"] { padding-left: 0 !important; padding-right: 0 !important; }
+
+@media (orientation: landscape) and (max-width: 992px) {
+  #trades-controls.dt-control-bar { margin-left: -10px !important; margin-right: -10px !important; }
+}
+
+#trades-controls .dt-row {
+  display: grid;
+  grid-template-columns: 1fr auto;  /* search grows, length snug */
+  align-items: center;
+  column-gap: 8px;
+}
+#trades-controls .flex-grow-1 { min-width: 0; }
+#trades-controls #tr-search   { min-width: 0; }
+#trades-controls #tr-length   { width: auto; }
+
+@media (max-width: 576px) {
+  #trades-controls .dt-row { grid-template-columns: 1fr auto !important; }
+}
+
+/* =============================== */
+/* Positions: wrapper alignment + one-line toolbar */
+/* =============================== */
+
+#positions-controls,
+#positions-table_wrapper {
+  width: 100%;
+  box-sizing: border-box;
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+#positions-table_wrapper > .row { margin-left: 0 !important; margin-right: 0 !important; }
+#positions-table_wrapper > .row > [class^="col-"],
+#positions-table_wrapper > .row > [class*=" col-"] { padding-left: 0 !important; padding-right: 0 !important; }
+
+#positions-controls .dt-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 8px;
+}
+#positions-controls .flex-grow-1 { min-width: 0; }
+#positions-controls #pos-search   { min-width: 0; }
+#positions-controls #pos-length   { width: auto; }
+
+@media (orientation: landscape) and (max-width: 992px) {
+  #positions-controls.dt-control-bar { margin-left: -10px !important; margin-right: -10px !important; }
+}
+
+/* =============================== */
+/* Performance (unified with Signals/Watchlist) */
+/* =============================== */
+
+/* IDs expected in the Performance template:
+   - #performance-root (page wrapper)
+   - #performance-controls (toolbar)
+   - #performance-table (DataTable)
+   - #perf-summary-modal (optional modal)
+*/
+
+/* Compact scale to match other tabs */
+#performance-root {
+  --perf-font-sm: 12px;
+  --perf-font-md: 13px;
+}
+
+/* Title */
+#performance-root h1,
+#performance-root .page-title {
+  font-size: 20px;
+  margin: 0 0 .75rem 0;
+  font-weight: 600;
+}
+
+/* Wrapper alignment (same pattern as other tabs) */
+#performance-controls,
+#performance-table_wrapper {
+  width: 100%;
+  box-sizing: border-box;
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+#performance-table_wrapper > .row { margin-left: 0 !important; margin-right: 0 !important; }
+#performance-table_wrapper > .row > [class^="col-"],
+#performance-table_wrapper > .row > [class*=" col-"] { padding-left: 0 !important; padding-right: 0 !important; }
+
+/* Toolbar: compact controls */
+#performance-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+#performance-controls .btn,
+#performance-controls .btn-group .btn {
+  padding: .25rem .5rem;
+  font-size: var(--perf-font-sm);
+  border-radius: .35rem;
+}
+
+#performance-controls .form-control,
+#performance-controls .form-select {
+  height: 2rem;
+  padding: .25rem .5rem;
+  font-size: var(--perf-font-sm);
+}
+
+/* KPI cards */
+#performance-root .kpi-card,
+#performance-summary .kpi-card {
+  border: 1px solid #eee;
+  border-radius: .5rem;
+  padding: .75rem 1rem;
+  background: #fff;
+}
+#performance-root .kpi-title { font-size: var(--perf-font-sm); color: #666; }
+#performance-root .kpi-value { font-size: 18px; font-weight: 600; }
+
+/* DataTable scale */
+#performance-table { font-size: var(--perf-font-sm); }
+
+#performance-table th,
+#performance-table td {
+  padding: .4rem .5rem;
+  vertical-align: middle;
+  white-space: nowrap;
+  border: 1px solid #ddd;
+}
+
+#performance-table_wrapper .dataTables_length select,
+#performance-table_wrapper .dataTables_filter input {
+  height: 2rem;
+  padding: .25rem .5rem;
+  font-size: var(--perf-font-sm);
+}
+
+/* Responsive tuning */
+@media (max-width: 576px) {
+  #performance-controls { gap: 6px; }
+  #performance-table th, #performance-table td {
+    padding: 4px !important;
+    font-size: 11px !important;
+    line-height: 1.1 !important;
+  }
+}
+
+/* Summary modal scale */
+#perf-summary-modal .modal-body,
+#perf-summary-modal table {
+  font-size: var(--perf-font-sm);
+}
+
+/* Performance control bar: single-line layout */
+#performance-controls .dt-row{
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;              /* keep one line on desktop */
+}
+
+/* Pieces */
+#performance-controls .perf-mode-wrap { flex: 0 0 auto; }
+
+#performance-controls #perf-search{
+  flex: 1 1 auto;                 /* search grows to fill */
+  display: flex;
+  min-width: 0;
+}
+#performance-controls #perf-search input{
+  width: 100%;
+  min-width: 0;
+}
+
+#performance-controls #perf-summary-btn{
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+#performance-controls #perf-length{
+  flex: 0 0 auto;
+}
+
+/* On small screens, allow wrapping */
+@media (max-width: 576px){
+  #performance-controls .dt-row{ flex-wrap: wrap; }
+  #performance-controls #perf-search{ order: 2; flex: 1 1 100%; }
+}
+
+/* ── Trades filter panel: compact, same size as table ───────────── */
+.dash-filters-compact {
+  font-size: 12px !important;
+  padding: 8px 10px !important;
+  border: 1px solid var(--bs-border-color, #e5e7eb);
+  border-radius: .5rem;
+  background: #fff;
+}
+
+.dash-filters-compact .d-flex {
+  flex-wrap: wrap;
+  gap: .20rem .70rem !important;
+  row-gap: .20rem !important;
+  padding-left: 8px !important;
+}
+
+.dash-filters-compact .form-check {
+  margin: 0 .6rem .10rem 0 !important;
+  padding: 0 !important;
+}
+.dash-filters-compact .form-check-inline {
+  margin-right: .6rem !important;
+}
+
+.dash-filters-compact .form-check-label,
+.dash-filters-compact .form-check-input,
+.dash-filters-compact .form-control-sm,
+.dash-filters-compact .form-select-sm {
+  font-size: 12px !important;
+  line-height: 1.1 !important;
+}
+
+.dash-filters-compact .form-check-input {
+  margin-top: 0 !important;
+}
+
+.dash-filters-compact #tr-search {
+  flex: 0 1 220px;
+  min-width: 180px;
+}
+.dash-filters-compact #tr-length {
+  flex: 0 0 110px;
+}
+.dash-filters-compact .ms-auto {
+  margin-left: auto !important;
+}
+
+@media (max-width: 992px) {
+  .dash-filters-compact #tr-search { min-width: 160px; }
+  .dash-filters-compact .d-flex { gap: .18rem .55rem !important; }
+}
+@media (max-width: 576px) {
+  .dash-filters-compact #tr-search { flex: 1 1 100%; min-width: 0; }
+  .dash-filters-compact #tr-length { flex: 0 0 100px; }
+}
+
+/* =============================== */
+/*  Navbar sizing (managed here)   */
+/* =============================== */
+
+.navbar { font-size: 11px; } /* baseline */
+
+.navbar-brand {
+  font-weight: 700;
+  letter-spacing: normal;
+  font-size: 18px;           /* keep autotrades as-is */
+}
+
+/* Menu + dropdown items (+1pt) */
+.navbar-nav .nav-link,
+.dropdown-item {
+  font-size: 13px;           /* was 12 */
+  padding: 4px 10px;
+  line-height: 1.15;
+  color: #000;
+}
+
+/* Notifications dropdown text */
+#notifications-menu li,
+#notifications-menu h6 {
+  font-size: 13px;           /* was 12 */
+}
+
+@media (max-width: 992px) {
+  .navbar-nav .nav-link,
+  .dropdown-item {
+    font-size: 12px;         /* was 11 */
+    padding: 3px 8px;
+  }
+  #notifications-menu li,
+  #notifications-menu h6 { font-size: 12px; }
+}
+
+@media (max-width: 576px) {
+  .navbar { font-size: 10px; }
+  .navbar-brand { font-size: 17px; }
+
+  .navbar-nav .nav-link,
+  .dropdown-item {
+    font-size: 11px;         /* unchanged for mobile */
+    padding: 3px 8px;
+  }
+
+  #notifications-menu li,
+  #notifications-menu h6 { font-size: 11px; }
+}
+
+/* =============================== */
+/*  Fixed Footer Band (Subtle)     */
+/* =============================== */
+
+:root{
+  --footer-height: 22px;
+}
+
+.site-footer{
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1030;
+
+  border-top: 1px solid #dee2e6;
+  background: #f8f9fa;
+
+  font-family: Montserrat, sans-serif;
+  font-size: 10px;        /* readable */
+  line-height: 1.15;
+  opacity: 0.75;
+
+  padding: 2px 0;
+  text-align: center;
+  font-weight: 600;       /* slightly bold */
+}
+
+.site-footer p{
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.site-footer a{
+  color: #000;
+  text-decoration: none;
+  font-weight: 700;       /* link a touch stronger */
+}
+
+.site-footer a:hover{
+  text-decoration: underline;
+}
+
+/* Prevent content hiding behind footer */
+body{
+  padding-bottom: calc(var(--footer-height) + env(safe-area-inset-bottom));
+}
+
+/* Mobile */
+@media (max-width: 576px){
+  :root{ --footer-height: 20px; }
+
+  .site-footer,
+  .site-footer p,
+  .site-footer a{
+    font-size: 9px;
+  }
+}

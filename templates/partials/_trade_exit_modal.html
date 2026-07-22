@@ -1,0 +1,76 @@
+{# templates/partials/_trade_exit_modal.html #}
+<div class="modal fade" id="tradeExitModal" tabindex="-1" aria-hidden="true"
+     aria-labelledby="tradeExitModalLabel">
+  <div class="modal-dialog modal-md modal-dialog-centered">
+    <div class="modal-content" style="font-family:Montserrat,sans-serif;">
+
+      <div class="modal-header py-2 px-3 bg-danger text-white">
+        <div class="w-100">
+          <div class="d-flex align-items-start justify-content-between gap-2">
+            <div>
+              <h5 id="tradeExitModalLabel" class="modal-title fw-bold mb-0" style="font-size:1.05rem;">
+                Exit Trade
+              </h5>
+              <div class="small mt-1" style="font-size:0.95rem;">
+                <span id="pem-userid-head">—</span>
+                <span class="mx-1">|</span>
+                <span id="pem-symbol-head">—</span>
+                <span class="mx-1">|</span>
+                <span id="pem-side-head">—</span>
+                <span class="mx-1">|</span>
+                <span id="pem-price-head">₹0.00</span>
+              </div>
+            </div>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-body px-3 py-2" style="font-size:0.92rem;">
+
+        <input type="hidden" id="pem-userid">
+
+        <div class="row g-2 mb-2">
+          <div class="col-md-6">
+            <label class="form-label mb-1 fw-semibold">Instrument Type</label>
+            <input id="pem-type" class="form-control form-control-sm bg-light text-muted" readonly>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label mb-1 fw-semibold">Open Qty</label>
+            <input id="pem-qty" class="form-control form-control-sm bg-light text-muted" readonly>
+          </div>
+        </div>
+
+        <div class="row g-2 mb-2">
+          <div class="col-md-6">
+            <label class="form-label mb-1 fw-semibold">Last Price</label>
+            <input id="pem-last" class="form-control form-control-sm bg-light text-muted" readonly>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label mb-1 fw-semibold">Equity Ref</label>
+            <input id="pem-equity-ref" class="form-control form-control-sm bg-light text-muted" readonly>
+          </div>
+        </div>
+
+        <div class="mb-2">
+          <label class="form-label mb-1 fw-semibold">Reason</label>
+          <input id="pem-reason" class="form-control form-control-sm" value="MANUAL_EXIT">
+        </div>
+
+        <div id="pem-status" class="text-muted" style="font-size:0.85rem;">Ready.</div>
+      </div>
+
+      <div class="modal-footer py-2 px-3 d-flex justify-content-between">
+        <div id="pem-status-footer" class="small text-muted"></div>
+
+        <div class="d-flex gap-2">
+          <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-danger btn-sm" id="pem-submit-btn">Exit Trade</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>

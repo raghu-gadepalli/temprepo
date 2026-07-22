@@ -1,0 +1,123 @@
+<div class="modal fade" id="signalsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <div class="w-100 d-flex align-items-center justify-content-between gap-2 flex-wrap">
+          <div class="fw-bold d-flex align-items-center gap-2 flex-wrap">
+            <span id="sig-symbol">—</span>
+            <span class="text-muted fw-normal" id="sig-ltp">—</span>
+            <span class="text-muted fw-normal" id="sig-time">—</span>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+      </div>
+
+      <div class="modal-body">
+
+        <style>
+          #signalsModal { font-size: 12px; }
+          #signalsModal table { font-size: 12px; }
+          #signalsModal .state-badge { font-size: 11px; padding: 0.22rem 0.45rem; }
+
+          #signalsModal .state-panel {
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+            overflow: hidden;
+            margin-bottom: 0.75rem;
+            background: #fff;
+          }
+          #signalsModal .state-panel-head {
+            padding: 0.45rem 0.75rem;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            font-weight: 600;
+          }
+          #signalsModal .state-panel-body {
+            padding: 0;
+          }
+          #signalsModal .state-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0;
+          }
+          #signalsModal .state-table th,
+          #signalsModal .state-table td {
+            border: 1px solid #e9ecef;
+            padding: 0.42rem 0.6rem;
+            vertical-align: top;
+          }
+          #signalsModal .state-table th {
+            width: 150px;
+            min-width: 150px;
+            background: #fcfcfc;
+            color: #6c757d;
+            font-weight: 500;
+          }
+          #signalsModal .state-summary {
+            white-space: pre-line;
+            line-height: 1.35;
+            padding: 0.75rem;
+          }
+        </style>
+
+        <div class="row g-3">
+
+          <div class="col-lg-4">
+            <div class="state-panel h-100">
+              <div class="state-panel-head">Current Context</div>
+              <div class="state-panel-body">
+                <table class="state-table">
+                  <tbody id="sig-context-body">
+                    <tr><td colspan="2" class="text-center text-muted">—</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-8">
+            <div class="state-panel h-100">
+              <div class="state-panel-head">Resolved Recommendation</div>
+              <div class="state-panel-body">
+                <table class="state-table">
+                  <tbody id="sig-resolved-body">
+                    <tr><td colspan="2" class="text-center text-muted">—</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div id="sig-resolved-summary" class="state-summary text-muted">—</div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="state-panel">
+          <div class="state-panel-head">Lifecycle Status</div>
+          <div class="state-panel-body">
+            <div class="table-responsive">
+              <table class="table table-sm mb-0 align-middle">
+                <thead>
+                  <tr>
+                    <th>Lifecycle</th>
+                    <th>State</th>
+                    <th>Side</th>
+                    <th>Entry</th>
+                    <th>Continue</th>
+                    <th>Transition</th>
+                    <th>Summary</th>
+                  </tr>
+                </thead>
+                <tbody id="sig-lifecycle-body">
+                  <tr><td colspan="7" class="text-center text-muted">—</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+</div>
