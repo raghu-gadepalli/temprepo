@@ -234,7 +234,7 @@ class AuctionServiceRunner:
                     "checkpoints_written",
                     "checkpoint_state_bytes",
                 ):
-                    timing[key] = writes.get(key, timing[key])
+                    timing[key] = writes[key] if key in writes else timing[key]
 
             if self.mark_processed_enabled:
                 started = perf_counter() if self.profile_timing else 0.0
@@ -266,7 +266,7 @@ class AuctionServiceRunner:
             return None
 
     def _runtime(self, symbol: str) -> SymbolRuntime:
-        runtime = self.runtimes.get(symbol)
+        runtime = self.runtimes[symbol] if symbol in self.runtimes else None
         if runtime is not None:
             return runtime
 
@@ -331,17 +331,17 @@ class AuctionServiceRunner:
         manager_action = result.manager_decision.action.value
         final_action = result.final_decision.action.value
         self.stats.manager_actions[manager_action] = (
-            self.stats.manager_actions.get(manager_action, 0) + 1
+            (self.stats.manager_actions[manager_action] if manager_action in self.stats.manager_actions else 0) + 1
         )
         self.stats.final_actions[final_action] = (
-            self.stats.final_actions.get(final_action, 0) + 1
+            (self.stats.final_actions[final_action] if final_action in self.stats.final_actions else 0) + 1
         )
         if manager_action == "SELECT":
             self.stats.manager_select_count += 1
         if result.final_decision.action is FinalAction.CREATE:
             self.stats.would_create_count += 1
         action = signal_result.applied_action
-        self.stats.signal_actions[action] = self.stats.signal_actions.get(action, 0) + 1
+        self.stats.signal_actions[action] = (self.stats.signal_actions[action] if action in self.stats.signal_actions else 0) + 1
         selected = result.final_decision.selected_candidate
         self.stats.decision_rows.append({
             "symbol": result.symbol,
@@ -363,9 +363,9 @@ class AuctionServiceRunner:
             ),
             "decision_reason_codes": "|".join(result.final_decision.reason_codes),
             "active_context_resolution_applied": bool(
-                result.final_decision.diagnostics.get(
+                result.final_decision.diagnostics[
                     "active_context_resolution_applied"
-                )
+                ]
             ),
         })
         self.stats.signal_rows.append({
@@ -385,10 +385,10 @@ class AuctionServiceRunner:
             ),
             "reason_codes": "|".join(signal_result.reason_codes),
             "defensive_guard_triggered": bool(
-                signal_result.diagnostics.get("defensive_guard_triggered")
+                signal_result.diagnostics["defensive_guard_triggered"]
             ),
             "idempotent_create_retry": bool(
-                signal_result.diagnostics.get("idempotent_create_retry")
+                signal_result.diagnostics["idempotent_create_retry"]
             ),
         })
 
@@ -411,10 +411,10 @@ class AuctionServiceRunner:
             "runner_record_ms",
             "total_ms",
         )
-        total_wall_ms = sum(float(row.get("total_ms") or 0.0) for row in rows)
+        total_wall_ms = sum(float(row["total_ms"] if "total_ms" in row else 0.0) for row in rows)
         output = []
         for stage in stage_fields:
-            values = [float(row.get(stage) or 0.0) for row in rows]
+            values = [float(row[stage] if stage in row else 0.0) for row in rows]
             ordered = sorted(values)
             total_ms = sum(values)
             p95_index = max(0, min(len(ordered) - 1, ceil(len(ordered) * 0.95) - 1))
@@ -436,7 +436,11 @@ class AuctionServiceRunner:
     def checkpoint_rows(self) -> List[dict]:
         rows = []
         for symbol, runtime in sorted(self.runtimes.items()):
-            result = runtime.engine._last_results.get(symbol)
+            result = (
+                runtime.engine._last_results[symbol]
+                if symbol in runtime.engine._last_results
+                else None
+            )
             rows.append({
                 "trading_day": self.trading_day.isoformat(),
                 "symbol": symbol,
@@ -468,19 +472,13 @@ def _elapsed_ms(started: float) -> float:
     return (perf_counter() - started) * 1000.0
 
 
-def _snapshot_identity(snapshot: Any) -> Tuple[str, datetime]:
-    if isinstance(snapshot, dict):
-        symbol = snapshot.get("symbol")
-        snapshot_time = snapshot.get("snapshot_time")
-    else:
-        symbol = getattr(snapshot, "symbol", None)
-        snapshot_time = getattr(snapshot, "snapshot_time", None)
-    key = str(symbol or "").strip().upper()
-    if isinstance(snapshot_time, str):
-        snapshot_time = datetime.fromisoformat(snapshot_time)
-    if not key or not isinstance(snapshot_time, datetime):
-        raise ValueError("Snapshot symbol and snapshot_time are required")
-    return key, snapshot_time
+def _snapshot_identity(snapshot: SnapshotSchema) -> Tuple[str, datetime]:
+    if not isinstance(snapshot, SnapshotSchema):
+        raise TypeError("Auction service runner requires a validated SnapshotSchema")
+    key = snapshot.symbol.strip().upper()
+    if not key:
+        raise ValueError("Snapshot symbol is required")
+    return key, snapshot.snapshot_time
 
 
 __all__ = ["AuctionServiceRunner", "AuctionServiceStats", "SymbolRuntime"]

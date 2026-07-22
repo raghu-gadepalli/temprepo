@@ -227,7 +227,7 @@ class OpportunityLedger:
     ) -> Tuple[OpportunityRecord, ...]:
         symbol = symbol.upper()
         day = snapshot_time.date()
-        prior_day = self._last_day.get(symbol)
+        prior_day = self._last_day[symbol] if symbol in self._last_day else None
         if prior_day is not None and prior_day != day:
             self.reset(symbol)
         self._last_day[symbol] = day
@@ -244,7 +244,11 @@ class OpportunityLedger:
         return self.records(symbol)
 
     def _upsert(self, candidate: SetupCandidate) -> None:
-        record = self._records.get(candidate.opportunity_key)
+        record = (
+            self._records[candidate.opportunity_key]
+            if candidate.opportunity_key in self._records
+            else None
+        )
         if record is None:
             record = OpportunityRecord(
                 opportunity_key=candidate.opportunity_key,
@@ -375,9 +379,17 @@ class OpportunityLedger:
         candidate_id: Optional[str] = None,
     ) -> None:
         record = self._records[opportunity_key]
-        selected = record.candidates.get(candidate_id or "") or record.selected_candidate()
-        if selected is None:
-            raise ValueError(f"Opportunity {opportunity_key} has no ELIGIBLE candidate to select")
+        if candidate_id is None:
+            raise ValueError("candidate_id is required when selecting an opportunity")
+        if candidate_id not in record.candidates:
+            raise ValueError(
+                f"Opportunity {opportunity_key} does not contain candidate {candidate_id}"
+            )
+        selected = record.candidates[candidate_id]
+        if selected.eligibility is not CandidateEligibility.ELIGIBLE:
+            raise ValueError(
+                f"Opportunity {opportunity_key} candidate {candidate_id} is not ELIGIBLE"
+            )
         record.primary_candidate = selected
         record.selected_candidate_id = selected.candidate_id
         record.selected_time = when
@@ -448,15 +460,19 @@ class OpportunityLedger:
         for event in self.events(symbol):
             events_by_key.setdefault(event.opportunity_key, []).append(event)
         return tuple(
-            record.to_dict(events_by_key.get(record.opportunity_key, ()))
+            record.to_dict(
+                events_by_key[record.opportunity_key]
+                if record.opportunity_key in events_by_key
+                else ()
+            )
             for record in self.records(symbol)
         )
 
 
 def _candidate_sort_key(candidate: SetupCandidate) -> Tuple[int, int, datetime, str]:
     return (
-        _ELIGIBILITY_RANK.get(candidate.eligibility, 99),
-        _ROLE_RANK.get(candidate.candidate_role.value, 99),
+        _ELIGIBILITY_RANK[candidate.eligibility],
+        _ROLE_RANK[candidate.candidate_role.value],
         candidate.candidate_time,
         candidate.candidate_id,
     )

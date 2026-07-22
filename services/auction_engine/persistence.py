@@ -141,13 +141,16 @@ class AuctionPersistenceCoordinator:
             )
             payload = self._opportunity_payload(
                 record,
-                events_by_key.get(record.opportunity_key, ()),
+                events_by_key[record.opportunity_key] if record.opportunity_key in events_by_key else (),
                 signal_id=linked_signal_id,
             )
             digest = _stable_hash(payload.model_dump(mode="json"))
             if self.profile_timing_enabled:
                 projection_ms += _elapsed_ms(started)
-            if self._record_hashes.get(record.opportunity_key) == digest:
+            if (
+                record.opportunity_key in self._record_hashes
+                and self._record_hashes[record.opportunity_key] == digest
+            ):
                 continue
             started = perf_counter() if self.profile_timing_enabled else 0.0
             StockOpportunity.upsert(payload)
@@ -205,9 +208,10 @@ class AuctionPersistenceCoordinator:
             target_basis=candidate.target_basis,
             target_reference_price=candidate.target_reference_price,
             source_auction_state=candidate.auction_state.value,
-            established_trend_side=str(
-                candidate.diagnostics.get("established_trend_side") or "UNKNOWN"
-            ).upper(),
+            established_trend_side=_required_candidate_diagnostic_text(
+                candidate,
+                "established_trend_side",
+            ),
             candidate_interpretations_json=record.candidate_interpretations(),
             event_history_json=[event.to_dict() for event in event_history],
             reason_codes_json=list(record.reason_codes),
@@ -245,7 +249,7 @@ class AuctionPersistenceCoordinator:
             engine_version=self.config.engine.engine_version,
             config_version=self.config.engine.config_version,
             last_processed_snapshot_time=ts,
-            last_snapshot_hash=engine._last_input_hashes.get(result.symbol),
+            last_snapshot_hash=_required_last_input_hash(engine, result.symbol),
             checkpoint_status="ACTIVE",
             checkpoint_version=1,
             state_json=sanitize_json(state_json),
@@ -276,6 +280,24 @@ def _stable_hash(value: Any) -> str:
         default=str,
     ).encode("utf-8")
     return sha256(raw).hexdigest()
+
+
+def _required_candidate_diagnostic_text(candidate: Any, key: str) -> str:
+    if key not in candidate.diagnostics:
+        raise ValueError(f"Candidate diagnostic {key} is required for persistence")
+    value = candidate.diagnostics[key]
+    if value is None or not str(value).strip():
+        raise ValueError(f"Candidate diagnostic {key} cannot be empty")
+    return str(value).strip().upper()
+
+
+def _required_last_input_hash(engine: Any, symbol: str) -> str:
+    if symbol not in engine._last_input_hashes:
+        raise ValueError(f"Auction input hash is missing for {symbol}")
+    value = engine._last_input_hashes[symbol]
+    if not value:
+        raise ValueError(f"Auction input hash is empty for {symbol}")
+    return str(value)
 
 
 __all__ = ["AuctionPersistenceCoordinator"]

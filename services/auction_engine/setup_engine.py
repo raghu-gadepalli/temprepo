@@ -151,7 +151,7 @@ class SetupCandidateEngine:
     ) -> Tuple[SetupCandidate, ...]:
         symbol = evidence.symbol
         ts = evidence.snapshot_time
-        prior = self._last_time.get(symbol)
+        prior = self._last_time[symbol] if symbol in self._last_time else None
         if prior is not None and ts.date() != prior.date():
             self.reset(symbol)
         self._last_time[symbol] = ts
@@ -268,8 +268,8 @@ class SetupCandidateEngine:
             source_boundary_status=episode.status,
             source_boundary_resolution=episode.resolution,
             source_boundary_resolution_basis=(
-                str(episode.diagnostics.get("failure_resolution_basis"))
-                if episode.diagnostics.get("failure_resolution_basis")
+                str(episode.diagnostics["failure_resolution_basis"])
+                if episode.diagnostics["failure_resolution_basis"] is not None
                 else None
             ),
             source_boundary_id=episode.boundary_id,
@@ -645,7 +645,7 @@ class SetupCandidateEngine:
             source_boundary_source=episode.boundary_source,
             source_frozen_range_id=episode.frozen_range.range_id,
             source_frozen_range_version=episode.frozen_range.range_version,
-            resolution_basis=str(episode.diagnostics.get("failure_resolution_basis") or "UNKNOWN"),
+            resolution_basis=_required_failure_resolution_basis(episode),
             state_at_failure=auction_state.current_state,
             expires_at=episode.failed_time + timedelta(minutes=self.config.boundary.failure_watch_valid_minutes),
         )
@@ -907,7 +907,7 @@ class SetupCandidateEngine:
             source_boundary_event_key=event_key,
             source_boundary_status=source_boundary["status"],
             source_boundary_resolution=source_boundary["resolution"],
-            source_boundary_resolution_basis=source_boundary.get("resolution_basis"),
+            source_boundary_resolution_basis=source_boundary["resolution_basis"],
             source_boundary_id=str(source_boundary["boundary_id"]),
             source_boundary_side=source_boundary["boundary_side"],
             source_boundary_source=str(source_boundary["boundary_source"]),
@@ -1043,19 +1043,19 @@ class SetupCandidateEngine:
         side: TradeSide,
         boundary_price: float,
     ) -> List[Tuple[float, str]]:
-        levels = (evidence.raw_facts or {}).get("source_levels") or {}
+        levels = _required_raw_levels(evidence)
         candidates: List[Tuple[float, str]] = []
         for label, raw in (
-            ("PREV_DAY_HIGH", levels.get("prev_day_high")),
-            ("OPENING_RANGE_HIGH", levels.get("opening_range_high")),
-            ("PREV_DAY_LOW", levels.get("prev_day_low")),
-            ("OPENING_RANGE_LOW", levels.get("opening_range_low")),
+            ("PREV_DAY_HIGH", levels["prev_day_high"]),
+            ("OPENING_RANGE_HIGH", levels["opening_range_high"]),
+            ("PREV_DAY_LOW", levels["prev_day_low"]),
+            ("OPENING_RANGE_LOW", levels["opening_range_low"]),
         ):
             try:
                 price = float(raw)
             except (TypeError, ValueError):
                 continue
-            minimum_gap = (evidence.atr or 0.0) * self.config.boundary.acceptance_close_buffer_atr
+            minimum_gap = _required_evidence_atr(evidence) * self.config.boundary.acceptance_close_buffer_atr
             beyond_broken_boundary = (
                 price > boundary_price + minimum_gap
                 if side is TradeSide.BUY
@@ -1246,7 +1246,7 @@ class SetupCandidateEngine:
         )
 
     def _established_side(self, state_diag: Mapping[str, Any]) -> TradeSide:
-        raw = str(state_diag.get("established_trend_side") or "").upper()
+        raw = str(state_diag["established_trend_side"]).upper()
         if raw in {"UP", "BUY"}:
             return TradeSide.BUY
         if raw in {"DOWN", "SELL"}:
@@ -1314,7 +1314,7 @@ class SetupCandidateEngine:
         return {
             "status": episode.status,
             "resolution": episode.resolution,
-            "resolution_basis": episode.diagnostics.get("failure_resolution_basis"),
+            "resolution_basis": episode.diagnostics["failure_resolution_basis"],
             "boundary_id": episode.boundary_id,
             "boundary_side": episode.boundary_side,
             "boundary_source": episode.boundary_source,
@@ -1449,6 +1449,41 @@ class SetupCandidateEngine:
     def _append_once(items: List[str], code: str) -> None:
         if code not in items:
             items.append(code)
+
+
+def _required_raw_levels(evidence: EvidenceSnapshot) -> Mapping[str, Any]:
+    if "source_levels" not in evidence.raw_facts:
+        raise ValueError("Evidence raw_facts.source_levels is required")
+    levels = evidence.raw_facts["source_levels"]
+    if not isinstance(levels, Mapping):
+        raise ValueError("Evidence raw_facts.source_levels must be a mapping")
+    required = {
+        "prev_day_high",
+        "opening_range_high",
+        "prev_day_low",
+        "opening_range_low",
+    }
+    missing = required.difference(levels)
+    if missing:
+        raise ValueError(
+            f"Evidence raw_facts.source_levels missing keys: {sorted(missing)}"
+        )
+    return levels
+
+
+def _required_failure_resolution_basis(episode: BoundaryEpisode) -> str:
+    if "failure_resolution_basis" not in episode.diagnostics:
+        raise ValueError("Boundary episode failure_resolution_basis is required")
+    value = episode.diagnostics["failure_resolution_basis"]
+    if value is None or not str(value).strip():
+        raise ValueError("Boundary episode failure_resolution_basis cannot be empty")
+    return str(value).strip().upper()
+
+
+def _required_evidence_atr(evidence: EvidenceSnapshot) -> float:
+    if evidence.atr is None or evidence.atr <= 0:
+        raise ValueError("Auction evidence ATR is required and must be positive")
+    return float(evidence.atr)
 
 
 __all__ = ["SetupCandidateEngine"]

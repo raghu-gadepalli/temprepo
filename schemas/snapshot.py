@@ -130,7 +130,7 @@ class ADXBlock(StrictBaseModel):
 
 
 class ATRBlock(StrictBaseModel):
-    value: Optional[float]
+    value: float = Field(gt=0)
     band: str
     pct: Optional[float]
 

@@ -100,9 +100,11 @@ def decode_checkpoint_value(value: Any) -> Any:
     if not isinstance(value, dict):
         raise TypeError(f"Invalid checkpoint payload value: {type(value)!r}")
 
-    kind = value.get("__kind__")
-    if not kind:
+    if "__kind__" not in value:
         return {key: decode_checkpoint_value(item) for key, item in value.items()}
+    kind = value["__kind__"]
+    if not isinstance(kind, str) or not kind:
+        raise ValueError("Checkpoint __kind__ must be a non-empty string")
     if kind == "datetime":
         return datetime.fromisoformat(value["value"])
     if kind == "date":
@@ -122,31 +124,52 @@ def decode_checkpoint_value(value: Any) -> Any:
             key: decode_checkpoint_value(item)
             for key, item in value["data"].items()
         }
-        # Older Phase-5A4 rows encoded ``str, Enum`` fields as JSON strings.
-        # Coerce decoded dataclass fields from their annotations so those rows
-        # remain restorable while new checkpoints preserve explicit enum tags.
         annotations = get_type_hints(data_type)
+        missing_annotations = set(data).difference(annotations)
+        if missing_annotations:
+            raise ValueError(
+                f"Checkpoint dataclass {data_type.__name__} has untyped fields: "
+                f"{sorted(missing_annotations)}"
+            )
         data = {
-            key: _coerce_annotated_value(annotations.get(key), item)
+            key: _coerce_annotated_value(annotations[key], item)
             for key, item in data.items()
         }
         return data_type(**data)
     if kind == "deque":
+        _require_codec_keys(value, {"__kind__", "items", "maxlen"}, kind)
         return deque(
-            (decode_checkpoint_value(item) for item in value.get("items", ())),
-            maxlen=value.get("maxlen"),
+            (decode_checkpoint_value(item) for item in value["items"]),
+            maxlen=value["maxlen"],
         )
     if kind == "tuple":
-        return tuple(decode_checkpoint_value(item) for item in value.get("items", ()))
+        _require_codec_keys(value, {"__kind__", "items"}, kind)
+        return tuple(decode_checkpoint_value(item) for item in value["items"])
     if kind == "set":
-        return {decode_checkpoint_value(item) for item in value.get("items", ())}
+        _require_codec_keys(value, {"__kind__", "items"}, kind)
+        return {decode_checkpoint_value(item) for item in value["items"]}
     if kind == "dict":
+        _require_codec_keys(value, {"__kind__", "items"}, kind)
         return {
             decode_checkpoint_value(key): decode_checkpoint_value(item)
-            for key, item in value.get("items", ())
+            for key, item in value["items"]
         }
     raise ValueError(f"Unknown checkpoint kind: {kind}")
 
+
+
+def _require_codec_keys(
+    value: dict[str, Any],
+    required: set[str],
+    kind: str,
+) -> None:
+    missing = required.difference(value)
+    extra = set(value).difference(required)
+    if missing or extra:
+        raise ValueError(
+            f"Invalid {kind} checkpoint payload; "
+            f"missing={sorted(missing)} extra={sorted(extra)}"
+        )
 
 def _coerce_annotated_value(annotation: Any, value: Any) -> Any:
     """Coerce JSON-decoded legacy values using a trusted dataclass annotation."""
@@ -157,14 +180,17 @@ def _coerce_annotated_value(annotation: Any, value: Any) -> Any:
     args = get_args(annotation)
 
     if origin is Union:
+        errors = []
         for option in args:
             if option is type(None):
                 continue
             try:
                 return _coerce_annotated_value(option, value)
-            except (TypeError, ValueError):
-                continue
-        return value
+            except (TypeError, ValueError) as exc:
+                errors.append(str(exc))
+        raise ValueError(
+            f"Checkpoint value {value!r} does not match {annotation!r}: {errors}"
+        )
 
     if origin in (list, tuple, set, frozenset):
         if not args:

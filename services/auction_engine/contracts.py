@@ -897,7 +897,11 @@ class SignalCreatePayload(ContractModel):
     def _validate_payload(self) -> "SignalCreatePayload":
         if self.side not in (TradeSide.BUY, TradeSide.SELL):
             raise ValueError("SignalCreatePayload.side must be BUY or SELL")
-        initiated = self.meta_json.get("initiated_setup_label")
+        initiated = (
+            self.meta_json["initiated_setup_label"]
+            if "initiated_setup_label" in self.meta_json
+            else None
+        )
         if initiated is not None and str(initiated).strip().upper() != self.setup_label:
             raise ValueError("meta_json initiated_setup_label must match setup_label")
         return self

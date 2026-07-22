@@ -42,7 +42,7 @@ class DecisionEngine:
         }
 
         if manager.action is ManagerAction.NO_ACTION:
-            if int(manager.diagnostics.get("active_watch_count") or 0) > 0:
+            if int(manager.diagnostics["active_watch_count"]) > 0:
                 action = LocalDecisionAction.WATCH
                 reasons: Tuple[str, ...] = (
                     "LOCAL_WATCH_NO_ELIGIBLE_OPPORTUNITY_YET",

@@ -83,8 +83,9 @@ class ActiveContextProvider:
                 diagnostics={"error": f"{type(exc).__name__}: {exc}"},
             )
 
+        cached_rows = self._signal_cache[key] if key in self._signal_cache else ()
         active_signals = [
-            row for row in self._signal_cache.get(key, ())
+            row for row in cached_rows
             if self._signal_active_as_of(row, snapshot_time)
         ]
         active_signals.sort(
@@ -126,7 +127,7 @@ class ActiveContextProvider:
             diagnostics={
                 "lifecycle": self.lifecycle,
                 "time_basis": "CAUSAL_AS_OF_SNAPSHOT",
-                "cached_signal_rows": len(self._signal_cache.get(key, ())),
+                "cached_signal_rows": len(cached_rows),
                 "active_signal_count": len(active_signals),
             },
         )

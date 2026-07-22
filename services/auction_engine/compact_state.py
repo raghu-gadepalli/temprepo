@@ -43,7 +43,14 @@ def restore_dataclass(cls: type, payload: Mapping[str, Any], *, overrides: Dict[
     for field in fields(cls):
         if field.name not in payload:
             continue
-        annotation = overrides.get(field.name, hints.get(field.name, Any))
+        if field.name in overrides:
+            annotation = overrides[field.name]
+        elif field.name in hints:
+            annotation = hints[field.name]
+        else:
+            raise ValueError(
+                f"Missing type annotation for {cls.__name__}.{field.name}"
+            )
         kwargs[field.name] = restore_typed(payload[field.name], annotation)
     return cls(**kwargs)
 

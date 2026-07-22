@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 from configs.auction_engine_config import AUCTION_ENGINE_CONFIG, AuctionEngineConfig
 from services.auction_engine.contracts import (
@@ -221,7 +221,7 @@ class AuctionStateEngine:
 
     def evaluate(self, evidence: EvidenceSnapshot) -> StateEvaluation:
         symbol = evidence.symbol
-        memory = self._memory.get(symbol)
+        memory = self._memory[symbol] if symbol in self._memory else None
         if memory is None or memory.trading_day != evidence.trading_day:
             memory = _StateMemory(trading_day=evidence.trading_day)
             self._memory[symbol] = memory
@@ -413,9 +413,9 @@ class AuctionStateEngine:
         compression = evidence.compression
         boundary = evidence.boundary
 
-        move_atr = float(bar.move_atr or 0.0)
-        body = float(bar.body_fraction or 0.0)
-        close_position = bar.close_position if bar.close_position is not None else 0.5
+        move_atr = _required_number(bar.move_atr, "bar.move_atr")
+        body = _required_number(bar.body_fraction, "bar.body_fraction")
+        close_position = _required_number(bar.close_position, "bar.close_position")
         directional_edge = self.evidence_cfg.directional_close_position
         strong_body = body >= self.evidence_cfg.strong_bar_body_fraction
         strong_up = bool(
@@ -468,17 +468,17 @@ class AuctionStateEngine:
         high_overlap = overlap is not None and overlap >= self.cfg.balance_overlap_min
         balance = bool(low_efficiency and high_overlap)
 
-        raw_states = evidence.raw_facts.get("source_states", {}) if evidence.raw_facts else {}
-        raw_structure = evidence.raw_facts.get("source_structure", {}) if evidence.raw_facts else {}
+        raw_states = _required_raw_section(evidence, "source_states")
+        raw_structure = _required_raw_section(evidence, "source_structure")
         cumulative_day_flip_count = max(
-            _as_int(raw_states.get("hma_flip_count")),
-            _as_int(raw_states.get("vwap_flip_count")),
-            _as_int(raw_structure.get("structure_flip_count")),
+            _strict_int(raw_states["hma_flip_count"], "source_states.hma_flip_count"),
+            _strict_int(raw_states["vwap_flip_count"], "source_states.vwap_flip_count"),
+            _strict_int(raw_structure["structure_flip_count"], "source_structure.structure_flip_count"),
         )
 
         current_hma_direction = _direction_from_text(trend.hma_order)
         current_vwap_direction = _direction_from_text(trend.vwap_side)
-        current_structure_direction = _direction_from_text(raw_structure.get("raw_side"))
+        current_structure_direction = _direction_from_text(raw_structure["raw_side"])
         current_bar_direction = bar.direction
         local_flip_counts = {
             "hma": _rolling_flip_count(memory.hma_direction_history, current_hma_direction, self.cfg.history_bars),
@@ -1089,7 +1089,7 @@ class AuctionStateEngine:
         level = memory.trend_protection_level
         if side not in (DirectionalBias.UP, DirectionalBias.DOWN) or level is None:
             return False
-        tolerance = (evidence.atr or 0.0) * self.cfg.failure_level_breach_atr
+        tolerance = _required_evidence_atr(evidence) * self.cfg.failure_level_breach_atr
         if side == DirectionalBias.UP:
             return evidence.close < level - tolerance
         return evidence.close > level + tolerance
@@ -1103,7 +1103,7 @@ class AuctionStateEngine:
         level = memory.failure_level
         if side not in (DirectionalBias.UP, DirectionalBias.DOWN) or level is None:
             return False
-        tolerance = (evidence.atr or 0.0) * self.cfg.failure_level_breach_atr
+        tolerance = _required_evidence_atr(evidence) * self.cfg.failure_level_breach_atr
         if side == DirectionalBias.UP:
             return evidence.close < level - tolerance
         return evidence.close > level + tolerance
@@ -1114,7 +1114,7 @@ class AuctionStateEngine:
         evidence: EvidenceSnapshot,
     ) -> float:
         level = memory.failure_level
-        atr = evidence.atr or 0.0
+        atr = _required_evidence_atr(evidence)
         if level is None or atr <= 0.0:
             return 0.0
         if memory.established_trend_side == DirectionalBias.UP:
@@ -1170,7 +1170,7 @@ class AuctionStateEngine:
             return
 
         memory.leg_age_bars += 1
-        atr = evidence.atr or 0.0
+        atr = _required_evidence_atr(evidence)
         tolerance = atr * self.cfg.current_leg_progress_tolerance_atr
         if side == DirectionalBias.UP:
             new_extreme = evidence.bar.high
@@ -1280,7 +1280,7 @@ class AuctionStateEngine:
             return AuctionStateName.REVERSAL, ("REVERSAL_EPISODE_HELD",)
 
         if flags["trend_failure_ready"]:
-            reason = str(flags.get("failure_confirmation_reason") or "STRUCTURAL_FAILURE_CONFIRMED")
+            reason = str(flags["failure_confirmation_reason"])
             return AuctionStateName.TREND_FAILURE, (f"TREND_FAILURE_{reason}",)
 
         if flags["chaos_ready"] and current not in {
@@ -1479,7 +1479,7 @@ class AuctionStateEngine:
             AuctionStateName.REVERSAL: self.cfg.reversal_min_hold_bars,
             AuctionStateName.CHAOTIC_ROTATION: self.cfg.chaotic_min_hold_bars,
         }
-        return mapping.get(state, self.cfg.minimum_state_hold_bars)
+        return mapping[state] if state in mapping else self.cfg.minimum_state_hold_bars
 
     # ------------------------------------------------------------------
     # Transition side effects and episode anchors
@@ -1493,7 +1493,7 @@ class AuctionStateEngine:
         flags: Dict[str, Any],
     ) -> None:
         if selected == AuctionStateName.FRESH_EXPANSION:
-            side = DirectionalBias(flags.get("expansion_direction", "UNKNOWN"))
+            side = DirectionalBias(flags["expansion_direction"])
             if side in (DirectionalBias.UP, DirectionalBias.DOWN):
                 self._establish_trend(memory, evidence, side, anchor_from_bar=True)
             memory.trend_neutral_candidate_bars = 0
@@ -1633,13 +1633,13 @@ class AuctionStateEngine:
                     evidence.snapshot_time,
                     f"TREND_FAILURE_TERMINATED_TO_{selected.value}",
                 )
-            elif flags.get("trend_neutralisation_ready") and memory.failure_episode_key:
+            elif flags["trend_neutralisation_ready"] and memory.failure_episode_key:
                 self._terminate_failure_episode(
                     memory,
                     evidence.snapshot_time,
                     f"FAILURE_WATCH_TERMINATED_BY_{selected.value}",
                 )
-            if flags.get("trend_neutralisation_ready") or previous == AuctionStateName.TREND_FAILURE:
+            if flags["trend_neutralisation_ready"] or previous == AuctionStateName.TREND_FAILURE:
                 self._clear_trend(memory)
 
         elif selected == AuctionStateName.UNKNOWN and previous == AuctionStateName.TREND_FAILURE:
@@ -1675,7 +1675,7 @@ class AuctionStateEngine:
                 AuctionStateName.CHAOTIC_ROTATION,
                 AuctionStateName.UNKNOWN,
             }
-            and flags.get("trend_neutralisation_ready")
+            and flags["trend_neutralisation_ready"]
             and memory.established_trend_side in (DirectionalBias.UP, DirectionalBias.DOWN)
         ):
             if memory.failure_episode_key:
@@ -1740,7 +1740,7 @@ class AuctionStateEngine:
         side = memory.established_trend_side
         if side not in (DirectionalBias.UP, DirectionalBias.DOWN):
             return False
-        atr = evidence.atr or 0.0
+        atr = _required_evidence_atr(evidence)
         minimum_improvement = atr * self.cfg.trend_protection_min_improvement_atr
         prior = memory.trend_protection_level
         if not force and prior is not None:
@@ -1953,11 +1953,11 @@ class AuctionStateEngine:
     # Diagnostics
     # ------------------------------------------------------------------
     def _update_rotation_memory(self, memory: _StateMemory, evidence: EvidenceSnapshot) -> None:
-        raw_structure = evidence.raw_facts.get("source_structure", {}) if evidence.raw_facts else {}
+        raw_structure = _required_raw_section(evidence, "source_structure")
         observations = (
             (memory.hma_direction_history, _direction_from_text(evidence.trend.hma_order)),
             (memory.vwap_direction_history, _direction_from_text(evidence.trend.vwap_side)),
-            (memory.structure_direction_history, _direction_from_text(raw_structure.get("raw_side"))),
+            (memory.structure_direction_history, _direction_from_text(raw_structure["raw_side"])),
             (memory.bar_direction_history, evidence.bar.direction),
         )
         for history, direction in observations:
@@ -1985,8 +1985,13 @@ class AuctionStateEngine:
         return supports
 
     def _enough_history(self, evidence: EvidenceSnapshot, memory: _StateMemory) -> bool:
-        source_windows = evidence.raw_facts.get("source_windows", {}) if evidence.raw_facts else {}
-        sod_bars = _as_int((source_windows.get("sod") or {}).get("bars"))
+        source_windows = _required_raw_section(evidence, "source_windows")
+        if "sod" not in source_windows or not isinstance(source_windows["sod"], Mapping):
+            raise ValueError("Evidence raw_facts.source_windows.sod is required")
+        sod_bars = _strict_int(
+            source_windows["sod"]["bars"],
+            "source_windows.sod.bars",
+        )
         observed = max(sod_bars, memory.observation_count + 1)
         return observed >= self.evidence_cfg.minimum_history_bars
 
@@ -2073,7 +2078,7 @@ class AuctionStateEngine:
         evidence: EvidenceSnapshot,
         flags: Dict[str, Any],
     ) -> Tuple[ConfidenceChannel, ...]:
-        coverage = evidence.data_quality.coverage or 0.0
+        coverage = _required_number(evidence.data_quality.coverage, "data_quality.coverage")
         efficiency = flags["efficiency"]
         overlap = flags["overlap"]
         balance_score = 0.0
@@ -2084,7 +2089,7 @@ class AuctionStateEngine:
         if flags["compression_ready"]:
             balance_score += 25.0
 
-        move = abs(float(flags["move_atr"] or 0.0))
+        move = abs(_required_number(flags["move_atr"], "flags.move_atr"))
         expansion_score = min(45.0, move * 45.0)
         expansion_score += 25.0 if flags["boundary_outside"] else 0.0
         expansion_score += 15.0 if flags["strong_up"] or flags["strong_down"] else 0.0
@@ -2208,11 +2213,43 @@ def _fact(
     )
 
 
-def _as_int(value: Any) -> int:
+
+def _required_evidence_atr(evidence: EvidenceSnapshot) -> float:
+    if evidence.atr is None or evidence.atr <= 0:
+        raise ValueError("Auction evidence ATR is required and must be positive")
+    return float(evidence.atr)
+
+
+def _required_number(value: Any, path: str) -> float:
+    if value is None or isinstance(value, bool):
+        raise ValueError(f"{path} is required and must be numeric")
     try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{path} is required and must be numeric") from exc
+    if number != number or number in (float("inf"), float("-inf")):
+        raise ValueError(f"{path} must be finite")
+    return number
+
+def _required_raw_section(
+    evidence: EvidenceSnapshot,
+    key: str,
+) -> Mapping[str, Any]:
+    if key not in evidence.raw_facts:
+        raise ValueError(f"Evidence raw_facts.{key} is required")
+    section = evidence.raw_facts[key]
+    if not isinstance(section, Mapping):
+        raise ValueError(f"Evidence raw_facts.{key} must be a mapping")
+    return section
+
+
+def _strict_int(value: Any, path: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{path} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{path} must be an integer") from exc
 
 
 def _clamp100(value: float) -> float:

@@ -163,7 +163,7 @@ class BoundaryEpisodeEngine:
     ) -> BoundaryEvaluation:
         symbol = evidence.symbol
         ts = evidence.snapshot_time
-        last_time = self._last_time.get(symbol)
+        last_time = self._last_time[symbol] if symbol in self._last_time else None
         if last_time is not None:
             if ts < last_time and self.config.state.strict_chronology:
                 raise BoundaryChronologyError(
@@ -175,7 +175,7 @@ class BoundaryEpisodeEngine:
 
         observation = evidence.boundary
         eligible_observation = observation if self._observation_allowed(observation) else None
-        memory = self._current.get(symbol)
+        memory = self._current[symbol] if symbol in self._current else None
         previous_status = memory.status if memory is not None else None
         closed_episode: Optional[BoundaryEpisode] = None
         handoff_reason: Optional[str] = None
@@ -449,7 +449,7 @@ class BoundaryEpisodeEngine:
 
         structural_key = self._structural_key(evidence, observation)
         seq_key = (evidence.symbol, structural_key)
-        sequence = self._sequences.get(seq_key, 0) + 1
+        sequence = (self._sequences[seq_key] if seq_key in self._sequences else 0) + 1
         self._sequences[seq_key] = sequence
         event_key = stable_key(
             "BOUNDARY_EVENT",
@@ -604,7 +604,11 @@ class BoundaryEpisodeEngine:
             memory.consecutive_inside_closes += 1
             memory.consecutive_acceptance_closes = 0
             depth = abs(offsets["close_offset_atr"])
-            memory.reentry_depth_atr = max(memory.reentry_depth_atr or 0.0, depth)
+            memory.reentry_depth_atr = (
+                depth
+                if memory.reentry_depth_atr is None
+                else max(memory.reentry_depth_atr, depth)
+            )
             memory.failure_followthrough_atr = max(
                 memory.failure_followthrough_atr,
                 self._failure_followthrough(memory, evidence),
@@ -617,7 +621,7 @@ class BoundaryEpisodeEngine:
                     memory.failure_followthrough_atr >= self.cfg.failure_followthrough_atr
                 )
                 deep_reentry_hold = bool(
-                    (memory.reentry_depth_atr or 0.0)
+                    (memory.reentry_depth_atr if memory.reentry_depth_atr is not None else 0.0)
                     >= self.cfg.failure_reentry_depth_atr
                     * self.cfg.failure_deep_reentry_multiplier
                 )
@@ -708,7 +712,7 @@ class BoundaryEpisodeEngine:
     def _detect_retest(self, memory: _EpisodeMemory, evidence: EvidenceSnapshot) -> bool:
         if memory.first_outside_close_time is None:
             return False
-        tolerance = self.cfg.acceptance_retest_tolerance_atr * (evidence.atr or 0.0)
+        tolerance = self.cfg.acceptance_retest_tolerance_atr * _required_evidence_atr(evidence)
         if memory.boundary_side is BoundarySide.UPPER:
             touched = evidence.bar.low <= memory.boundary_price + tolerance
             held = evidence.close >= memory.boundary_price - tolerance
@@ -917,7 +921,11 @@ class BoundaryEpisodeEngine:
             "observed_range_version": observation.range_version if observation else None,
             "observed_range_low": observation.range_low if observation else None,
             "observed_range_high": observation.range_high if observation else None,
-            "last_terminal": self._last_terminal.get(evidence.symbol),
+            "last_terminal": (
+                self._last_terminal[evidence.symbol]
+                if evidence.symbol in self._last_terminal
+                else None
+            ),
         }
         if memory is None:
             return diagnostics
@@ -1079,6 +1087,12 @@ class BoundaryEpisodeEngine:
             source_path=source_path,
             quality=QualityStatus.GOOD,
         )
+
+
+def _required_evidence_atr(evidence: EvidenceSnapshot) -> float:
+    if evidence.atr is None or evidence.atr <= 0:
+        raise ValueError("Auction evidence ATR is required and must be positive")
+    return float(evidence.atr)
 
 
 __all__ = [

@@ -15,6 +15,8 @@ import hashlib
 import json
 from typing import Any, Deque, Dict, Iterable, List, Mapping, Optional
 
+from schemas.snapshot import SnapshotSchema
+
 from configs.auction_engine_config import AUCTION_ENGINE_CONFIG, AuctionEngineConfig
 from services.auction_engine.contracts import (
     AuctionEngineResult,
@@ -99,13 +101,17 @@ class AuctionEngine:
 
     def evaluate_snapshot(
         self,
-        snapshot: Any,
+        snapshot: SnapshotSchema,
         *,
         equity_ref: Optional[str] = None,
     ) -> AuctionEngineResult:
+        if not isinstance(snapshot, SnapshotSchema):
+            raise TypeError(
+                "AuctionEngine.evaluate_snapshot requires a validated SnapshotSchema"
+            )
         symbol, snapshot_time = _snapshot_identity(snapshot)
         input_hash = _snapshot_content_hash(snapshot)
-        last_result = self._last_results.get(symbol)
+        last_result = self._last_results[symbol] if symbol in self._last_results else None
         if last_result is not None:
             if (
                 snapshot_time < last_result.snapshot_time
@@ -119,7 +125,12 @@ class AuctionEngine:
                 self.reset(symbol)
                 last_result = None
             elif snapshot_time == last_result.snapshot_time:
-                if self._last_input_hashes.get(symbol) == input_hash:
+                prior_hash = (
+                    self._last_input_hashes[symbol]
+                    if symbol in self._last_input_hashes
+                    else None
+                )
+                if prior_hash == input_hash:
                     return last_result
                 if self.config.state.strict_chronology:
                     raise AuctionStateChronologyError(
@@ -162,7 +173,11 @@ class AuctionEngine:
         selected_record = None
         if manager.selected_candidate_id:
             for record in self.opportunity_ledger.active_eligible(symbol):
-                candidate = record.candidates.get(manager.selected_candidate_id)
+                candidate = (
+                    record.candidates[manager.selected_candidate_id]
+                    if manager.selected_candidate_id in record.candidates
+                    else None
+                )
                 if candidate is not None and candidate.eligibility.value == "ELIGIBLE":
                     selected = candidate
                     selected_record = record
@@ -525,9 +540,13 @@ class AuctionEngine:
             "engine_version": self.config.engine.engine_version,
             "config_version": self.config.engine.config_version,
             "symbol": key,
-            "history": list(self._history.get(key, ())),
-            "last_result": self._last_results.get(key),
-            "last_input_hash": self._last_input_hashes.get(key),
+            "history": list(self._history[key]) if key in self._history else [],
+            "last_result": self._last_results[key] if key in self._last_results else None,
+            "last_input_hash": (
+                self._last_input_hashes[key]
+                if key in self._last_input_hashes
+                else None
+            ),
             "state_memory": dict(self.state_engine._memory),
             "boundary_current": dict(self.boundary_engine._current),
             "boundary_last_time": dict(self.boundary_engine._last_time),
@@ -557,47 +576,67 @@ class AuctionEngine:
             "config_version": self.config.engine.config_version,
             "symbol": key,
         }
+        required = set(expected) | {
+            "history", "last_result", "last_input_hash", "state_memory",
+            "boundary_current", "boundary_last_time", "boundary_sequences",
+            "boundary_last_terminal", "setup_initiation", "setup_failed",
+            "setup_emitted_once", "setup_completed", "setup_last_time",
+            "ledger_records", "ledger_events", "ledger_last_day",
+        }
+        missing = required.difference(decoded)
+        extra = set(decoded).difference(required)
+        if missing or extra:
+            raise ValueError(
+                f"Invalid Auction checkpoint keys; "
+                f"missing={sorted(missing)} extra={sorted(extra)}"
+            )
         for field, value in expected.items():
-            if decoded.get(field) != value:
+            actual = decoded[field]
+            if actual != value:
                 raise ValueError(
                     f"Auction checkpoint mismatch for {field}: "
-                    f"{decoded.get(field)!r} != {value!r}"
+                    f"{actual!r} != {value!r}"
                 )
 
         self.reset()
-        history = decoded.get("history") or []
-        self._history[key] = deque(history, maxlen=self.config.state.history_bars)
-        if decoded.get("last_result") is not None:
+        self._history[key] = deque(
+            decoded["history"],
+            maxlen=self.config.state.history_bars,
+        )
+        if decoded["last_result"] is not None:
             self._last_results[key] = decoded["last_result"]
-        if decoded.get("last_input_hash"):
+        if decoded["last_input_hash"] is not None:
             self._last_input_hashes[key] = decoded["last_input_hash"]
 
-        self.state_engine._memory = dict(decoded.get("state_memory") or {})
-        self.boundary_engine._current = dict(decoded.get("boundary_current") or {})
-        self.boundary_engine._last_time = dict(decoded.get("boundary_last_time") or {})
-        self.boundary_engine._sequences = dict(decoded.get("boundary_sequences") or {})
-        self.boundary_engine._last_terminal = dict(decoded.get("boundary_last_terminal") or {})
-        self.setup_engine._initiation = dict(decoded.get("setup_initiation") or {})
-        self.setup_engine._failed = dict(decoded.get("setup_failed") or {})
-        self.setup_engine._emitted_once = set(decoded.get("setup_emitted_once") or set())
-        self.setup_engine._completed = set(decoded.get("setup_completed") or set())
-        self.setup_engine._last_time = dict(decoded.get("setup_last_time") or {})
-        self.opportunity_ledger._records = dict(decoded.get("ledger_records") or {})
-        self.opportunity_ledger._events = list(decoded.get("ledger_events") or [])
-        self.opportunity_ledger._last_day = dict(decoded.get("ledger_last_day") or {})
+        self.state_engine._memory = dict(decoded["state_memory"])
+        self.boundary_engine._current = dict(decoded["boundary_current"])
+        self.boundary_engine._last_time = dict(decoded["boundary_last_time"])
+        self.boundary_engine._sequences = dict(decoded["boundary_sequences"])
+        self.boundary_engine._last_terminal = dict(decoded["boundary_last_terminal"])
+        self.setup_engine._initiation = dict(decoded["setup_initiation"])
+        self.setup_engine._failed = dict(decoded["setup_failed"])
+        self.setup_engine._emitted_once = set(decoded["setup_emitted_once"])
+        self.setup_engine._completed = set(decoded["setup_completed"])
+        self.setup_engine._last_time = dict(decoded["setup_last_time"])
+        self.opportunity_ledger._records = dict(decoded["ledger_records"])
+        self.opportunity_ledger._events = list(decoded["ledger_events"])
+        self.opportunity_ledger._last_day = dict(decoded["ledger_last_day"])
 
     def evaluate_many(
         self,
-        snapshots: Iterable[Any],
+        snapshots: Iterable[SnapshotSchema],
         *,
         equity_refs: Optional[Mapping[str, str]] = None,
     ) -> List[AuctionEngineResult]:
         results: List[AuctionEngineResult] = []
-        refs = equity_refs or {}
+        refs = equity_refs if equity_refs is not None else {}
         for snapshot in snapshots:
             symbol, _ = _snapshot_identity(snapshot)
             results.append(
-                self.evaluate_snapshot(snapshot, equity_ref=refs.get(symbol))
+                self.evaluate_snapshot(
+                    snapshot,
+                    equity_ref=refs[symbol] if symbol in refs else None,
+                )
             )
         return results
 
@@ -644,42 +683,15 @@ def _compact_history_evidence(evidence: EvidenceSnapshot) -> _HistoryEvidence:
     )
 
 
-def _snapshot_identity(snapshot: Any) -> tuple[str, datetime]:
-    if hasattr(snapshot, "symbol") and hasattr(snapshot, "snapshot_time"):
-        symbol = snapshot.symbol
-        snapshot_time = snapshot.snapshot_time
-    elif isinstance(snapshot, Mapping):
-        try:
-            symbol = snapshot["symbol"]
-            snapshot_time = snapshot["snapshot_time"]
-        except KeyError as exc:
-            raise ValueError(f"Required snapshot identity field is missing: {exc.args[0]}") from exc
-    else:
-        raise ValueError(
-            f"AuctionEngine requires SnapshotSchema or a complete validated mapping; "
-            f"received {type(snapshot)!r}"
-        )
-
-    key = str(symbol).strip().upper()
+def _snapshot_identity(snapshot: SnapshotSchema) -> tuple[str, datetime]:
+    key = snapshot.symbol.strip().upper()
     if not key:
         raise ValueError("Snapshot symbol is required")
-    if isinstance(snapshot_time, str):
-        snapshot_time = datetime.fromisoformat(snapshot_time)
-    if not isinstance(snapshot_time, datetime):
-        raise ValueError(f"Snapshot timestamp is required for {key}")
-    return key, snapshot_time
+    return key, snapshot.snapshot_time
 
 
-def _snapshot_content_hash(snapshot: Any) -> str:
-    if hasattr(snapshot, "model_dump"):
-        data = snapshot.model_dump(mode="json", by_alias=True)
-    elif isinstance(snapshot, Mapping):
-        data = dict(snapshot)
-    else:
-        raise ValueError(
-            f"AuctionEngine requires SnapshotSchema or a complete validated mapping; "
-            f"received {type(snapshot)!r}"
-        )
+def _snapshot_content_hash(snapshot: SnapshotSchema) -> str:
+    data = snapshot.model_dump(mode="json", by_alias=True)
     payload = json.dumps(
         data,
         sort_keys=True,

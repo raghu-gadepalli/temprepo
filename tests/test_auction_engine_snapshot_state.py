@@ -349,6 +349,34 @@ class AuctionSnapshotStateTests(unittest.TestCase):
         self.assertNotIn("SnapshotSchema.update_snapshot(", generator)
         self.assertNotIn('"generation_diagnostics"', generator)
 
+    def test_auction_engine_requires_validated_snapshot_schema(self):
+        row = self._rows()[0]
+        with self.assertRaises(TypeError):
+            AuctionEngine(_test_config()).evaluate_snapshot(
+                row.model_dump(mode="python", by_alias=True)
+            )
+
+    def test_incremental_state_missing_required_section_fails(self):
+        engine = AuctionEngine(_test_config())
+        row = self._rows()[0]
+        engine.evaluate_snapshot(row)
+        state = engine.export_incremental_state(row.symbol)
+        del state["state_memory"]
+        with self.assertRaises(ValueError):
+            AuctionEngine(_test_config()).restore_incremental_state(
+                row.symbol,
+                state,
+            )
+
+    def test_all_auction_engine_modules_have_no_dict_get_access(self):
+        for path in sorted(Path("services/auction_engine").glob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            self.assertNotIn(
+                ".get(",
+                source,
+                msg=f"dict.get is not allowed in Auction processing: {path}",
+            )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -15,6 +15,8 @@ from __future__ import annotations
 from datetime import datetime, time
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
+from schemas.snapshot import SnapshotSchema
+
 from configs.auction_engine_config import AUCTION_ENGINE_CONFIG, AuctionEngineConfig
 from services.auction_engine.contracts import (
     BarEvidence,
@@ -66,12 +68,16 @@ class EvidenceBuilder:
 
     def build(
         self,
-        snapshot: Any,
+        snapshot: SnapshotSchema,
         *,
         history: Sequence[EvidenceSnapshot] = (),
         equity_ref: Optional[str] = None,
     ) -> EvidenceSnapshot:
-        data = _snapshot_dict(snapshot)
+        if not isinstance(snapshot, SnapshotSchema):
+            raise EvidenceBuildError(
+                "EvidenceBuilder.build requires a validated SnapshotSchema"
+            )
+        data = snapshot.model_dump(mode="python", by_alias=True)
         symbol = str(data["symbol"]).strip().upper()
         snapshot_time = _as_datetime(data["snapshot_time"])
         if not symbol:
@@ -84,6 +90,10 @@ class EvidenceBuilder:
             raise EvidenceBuildError(f"Snapshot close is invalid for {symbol} @ {snapshot_time}")
 
         atr = _positive_float(_path(data, "indicators.atr.value"))
+        if atr is None:
+            raise EvidenceBuildError(
+                f"Snapshot ATR is invalid for {symbol} @ {snapshot_time}"
+            )
         bar, bar_missing = self._build_bar(data, snapshot_time, close, atr)
         quality = self._build_data_quality(data, snapshot_time, bar_missing)
         price_action = self._build_price_action(data, bar, atr, history, quality)
@@ -96,8 +106,6 @@ class EvidenceBuilder:
         derivatives = self._build_derivatives_context(data, snapshot_time)
 
         reason_codes = list(quality.reason_codes)
-        if atr is None:
-            reason_codes.append("ATR_UNKNOWN")
         if boundary is None:
             reason_codes.append("DYNAMIC_BOUNDARY_UNKNOWN")
 
@@ -202,7 +210,7 @@ class EvidenceBuilder:
             if value is None:
                 missing.append(block)
 
-        history_bars = _as_int(_path(data, "market_windows.sod.bars"), default=0)
+        history_bars = _strict_int(_path(data, "market_windows.sod.bars"), "market_windows.sod.bars")
         required = len(self.cfg.required_top_level_blocks) + 4
         present = max(0, required - len(set(missing)))
         coverage = _clamp(present / required)
@@ -264,11 +272,18 @@ class EvidenceBuilder:
             and direction is bar.direction
         )
 
-        upper_wick = bar.upper_wick_fraction or 0.0
-        lower_wick = bar.lower_wick_fraction or 0.0
+        upper_wick = _required_number(
+            bar.upper_wick_fraction, "bar.upper_wick_fraction"
+        )
+        lower_wick = _required_number(
+            bar.lower_wick_fraction, "bar.lower_wick_fraction"
+        )
+        close_position = _required_number(
+            bar.close_position, "bar.close_position"
+        )
         rejection = bool(
-            (upper_wick >= 0.45 and (bar.close_position or 0.5) <= 0.60)
-            or (lower_wick >= 0.45 and (bar.close_position or 0.5) >= 0.40)
+            (upper_wick >= 0.45 and close_position <= 0.60)
+            or (lower_wick >= 0.45 and close_position >= 0.40)
         )
         rsi = _float(_path(data, "indicators.rsi.value"))
         bb = _float(_path(data, "indicators.bollinger.position"))
@@ -280,9 +295,10 @@ class EvidenceBuilder:
             )
         )
 
-        move_abs = abs(bar.move_atr or 0.0)
-        body = bar.body_fraction or 0.0
-        close_edge = max(bar.close_position or 0.5, 1.0 - (bar.close_position or 0.5))
+        move_abs = abs(_required_number(bar.move_atr, "bar.move_atr"))
+        body = _required_number(bar.body_fraction, "bar.body_fraction")
+        close_position = _required_number(bar.close_position, "bar.close_position")
+        close_edge = max(close_position, 1.0 - close_position)
         strength = 100.0 * _clamp((min(move_abs, 1.0) + body + close_edge) / 3.0)
 
         supporting = []
@@ -331,8 +347,8 @@ class EvidenceBuilder:
         for source, value in candidates:
             if not isinstance(value, Mapping):
                 continue
-            high = _positive_float(value.get("high"))
-            low = _positive_float(value.get("low"))
+            high = _positive_float(value["high"])
+            low = _positive_float(value["low"])
             if high is not None and low is not None and high > low:
                 selected_source = source
                 selected = value
@@ -355,46 +371,29 @@ class EvidenceBuilder:
             offset_points = low - bar.close
             excursion_points = low - bar.low
 
-        range_id = _string_or_none(selected.get("range_id"))
-        range_version = _as_int(selected.get("version"), default=0)
+        range_id = _string_or_none(selected["range_id"])
+        range_version = _strict_int(selected["version"], "structure.range.version")
         range_start_time = _align_datetime(
-            _first_datetime(
-                selected.get("start_time"),
-                selected.get("range_start_time"),
-                selected.get("formed_at"),
-                selected.get("start"),
-            ),
+            _as_datetime(selected["start_time"]),
             bar.snapshot_time,
         )
         range_end_time = _align_datetime(
-            _first_datetime(
-                selected.get("end_time"),
-                selected.get("range_end_time"),
-                selected.get("updated_at"),
-                selected.get("end"),
-            ),
+            _as_datetime(selected["end_time"]),
             bar.snapshot_time,
         )
-        range_basis = str(
-            selected.get("range_type")
-            or selected.get("classification")
-            or selected.get("basis")
-            or selected_source
-        ).strip().upper()
-        range_quality_score = _float(
-            selected.get("quality_score")
-            if selected.get("quality_score") is not None
-            else selected.get("score")
-        )
+        range_basis = _normalise_word(selected["range_type"])
+        if not range_basis:
+            raise EvidenceBuildError("structure range_type cannot be empty")
+        range_quality_score = None
         boundary_id = f"{range_id or stable_key('range', bar.snapshot_time.date(), low, high)}:{side.value.lower()}"
         reason_codes = [selected_source, f"NEAREST_{side.value}"]
-        if _normalise_word(selected.get("range_type")) == "MICRO_COMPRESSION":
+        if _normalise_word(selected["range_type"]) == "MICRO_COMPRESSION":
             reason_codes.append("MICRO_COMPRESSION_RANGE")
 
         return BoundaryObservation(
             boundary_id=boundary_id,
             boundary_side=side,
-            boundary_source=str(selected.get("source") or selected_source),
+            boundary_source=_required_text(selected["source"], "structure.range.source"),
             boundary_price=price,
             observed_at=bar.snapshot_time,
             range_id=range_id,
@@ -489,14 +488,14 @@ class EvidenceBuilder:
         if direction is DirectionalBias.UP:
             if raw_state in _DOWN_WORDS or raw_side in _DOWN_WORDS:
                 retained = False
-            elif boundary and boundary.boundary_side is BoundarySide.LOWER and (boundary.current_offset_atr or 0.0) > 0:
+            elif boundary and boundary.boundary_side is BoundarySide.LOWER and _required_number(boundary.current_offset_atr, "boundary.current_offset_atr") > 0:
                 retained = False
             elif raw_state in _UP_WORDS or raw_side in _UP_WORDS:
                 retained = True
         elif direction is DirectionalBias.DOWN:
             if raw_state in _UP_WORDS or raw_side in _UP_WORDS:
                 retained = False
-            elif boundary and boundary.boundary_side is BoundarySide.UPPER and (boundary.current_offset_atr or 0.0) > 0:
+            elif boundary and boundary.boundary_side is BoundarySide.UPPER and _required_number(boundary.current_offset_atr, "boundary.current_offset_atr") > 0:
                 retained = False
             elif raw_state in _DOWN_WORDS or raw_side in _DOWN_WORDS:
                 retained = True
@@ -551,16 +550,16 @@ class EvidenceBuilder:
         source_state = _normalise_word(_path(data, "structure.raw.state"))
         classification = "UNKNOWN"
         if range_block:
-            high = _positive_float(range_block.get("high"))
-            low = _positive_float(range_block.get("low"))
+            high = _positive_float(range_block["high"])
+            low = _positive_float(range_block["low"])
             if high is not None and low is not None and high > low:
                 range_width_points = high - low
-            range_width_atr = _nonnegative_float(range_block.get("width_atr"))
+            range_width_atr = _nonnegative_float(range_block["width_atr"])
             if range_width_atr is None and atr and range_width_points is not None:
                 range_width_atr = range_width_points / atr
-            duration_bars = _as_int(range_block.get("bars"), default=0)
-            range_id = _string_or_none(range_block.get("range_id"))
-            range_type = _normalise_word(range_block.get("range_type")) or "UNKNOWN"
+            duration_bars = _strict_int(range_block["bars"], "structure.range.bars")
+            range_id = _string_or_none(range_block["range_id"])
+            range_type = _required_text(range_block["range_type"], "structure.range.range_type").upper()
 
         source_range_width_points = range_width_points
         source_range_width_atr = range_width_atr
@@ -572,10 +571,10 @@ class EvidenceBuilder:
         overlap = self._overlap_ratio(data, history, bar)
         close_inside_source_range = False
         if range_block:
-            range_high = _positive_float(range_block.get("high"))
-            range_low = _positive_float(range_block.get("low"))
+            range_high = _positive_float(range_block["high"])
+            range_low = _positive_float(range_block["low"])
             if range_high is not None and range_low is not None:
-                tolerance = (atr or 0.0) * 0.10
+                tolerance = atr * 0.10
                 close_inside_source_range = (range_low - tolerance) <= bar.close <= (range_high + tolerance)
 
         # Build a causal local box from completed bars.  The V1 report compared
@@ -904,100 +903,95 @@ class EvidenceBuilder:
             ),
         )
 
-    def _build_market_context(self, data: Mapping[str, Any], snapshot_time: datetime) -> MarketContextEvidence:
-        market = data.get("market_context")
-        if not isinstance(market, Mapping) or not market:
-            return MarketContextEvidence(
-                quality=SourceQuality(
-                    status=QualityStatus.MISSING,
-                    source="snapshot.market_context",
-                    source_time=snapshot_time,
-                    age_seconds=0.0,
-                    coverage=0.0,
-                    missing_fields=("market_context",),
-                    reason_codes=("MARKET_CONTEXT_UNKNOWN",),
-                ),
-                reason_codes=("MARKET_CONTEXT_UNKNOWN",),
-            )
-        preferred = _word_direction(market.get("preferred_direction"))
+    def _build_market_context(
+        self,
+        data: Mapping[str, Any],
+        snapshot_time: datetime,
+    ) -> MarketContextEvidence:
         return MarketContextEvidence(
-            index_alignment=_alignment(market.get("index_alignment")),
-            bank_index_alignment=_alignment(market.get("bank_index_alignment")),
-            sector_alignment=_alignment(market.get("sector_alignment")),
-            vix_alignment=_alignment(market.get("vix_alignment")),
-            regime=str(market.get("regime") or "UNKNOWN").upper(),
-            preferred_direction=preferred,
-            reason_codes=("MARKET_CONTEXT_PRESENT",),
+            index_alignment=ContextAlignment.UNKNOWN,
+            bank_index_alignment=ContextAlignment.UNKNOWN,
+            sector_alignment=ContextAlignment.UNKNOWN,
+            vix_alignment=ContextAlignment.UNKNOWN,
+            preferred_direction=DirectionalBias.UNKNOWN,
+            regime="UNKNOWN",
+            reason_codes=("MARKET_CONTEXT_NOT_IN_SNAPSHOT_SCHEMA",),
             quality=SourceQuality(
-                status=QualityStatus.GOOD,
+                status=QualityStatus.UNKNOWN,
                 source="snapshot.market_context",
                 source_time=snapshot_time,
                 age_seconds=0.0,
-                coverage=1.0,
+                coverage=0.0,
+                missing_fields=("market_context",),
+                reason_codes=("MARKET_CONTEXT_NOT_IN_SNAPSHOT_SCHEMA",),
             ),
         )
 
-    def _build_derivatives_context(self, data: Mapping[str, Any], snapshot_time: datetime) -> DerivativesContextEvidence:
-        """Interpret the derivatives payload actually produced by AutoTrades.
-
-        Snapshot generation attaches the ``derivativeschain_v2.derived`` shape:
-        ``options_lite``, ``option_sentiment_windows`` and
-        ``future_sentiment_windows``.  Evidence remains candidate-neutral and
-        records absolute UP/DOWN/NEUTRAL biases.  ContextAdvisor later converts
-        those biases into candidate-relative SUPPORT/CONFLICT.
-        """
-        derivatives = data.get("derivatives")
-        if not isinstance(derivatives, Mapping) or not derivatives:
-            return DerivativesContextEvidence(
-                reason_codes=("DERIVATIVES_CONTEXT_UNKNOWN",),
-                quality=SourceQuality(
-                    status=QualityStatus.MISSING,
-                    source="snapshot.derivatives",
-                    source_time=snapshot_time,
-                    age_seconds=0.0,
-                    coverage=0.0,
-                    missing_fields=("derivatives",),
-                    reason_codes=("DERIVATIVES_CONTEXT_UNKNOWN",),
-                ),
-            )
+    def _build_derivatives_context(
+        self,
+        data: Mapping[str, Any],
+        snapshot_time: datetime,
+    ) -> DerivativesContextEvidence:
+        derivatives = _path(data, "derivatives")
+        if not isinstance(derivatives, Mapping):
+            raise EvidenceBuildError("snapshot.derivatives must be a mapping")
 
         preferred = tuple(self.config.advisor.derivatives_preferred_windows)
-        option_windows = derivatives.get("option_sentiment_windows")
-        future_windows = derivatives.get("future_sentiment_windows")
-        option_key, option_row = _preferred_derivatives_window(option_windows, preferred)
-        future_key, future_row = _preferred_derivatives_window(future_windows, preferred)
+        option_windows = derivatives["option_sentiment_windows"]
+        future_windows = derivatives["future_sentiment_windows"]
+        option_key, option_row = _preferred_derivatives_window(
+            option_windows, preferred, "option_sentiment_windows"
+        )
+        future_key, future_row = _preferred_derivatives_window(
+            future_windows, preferred, "future_sentiment_windows"
+        )
 
-        option_indication = _normalise_word(option_row.get("indication")) if option_row else ""
-        future_label = _normalise_word(future_row.get("label")) if future_row else ""
+        option_indication = (
+            _normalise_word(_required_mapping_value(option_row, "indication", option_key))
+            if option_row is not None
+            else ""
+        )
+        future_label = (
+            _normalise_word(_required_mapping_value(future_row, "label", future_key))
+            if future_row is not None
+            else ""
+        )
         options_bias = _options_sentiment_bias(option_indication)
         futures_bias = _future_sentiment_bias(future_label)
 
-        options_lite = derivatives.get("options_lite")
-        if not isinstance(options_lite, Mapping):
-            options_lite = {}
-        raw_future = derivatives.get("future")
-        if not isinstance(raw_future, Mapping):
-            raw_future = {}
+        spot = _positive_float(derivatives["spot_price"])
+        fut_ltp_now = (
+            _positive_float(_required_mapping_value(future_row, "fut_ltp_now", future_key))
+            if future_row is not None
+            else None
+        )
+        basis_points = (
+            fut_ltp_now - spot
+            if fut_ltp_now is not None and spot is not None
+            else None
+        )
 
-        spot = _positive_float(derivatives.get("spot_price"))
-        fut_ltp_now = _positive_float(future_row.get("fut_ltp_now")) if future_row else None
-        if fut_ltp_now is None:
-            fut_ltp_now = _positive_float(raw_future.get("last_price"))
-        basis_points = (fut_ltp_now - spot) if fut_ltp_now is not None and spot is not None else None
-
-        fut_oi_now = _nonnegative_float(future_row.get("fut_oi_now")) if future_row else None
-        fut_oi_delta = _float(future_row.get("fut_oi_delta")) if future_row else None
+        fut_oi_now = (
+            _nonnegative_float(_required_mapping_value(future_row, "fut_oi_now", future_key))
+            if future_row is not None
+            else None
+        )
+        fut_oi_delta = (
+            _float(_required_mapping_value(future_row, "fut_oi_delta", future_key))
+            if future_row is not None
+            else None
+        )
         oi_change_pct = None
         if fut_oi_now is not None and fut_oi_delta is not None:
             prior_oi = fut_oi_now - fut_oi_delta
             if prior_oi > 0:
                 oi_change_pct = (fut_oi_delta / prior_oi) * 100.0
 
-        pcr = None
-        if option_row:
-            pcr = _nonnegative_float(option_row.get("pcr_now"))
-        if pcr is None:
-            pcr = _nonnegative_float(options_lite.get("pcr"))
+        pcr = (
+            _nonnegative_float(_required_mapping_value(option_row, "pcr_now", option_key))
+            if option_row is not None
+            else None
+        )
 
         directional_count = sum(
             bias is not DirectionalBias.UNKNOWN
@@ -1014,45 +1008,62 @@ class EvidenceBuilder:
             coverage = 0.25
 
         reasons = ["DERIVATIVES_CONTEXT_PRESENT"]
-        if option_row:
-            reasons.append("OPTIONS_SENTIMENT_WINDOW_PRESENT")
-        else:
-            reasons.append("OPTIONS_SENTIMENT_WINDOW_MISSING")
-        if future_row:
-            reasons.append("FUTURES_SENTIMENT_WINDOW_PRESENT")
-        else:
-            reasons.append("FUTURES_SENTIMENT_WINDOW_MISSING")
+        reasons.append(
+            "OPTIONS_SENTIMENT_WINDOW_PRESENT"
+            if option_row is not None
+            else "OPTIONS_SENTIMENT_WINDOW_MISSING"
+        )
+        reasons.append(
+            "FUTURES_SENTIMENT_WINDOW_PRESENT"
+            if future_row is not None
+            else "FUTURES_SENTIMENT_WINDOW_MISSING"
+        )
 
         return DerivativesContextEvidence(
             futures_bias=futures_bias,
             options_bias=options_bias,
             futures_window=future_key,
-            futures_status=str(future_row.get("status") or "").upper() or None if future_row else None,
+            futures_status=(
+                _normalise_word(_required_mapping_value(future_row, "status", future_key)) or None
+                if future_row is not None
+                else None
+            ),
             futures_label=future_label or None,
-            futures_strength=_bounded_fraction(future_row.get("strength")) if future_row else None,
+            futures_strength=(
+                _bounded_fraction(_required_mapping_value(future_row, "strength", future_key))
+                if future_row is not None
+                else None
+            ),
             options_window=option_key,
-            options_status=str(option_row.get("status") or "").upper() or None if option_row else None,
+            options_status=(
+                _normalise_word(_required_mapping_value(option_row, "status", option_key)) or None
+                if option_row is not None
+                else None
+            ),
             options_indication=option_indication or None,
-            options_strength=_bounded_fraction(option_row.get("strength")) if option_row else None,
+            options_strength=(
+                _bounded_fraction(_required_mapping_value(option_row, "strength", option_key))
+                if option_row is not None
+                else None
+            ),
             basis_points=basis_points,
             basis_change_points=None,
             futures_oi_change_pct=oi_change_pct,
-            futures_ltp_delta=_float(future_row.get("fut_ltp_delta")) if future_row else None,
+            futures_ltp_delta=(
+                _float(_required_mapping_value(future_row, "fut_ltp_delta", future_key))
+                if future_row is not None
+                else None
+            ),
             futures_oi_delta=fut_oi_delta,
             pcr=pcr,
-            pcr_delta=_float(option_row.get("pcr_delta")) if option_row else None,
-            implied_volatility=_nonnegative_float(_first_value(derivatives, "implied_volatility", "iv")),
-            skew=_float(derivatives.get("skew")),
-            raw_diagnostics={
-                "preferred_windows": list(preferred),
-                "selected_option_window": option_key,
-                "selected_future_window": future_key,
-                "option_window": dict(option_row) if option_row else {},
-                "future_window": dict(future_row) if future_row else {},
-                "options_lite": dict(options_lite),
-                "spot_price": spot,
-                "future_last_price": fut_ltp_now,
-            },
+            pcr_delta=(
+                _float(_required_mapping_value(option_row, "pcr_delta", option_key))
+                if option_row is not None
+                else None
+            ),
+            implied_volatility=None,
+            skew=None,
+            raw_diagnostics={},
             reason_codes=_unique(reasons),
             quality=SourceQuality(
                 status=quality_status,
@@ -1061,10 +1072,12 @@ class EvidenceBuilder:
                 age_seconds=0.0,
                 coverage=coverage,
                 missing_fields=tuple(
-                    field for field, present in (
-                        ("option_sentiment_windows", bool(option_row)),
-                        ("future_sentiment_windows", bool(future_row)),
-                    ) if not present
+                    field
+                    for field, present in (
+                        ("option_sentiment_windows", option_row is not None),
+                        ("future_sentiment_windows", future_row is not None),
+                    )
+                    if not present
                 ),
                 reason_codes=_unique(reasons),
             ),
@@ -1078,8 +1091,8 @@ class EvidenceBuilder:
         ):
             value = _path(data, path)
             if isinstance(value, Mapping):
-                high = _positive_float(value.get("high"))
-                low = _positive_float(value.get("low"))
+                high = _positive_float(value["high"])
+                low = _positive_float(value["low"])
                 if high is not None and low is not None and high > low:
                     return value
         return None
@@ -1194,17 +1207,6 @@ class EvidenceBuilder:
         }
 
 
-def _snapshot_dict(snapshot: Any) -> Dict[str, Any]:
-    if hasattr(snapshot, "model_dump"):
-        return dict(snapshot.model_dump(mode="python", by_alias=True))
-    if isinstance(snapshot, Mapping):
-        return dict(snapshot)
-    raise EvidenceBuildError(
-        f"Auction evidence requires SnapshotSchema or a complete validated mapping; "
-        f"received {type(snapshot)!r}"
-    )
-
-
 def _path(data: Any, path: str) -> Any:
     current = data
     traversed = []
@@ -1270,12 +1272,41 @@ def _nonnegative_float(value: Any) -> Optional[float]:
     return result if result is not None and result >= 0 else None
 
 
-def _as_int(value: Any, *, default: int = 0) -> int:
+def _strict_int(value: Any, path: str) -> int:
+    if isinstance(value, bool):
+        raise EvidenceBuildError(f"{path} must be an integer")
     try:
         return int(value)
-    except (TypeError, ValueError):
-        return default
+    except (TypeError, ValueError) as exc:
+        raise EvidenceBuildError(f"{path} must be an integer") from exc
 
+
+def _required_text(value: Any, path: str) -> str:
+    if value is None:
+        raise EvidenceBuildError(f"{path} is required")
+    text = str(value).strip()
+    if not text:
+        raise EvidenceBuildError(f"{path} cannot be empty")
+    return text
+
+
+def _required_mapping_value(
+    row: Mapping[str, Any],
+    key: str,
+    context: Optional[str],
+) -> Any:
+    if key not in row:
+        label = context if context is not None else "derivatives window"
+        raise EvidenceBuildError(f"{label}.{key} is required")
+    return row[key]
+
+
+
+def _required_number(value: Any, path: str) -> float:
+    number = _float(value)
+    if number is None:
+        raise EvidenceBuildError(f"{path} is required and must be finite")
+    return number
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
@@ -1293,15 +1324,20 @@ def _string_or_none(value: Any) -> Optional[str]:
 def _preferred_derivatives_window(
     windows: Any,
     preferred: Sequence[str],
+    context: str,
 ) -> Tuple[Optional[str], Optional[Mapping[str, Any]]]:
-    if not isinstance(windows, Mapping):
+    if windows is None:
         return None, None
+    if not isinstance(windows, Mapping):
+        raise EvidenceBuildError(f"derivatives.{context} must be a mapping or null")
     for key in preferred:
-        row = windows.get(key)
-        if isinstance(row, Mapping) and str(row.get("status") or "ok").strip().lower() == "ok":
-            return str(key), row
-    for key, row in windows.items():
-        if isinstance(row, Mapping):
+        if key not in windows:
+            continue
+        row = windows[key]
+        if not isinstance(row, Mapping):
+            raise EvidenceBuildError(f"derivatives.{context}.{key} must be a mapping")
+        status = _required_mapping_value(row, "status", f"{context}.{key}")
+        if str(status).strip().lower() == "ok":
             return str(key), row
     return None, None
 
@@ -1440,7 +1476,7 @@ def _compact_mapping(value: Any) -> Dict[str, Any]:
         "status", "bars", "minutes", "move_points", "move_pct", "move_atr",
         "range_points", "range_pct", "slope_atr_per_bar", "close_position_in_range",
     )
-    return {key: value.get(key) for key in keys if value.get(key) is not None}
+    return {key: value[key] for key in keys if key in value and value[key] is not None}
 
 
 __all__ = ["EvidenceBuildError", "EvidenceBuilder"]
