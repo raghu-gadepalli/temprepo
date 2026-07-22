@@ -22,7 +22,7 @@ from services.snapshot.snapshot_generator import SnapshotGenerator
 TOKEN        = 2955009
 SYMBOL       = "COFORGE"
 API_KEY      = "d17pao9dsc9jsp84"
-ACCESS_TOKEN = "r3pcOIBTz6KveSwDdso8jLjo3M3pAiWF"
+ACCESS_TOKEN = "w7wQoOP0tTnO1Di8C1PPtWSgwfxQQo6W"
 
 # TOKEN        = 408065
 # SYMBOL       = "INFY"
