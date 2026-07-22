@@ -111,10 +111,8 @@ class AuctionEvidenceConfig(BaseModel):
         "indicators",
         "volume",
         "market_windows",
-        "indicator_windows",
         "price_action",
         "structure",
-        "state_context",
     )
     objective_domains: Tuple[str, ...] = (
         "price_action",

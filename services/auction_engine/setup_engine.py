@@ -936,6 +936,11 @@ class SetupCandidateEngine:
             reason_codes=reason_codes,
             terminal=terminal,
             valid_until=valid_until,
+            dynamic_watch=bool(
+                diagnostics["dynamic_watch"]
+                if diagnostics is not None and "dynamic_watch" in diagnostics
+                else False
+            ),
             diagnostics=dict(diagnostics or {}),
             config_version=self.version,
         )

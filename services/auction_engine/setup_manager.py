@@ -283,7 +283,7 @@ class SetupManager:
             return False, "STRUCTURALLY_BLOCKED_OPPOSITION_IGNORED"
         if blockers and blockers <= _PENDING_WATCH_BLOCKERS:
             return True, "PENDING_CONFIRMATION_MATERIAL_OPPOSITION"
-        if bool(candidate.diagnostics.get("dynamic_watch")) and not blockers:
+        if candidate.dynamic_watch and not blockers:
             return True, "DYNAMIC_WATCH_MATERIAL_OPPOSITION"
         return False, "NON_MATERIAL_OPPOSITION"
 

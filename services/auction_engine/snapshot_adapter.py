@@ -1,280 +1,432 @@
-"""Build the pure Auction Engine section embedded in each market snapshot.
+"""Strict snapshot-carried Auction Engine adapter.
 
-The immediately previous enriched snapshot is the only continuity source.
-There is no Auction service checkpoint, opportunity-table persistence, Advisor
-call, active-signal lookup, or signal lifecycle side effect in this module.
+The adapter consumes a validated ``SnapshotSchema`` and returns a compact
+public Auction projection plus bounded private continuity memory. It never
+reads or writes signal/trade state and never falls back to alternate snapshot
+paths.
 """
 from __future__ import annotations
 
 from datetime import datetime
-import hashlib
-import json
+import logging
 import time
-from typing import Any, Dict, Mapping, Optional
+from typing import Dict, Optional
 
 from configs.auction_engine_config import AUCTION_ENGINE_CONFIG
 from configs.snapshot_config import SNAPSHOT_CONFIG
+from schemas.snapshot import (
+    AuctionChange,
+    AuctionDecisionProjection,
+    AuctionMemoryBlock,
+    AuctionSnapshotBlock,
+    AuctionStateProjection,
+    BoundaryProjection,
+    CandidateProjection,
+    FrozenRangeProjection,
+    OpportunityProjection,
+    SnapshotSchema,
+)
 from services.auction_engine.engine import AuctionEngine
+
+logger = logging.getLogger(__name__)
+
+
+def empty_auction_memory() -> AuctionMemoryBlock:
+    """Explicit pre-evaluation placeholder used only during assembly."""
+    return AuctionMemoryBlock(
+        history=[],
+        state_memory=None,
+        boundary_current=None,
+        boundary_last_time=None,
+        boundary_sequences=[],
+        boundary_last_terminal=None,
+        setup_initiation={},
+        setup_failed={},
+        setup_emitted_once=[],
+        setup_completed=[],
+        setup_last_time=None,
+        ledger_records={},
+        ledger_last_day=None,
+    )
+
+
+def empty_auction_block() -> AuctionSnapshotBlock:
+    """Explicit pre-evaluation placeholder used only during assembly."""
+    return AuctionSnapshotBlock(
+        status="NOT_RUN",
+        continuity_mode="COLD_START",
+        previous_snapshot_time=None,
+        state=None,
+        boundary=None,
+        candidates=[],
+        opportunities=[],
+        decision=None,
+        changes=[],
+        error=None,
+    )
 
 
 def enrich_snapshot_with_auction(
-    snapshot_payload: Mapping[str, Any],
+    snapshot: SnapshotSchema,
     *,
-    previous_payload: Optional[Mapping[str, Any]] = None,
-) -> Dict[str, Any]:
-    """Return the Auction block for one newly assembled snapshot.
-
-    Normal operation restores bounded incremental state from the immediately
-    previous same-day snapshot and advances it with the current snapshot.
-    When no compatible previous Auction block exists, the engine starts a fresh
-    local sequence. This is intentional for the clean base implementation; the
-    development database can be regenerated chronologically from the first bar.
-    """
-    symbol = str(snapshot_payload.get("symbol") or "").strip().upper()
-    snapshot_time = _as_datetime(snapshot_payload.get("snapshot_time"))
-    if not symbol:
-        raise ValueError("Auction snapshot symbol is required")
-    if snapshot_time is None:
-        raise ValueError("Auction snapshot_time is required")
-
-    cfg = SNAPSHOT_CONFIG.auction
+    previous_snapshot: Optional[SnapshotSchema] = None,
+) -> tuple[AuctionSnapshotBlock, AuctionMemoryBlock]:
+    """Evaluate one validated snapshot and return public result + memory."""
+    symbol = snapshot.symbol.strip().upper()
+    snapshot_time = snapshot.snapshot_time
     engine = AuctionEngine(AUCTION_ENGINE_CONFIG)
-    previous_time = _payload_time(previous_payload)
+    previous_time: Optional[datetime] = None
     continuity_mode = "COLD_START"
     started = time.perf_counter()
 
-    try:
-        if previous_auction_continuity_usable(
-            previous_payload,
-            symbol=symbol,
-            current_time=snapshot_time,
-        ):
-            previous_auction = dict(previous_payload.get("auction") or {})
+    if previous_snapshot is not None:
+        previous_time = previous_snapshot.snapshot_time
+        if previous_snapshot.symbol.strip().upper() != symbol:
+            raise ValueError(
+                f"Previous snapshot symbol mismatch: {previous_snapshot.symbol} != {symbol}"
+            )
+        if previous_time >= snapshot_time:
+            raise ValueError(
+                f"Previous snapshot time must precede current snapshot: "
+                f"{previous_time} >= {snapshot_time}"
+            )
+        if previous_time.date() == snapshot_time.date():
+            gap_minutes = (snapshot_time - previous_time).total_seconds() / 60.0
+            max_gap = float(SNAPSHOT_CONFIG.auction.max_incremental_gap_minutes)
+            if gap_minutes > max_gap:
+                raise ValueError(
+                    f"Auction continuity gap is {gap_minutes:.3f} minutes; "
+                    f"maximum is {max_gap:.3f}"
+                )
+            if previous_snapshot.auction.status != "OK":
+                raise ValueError("Previous same-day Auction block is not OK")
             engine.restore_incremental_state(
                 symbol,
-                previous_auction["continuity"],
+                previous_snapshot.memory.auction.model_dump(mode="python"),
             )
             continuity_mode = "INCREMENTAL_PREVIOUS_SNAPSHOT"
 
-        result = engine.evaluate_snapshot(
-            _auction_input(snapshot_payload),
-            equity_ref=symbol,
-        )
-        continuity = engine.export_incremental_state(symbol)
-        continuity_raw = json.dumps(
-            continuity,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=True,
-            default=str,
-        ).encode("utf-8")
-
-        diagnostics: Dict[str, Any] = {
-            "decision_scope": "LOCAL_AUCTION_ONLY",
-            "signal_lifecycle_applied": False,
-            "advisor_context_applied": False,
-            "active_signal_context_applied": False,
-            "history_count": len(engine._history.get(symbol, ())),
-            "candidate_count": len(result.candidates),
-            "local_action": result.local_decision.action.value,
-            "manager_action": result.manager_decision.action.value,
-            "selected_candidate_id": result.manager_decision.selected_candidate_id,
-            "selected_opportunity_key": (
-                result.local_decision.selected_candidate.opportunity_key
-                if result.local_decision.selected_candidate is not None
-                else None
-            ),
-        }
-        if cfg.include_diagnostics:
-            diagnostics.update(
-                {
-                    "proposed_state": result.diagnostics.get("proposed_state"),
-                    "transitioned": result.diagnostics.get("transitioned"),
-                    "boundary_transitioned": result.diagnostics.get(
-                        "boundary_transitioned"
-                    ),
-                    "state_flags": result.diagnostics.get("state_flags") or {},
-                    "state_diagnostics": (
-                        result.diagnostics.get("state_diagnostics") or {}
-                    ),
-                    "boundary_diagnostics": (
-                        result.diagnostics.get("boundary_diagnostics") or {}
-                    ),
-                }
-            )
-
-        return {
-            "status": "OK",
-            "continuity_mode": continuity_mode,
-            "engine_name": AUCTION_ENGINE_CONFIG.engine.engine_name,
-            "engine_version": AUCTION_ENGINE_CONFIG.engine.engine_version,
-            "config_version": AUCTION_ENGINE_CONFIG.engine.config_version,
-            "config_hash": AUCTION_ENGINE_CONFIG.stable_hash(),
-            "previous_snapshot_time": previous_time,
-            "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
-            "continuity_bytes": len(continuity_raw),
-            "continuity_hash": hashlib.sha256(continuity_raw).hexdigest(),
-            "continuity": continuity,
-            "state": result.auction_state.to_storage_dict(exclude_none=False),
-            "boundary": (
-                result.boundary_episode.to_storage_dict(exclude_none=False)
-                if result.boundary_episode is not None
-                else None
-            ),
-            "candidates": [
-                candidate.to_storage_dict(exclude_none=False)
-                for candidate in result.candidates
-            ],
-            "opportunities": [
-                _compact_opportunity(record)
-                for record in engine.opportunity_ledger.records(symbol)
-            ],
-            "manager_decision": result.manager_decision.to_storage_dict(
-                exclude_none=False
-            ),
-            "local_decision": result.local_decision.to_storage_dict(
-                exclude_none=False
-            ),
-            "diagnostics": diagnostics,
-            "error": None,
-        }
-    except Exception as exc:
-        if not cfg.fail_open:
-            raise
-        return {
-            "status": "ERROR",
-            "continuity_mode": continuity_mode,
-            "engine_name": AUCTION_ENGINE_CONFIG.engine.engine_name,
-            "engine_version": AUCTION_ENGINE_CONFIG.engine.engine_version,
-            "config_version": AUCTION_ENGINE_CONFIG.engine.config_version,
-            "config_hash": AUCTION_ENGINE_CONFIG.stable_hash(),
-            "previous_snapshot_time": previous_time,
-            "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
-            "continuity_bytes": 0,
-            "continuity_hash": None,
-            "continuity": {},
-            "state": {},
-            "boundary": None,
-            "candidates": [],
-            "opportunities": [],
-            "manager_decision": {},
-            "local_decision": {},
-            "diagnostics": {
-                "decision_scope": "LOCAL_AUCTION_ONLY",
-                "signal_lifecycle_applied": False,
-                "advisor_context_applied": False,
-                "active_signal_context_applied": False,
-            },
-            "error": f"{type(exc).__name__}: {exc}",
-        }
-
-
-def previous_auction_continuity_usable(
-    payload: Optional[Mapping[str, Any]],
-    *,
-    symbol: str,
-    current_time: datetime,
-) -> bool:
-    """Return whether the previous snapshot can advance this Auction sequence."""
-    if not isinstance(payload, Mapping) or not payload:
-        return False
-    if str(payload.get("symbol") or "").strip().upper() != symbol:
-        return False
-
-    previous_time = _payload_time(payload)
-    if previous_time is None:
-        return False
-    previous_time, comparable_current = _align_datetimes(
-        previous_time,
-        current_time,
+    result = engine.evaluate_snapshot(snapshot, equity_ref=symbol)
+    memory = AuctionMemoryBlock.model_validate(
+        engine.export_incremental_state(symbol)
     )
-    if previous_time.date() != comparable_current.date():
-        return False
-    gap_minutes = (comparable_current - previous_time).total_seconds() / 60.0
-    if gap_minutes <= 0:
-        return False
-    if gap_minutes > SNAPSHOT_CONFIG.auction.max_incremental_gap_minutes:
-        return False
 
-    auction = payload.get("auction")
-    if not isinstance(auction, Mapping) or auction.get("status") != "OK":
-        return False
-    if auction.get("engine_name") != AUCTION_ENGINE_CONFIG.engine.engine_name:
-        return False
-    if auction.get("engine_version") != AUCTION_ENGINE_CONFIG.engine.engine_version:
-        return False
-    if auction.get("config_version") != AUCTION_ENGINE_CONFIG.engine.config_version:
-        return False
-    if auction.get("config_hash") != AUCTION_ENGINE_CONFIG.stable_hash():
-        return False
-    continuity = auction.get("continuity")
-    return bool(
-        isinstance(continuity, Mapping)
-        and continuity.get("state_schema") == "AUCTION_INCREMENTAL_STATE_V2"
+    state = _state_projection(result.auction_state)
+    boundary = (
+        _boundary_projection(result.boundary_episode)
+        if result.boundary_episode is not None
+        else None
+    )
+    candidates = [_candidate_projection(item) for item in result.candidates]
+    opportunities = [
+        _opportunity_projection(record)
+        for record in engine.opportunity_ledger.records(symbol)
+    ]
+    decision = _decision_projection(result)
+    changes = _build_changes(
+        previous_snapshot.auction
+        if previous_snapshot is not None
+        and previous_snapshot.snapshot_time.date() == snapshot_time.date()
+        else None,
+        state=state,
+        boundary=boundary,
+        candidates=candidates,
+        opportunities=opportunities,
+        decision=decision,
+    )
+
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    logger.info(
+        "auction_snapshot symbol=%s snapshot_time=%s continuity_mode=%s "
+        "elapsed_ms=%.3f state=%s candidates=%d opportunities=%d action=%s changes=%d",
+        symbol,
+        snapshot_time,
+        continuity_mode,
+        elapsed_ms,
+        state.current,
+        len(candidates),
+        len(opportunities),
+        decision.action,
+        len(changes),
+    )
+
+    block = AuctionSnapshotBlock(
+        status="OK",
+        continuity_mode=continuity_mode,
+        previous_snapshot_time=previous_time,
+        state=state,
+        boundary=boundary,
+        candidates=candidates,
+        opportunities=opportunities,
+        decision=decision,
+        changes=changes,
+        error=None,
+    )
+    return block, memory
+
+
+def _state_projection(state) -> AuctionStateProjection:
+    return AuctionStateProjection(
+        state_key=state.state_key,
+        previous=state.previous_state.value,
+        current=state.current_state.value,
+        transition_time=state.transition_time,
+        entered_at=state.entered_at,
+        expires_at=state.expires_at,
+        reason_codes=list(state.reason_codes),
     )
 
 
-def _auction_input(payload: Mapping[str, Any]) -> Dict[str, Any]:
-    data = dict(payload)
-    data.pop("auction", None)
-    return data
+def _boundary_projection(boundary) -> BoundaryProjection:
+    frozen = boundary.frozen_range
+    return BoundaryProjection(
+        event_key=boundary.event_key,
+        structural_key=boundary.structural_key,
+        attempt_id=boundary.attempt_id,
+        sequence=boundary.episode_sequence,
+        event_time=boundary.event_time,
+        first_seen_time=boundary.first_seen_time,
+        last_seen_time=boundary.last_seen_time,
+        attempt_time=boundary.attempt_time,
+        boundary_id=boundary.boundary_id,
+        boundary_side=boundary.boundary_side.value,
+        boundary_source=boundary.boundary_source,
+        boundary_price=boundary.boundary_price,
+        breakout_side=boundary.breakout_side.value,
+        failure_side=boundary.failure_side.value,
+        frozen_range=FrozenRangeProjection(
+            range_id=frozen.range_id,
+            version=frozen.range_version,
+            source=frozen.source,
+            low=frozen.low,
+            high=frozen.high,
+            start_time=frozen.start_time,
+            end_time=frozen.end_time,
+            frozen_at=frozen.frozen_at,
+            basis=frozen.basis,
+            quality=frozen.quality_score,
+        ),
+        status=boundary.status.value,
+        resolution=boundary.resolution.value,
+        accepted_time=boundary.accepted_time,
+        failed_time=boundary.failed_time,
+        expires_at=boundary.expires_at,
+        current_offset_atr=boundary.current_offset_atr,
+        max_outside_excursion_atr=boundary.max_outside_excursion_atr,
+        consecutive_outside_closes=boundary.consecutive_outside_closes,
+        consecutive_inside_closes=boundary.consecutive_inside_closes,
+        retest_detected=boundary.retest_detected,
+        terminal=boundary.terminal,
+        consumed=boundary.consumed,
+        superseded=boundary.superseded,
+        terminal_reason=boundary.terminal_reason,
+        superseded_by=boundary.superseded_by,
+        reason_codes=list(boundary.reason_codes),
+    )
 
 
-def _compact_opportunity(record: Any) -> Dict[str, Any]:
+def _candidate_projection(candidate) -> CandidateProjection:
+    return CandidateProjection(
+        candidate_id=candidate.candidate_id,
+        opportunity_key=candidate.opportunity_key,
+        family=candidate.family.value,
+        subtype=candidate.subtype,
+        role=candidate.candidate_role.value,
+        side=candidate.side.value,
+        eligibility=candidate.eligibility.value,
+        blockers=list(candidate.blockers),
+        reason_codes=list(candidate.reason_codes),
+        event_key=candidate.event_key,
+        event_time=candidate.event_time,
+        candidate_time=candidate.candidate_time,
+        valid_until=candidate.valid_until,
+        auction_state=candidate.auction_state.value,
+        entry_price=candidate.entry_price,
+        stop_anchor_price=candidate.stop_anchor_price,
+        stop_anchor_type=candidate.stop_anchor_type,
+        target_basis=candidate.target_basis,
+        target_reference_price=candidate.target_reference_price,
+        room_points=candidate.room_points,
+        room_atr=candidate.room_atr,
+        room_pct=candidate.room_pct,
+        entry_distance_atr=candidate.entry_distance_atr,
+        source_boundary_id=candidate.source_boundary_id,
+        source_boundary_status=candidate.source_boundary_status.value,
+        source_boundary_resolution=candidate.source_boundary_resolution.value,
+        source_boundary_side=candidate.source_boundary_side.value,
+        source_boundary_price=candidate.source_boundary_price,
+        source_frozen_range_id=candidate.source_frozen_range_id,
+        source_frozen_range_version=candidate.source_frozen_range_version,
+        terminal=candidate.terminal,
+        consumed=candidate.consumed,
+        superseded=candidate.superseded,
+    )
+
+
+def _opportunity_projection(record) -> OpportunityProjection:
     candidate = record.primary_candidate
-    return {
-        "opportunity_key": record.opportunity_key,
-        "symbol": record.symbol,
-        "trading_day": record.trading_day.isoformat(),
-        "side": record.side.value,
-        "boundary_event_key": record.boundary_event_key,
-        "lifecycle_state": record.lifecycle_state,
-        "first_observed_time": record.first_observed_time.isoformat(),
-        "last_observed_time": record.last_observed_time.isoformat(),
-        "eligible_time": (
-            record.eligible_time.isoformat() if record.eligible_time else None
+    return OpportunityProjection(
+        opportunity_key=record.opportunity_key,
+        side=record.side.value,
+        lifecycle=record.lifecycle_state,
+        boundary_event_key=record.boundary_event_key,
+        primary_candidate_id=candidate.candidate_id,
+        primary_family=candidate.family.value,
+        primary_subtype=candidate.subtype,
+        primary_role=candidate.candidate_role.value,
+        primary_eligibility=candidate.eligibility.value,
+        candidate_ids=list(record.candidate_ids),
+        supporting_candidate_ids=list(record.supporting_candidate_ids),
+        selected_candidate_id=record.selected_candidate_id,
+        first_observed_time=record.first_observed_time,
+        last_observed_time=record.last_observed_time,
+        eligible_time=record.eligible_time,
+        selected_time=record.selected_time,
+        reason_codes=list(record.reason_codes),
+    )
+
+
+def _decision_projection(result) -> AuctionDecisionProjection:
+    local = result.local_decision
+    manager = result.manager_decision
+    selected = local.selected_candidate
+    return AuctionDecisionProjection(
+        action=local.action.value,
+        manager_action=manager.action.value,
+        selected_candidate_id=(selected.candidate_id if selected is not None else None),
+        selected_opportunity_key=(selected.opportunity_key if selected is not None else None),
+        family=(selected.family.value if selected is not None else None),
+        subtype=(selected.subtype if selected is not None else None),
+        side=(selected.side.value if selected is not None else None),
+        entry_price=(selected.entry_price if selected is not None else None),
+        stop_anchor_price=(selected.stop_anchor_price if selected is not None else None),
+        stop_anchor_type=(selected.stop_anchor_type if selected is not None else None),
+        target_basis=(selected.target_basis if selected is not None else None),
+        target_reference_price=(
+            selected.target_reference_price if selected is not None else None
         ),
-        "selected_time": (
-            record.selected_time.isoformat() if record.selected_time else None
-        ),
-        "selected_candidate_id": record.selected_candidate_id,
-        "primary_candidate_id": candidate.candidate_id,
-        "primary_family": candidate.family.value,
-        "primary_subtype": candidate.subtype,
-        "primary_role": candidate.candidate_role.value,
-        "primary_eligibility": candidate.eligibility.value,
-        "candidate_ids": list(record.candidate_ids),
-        "supporting_candidate_ids": list(record.supporting_candidate_ids),
-        "reason_codes": list(record.reason_codes),
-    }
+        valid_until=local.valid_until,
+        reason_codes=list(local.reason_codes),
+    )
 
 
-def _align_datetimes(left: datetime, right: datetime) -> tuple[datetime, datetime]:
-    if left.tzinfo is None and right.tzinfo is not None:
-        left = left.replace(tzinfo=right.tzinfo)
-    elif left.tzinfo is not None and right.tzinfo is None:
-        right = right.replace(tzinfo=left.tzinfo)
-    return left, right
+def _build_changes(
+    previous: Optional[AuctionSnapshotBlock],
+    *,
+    state: AuctionStateProjection,
+    boundary: Optional[BoundaryProjection],
+    candidates: list[CandidateProjection],
+    opportunities: list[OpportunityProjection],
+    decision: AuctionDecisionProjection,
+) -> list[AuctionChange]:
+    changes: list[AuctionChange] = []
+    if previous is None or previous.state is None:
+        changes.append(AuctionChange(
+            type="AUCTION_STATE_INITIALIZED",
+            entity_key=state.state_key,
+            from_=None,
+            to=state.current,
+        ))
+    elif previous.state.current != state.current:
+        changes.append(AuctionChange(
+            type="AUCTION_STATE_CHANGED",
+            entity_key=state.state_key,
+            from_=previous.state.current,
+            to=state.current,
+        ))
 
+    previous_boundary = previous.boundary if previous is not None else None
+    if boundary is not None:
+        if previous_boundary is None or previous_boundary.event_key != boundary.event_key:
+            changes.append(AuctionChange(
+                type="BOUNDARY_STARTED",
+                entity_key=boundary.event_key,
+                from_=None,
+                to=boundary.status,
+            ))
+        elif previous_boundary.status != boundary.status:
+            changes.append(AuctionChange(
+                type="BOUNDARY_STATUS_CHANGED",
+                entity_key=boundary.event_key,
+                from_=previous_boundary.status,
+                to=boundary.status,
+            ))
+    elif previous_boundary is not None:
+        changes.append(AuctionChange(
+            type="BOUNDARY_CLOSED",
+            entity_key=previous_boundary.event_key,
+            from_=previous_boundary.status,
+            to=None,
+        ))
 
-def _payload_time(payload: Optional[Mapping[str, Any]]) -> Optional[datetime]:
-    if not isinstance(payload, Mapping):
-        return None
-    return _as_datetime(payload.get("snapshot_time"))
+    previous_candidates: Dict[str, CandidateProjection] = (
+        {item.candidate_id: item for item in previous.candidates}
+        if previous is not None
+        else {}
+    )
+    for candidate in candidates:
+        prior = previous_candidates[candidate.candidate_id] if candidate.candidate_id in previous_candidates else None
+        if prior is None:
+            changes.append(AuctionChange(
+                type="CANDIDATE_CREATED",
+                entity_key=candidate.candidate_id,
+                from_=None,
+                to=candidate.eligibility,
+            ))
+        elif prior.eligibility != candidate.eligibility:
+            changes.append(AuctionChange(
+                type="CANDIDATE_ELIGIBILITY_CHANGED",
+                entity_key=candidate.candidate_id,
+                from_=prior.eligibility,
+                to=candidate.eligibility,
+            ))
 
+    previous_opportunities: Dict[str, OpportunityProjection] = (
+        {item.opportunity_key: item for item in previous.opportunities}
+        if previous is not None
+        else {}
+    )
+    for opportunity in opportunities:
+        prior = previous_opportunities[opportunity.opportunity_key] if opportunity.opportunity_key in previous_opportunities else None
+        if prior is None:
+            changes.append(AuctionChange(
+                type="OPPORTUNITY_CREATED",
+                entity_key=opportunity.opportunity_key,
+                from_=None,
+                to=opportunity.lifecycle,
+            ))
+        elif prior.lifecycle != opportunity.lifecycle:
+            changes.append(AuctionChange(
+                type="OPPORTUNITY_LIFECYCLE_CHANGED",
+                entity_key=opportunity.opportunity_key,
+                from_=prior.lifecycle,
+                to=opportunity.lifecycle,
+            ))
 
-def _as_datetime(value: Any) -> Optional[datetime]:
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value)
-        except ValueError:
-            return None
-    return None
+    previous_decision = previous.decision if previous is not None else None
+    if previous_decision is None:
+        changes.append(AuctionChange(
+            type="LOCAL_DECISION_INITIALIZED",
+            entity_key="LOCAL_DECISION",
+            from_=None,
+            to=decision.action,
+        ))
+    elif (
+        previous_decision.action != decision.action
+        or previous_decision.selected_candidate_id != decision.selected_candidate_id
+    ):
+        changes.append(AuctionChange(
+            type="LOCAL_DECISION_CHANGED",
+            entity_key=decision.selected_candidate_id or "LOCAL_DECISION",
+            from_=previous_decision.action,
+            to=decision.action,
+        ))
+
+    return changes
 
 
 __all__ = [
+    "empty_auction_block",
+    "empty_auction_memory",
     "enrich_snapshot_with_auction",
-    "previous_auction_continuity_usable",
 ]

@@ -260,18 +260,11 @@ class PriceActionSnapshotConfig(BaseModel):
 
 
 class SnapshotAuctionConfig(BaseModel):
-    """Direct Auction Engine enrichment of every generated snapshot."""
+    """Strict direct Auction enrichment of every generated snapshot."""
 
-    # Preserve the raw market snapshot even if derived Auction analysis fails.
-    fail_open: bool = True
-
-    # Normal continuity expects one completed 3-minute snapshot. A larger gap
-    # starts a fresh local Auction sequence rather than silently skipping bars.
+    # A same-day gap beyond this limit is an explicit generation error. The
+    # engine must never silently reset or substitute missing continuity.
     max_incremental_gap_minutes: float = 4.0
-
-    # Keep detailed diagnostics during development; this can be disabled later
-    # without changing the persisted analytical contract.
-    include_diagnostics: bool = True
 
 
 class SnapshotConfig(BaseModel):

@@ -253,20 +253,18 @@ class AuctionEngine:
         return result
 
     def export_incremental_state(self, symbol: str) -> Dict[str, Any]:
-        """Export bounded, plain-JSON state for the next snapshot only.
+        """Export the exact bounded state required by the next snapshot.
 
-        The snapshot is the chronological record.  This continuity block keeps
-        only memory required to advance one more candle: bounded evidence
-        history, current state/boundary/setup watches and live or recently
-        selected opportunities.  It deliberately excludes ``last_evaluation``,
-        ledger event history, terminal unselected records and generic Python
-        type wrappers.
+        The payload intentionally contains no engine/config/schema version
+        metadata. The root snapshot carries the development version indicator;
+        continuity compatibility is enforced by the strict SnapshotSchema shape
+        and by direct restoration of every required field.
         """
         key = str(symbol or "").strip().upper()
         if not key:
             raise ValueError("Auction incremental-state symbol is required")
 
-        state_memory = self.state_engine._memory.get(key)
+        state_memory = self.state_engine._memory[key] if key in self.state_engine._memory else None
         compact_state_memory = (
             replace(state_memory, last_evaluation=None)
             if state_memory is not None
@@ -307,17 +305,25 @@ class AuctionEngine:
                 candidate_ids=list(record.candidate_ids),
                 supporting_candidate_ids=list(record.supporting_candidate_ids),
             )
-            ledger_records[opportunity_key] = to_plain(compact_record)
-
-        history = []
-        for item in self._history.get(key, ()):
-            history.append(
-                {
-                    "close": float(item.close),
-                    "bar": to_plain(item.bar),
-                    "trend": to_plain(item.trend),
-                }
+            record_payload = to_plain(compact_record)
+            record_payload["primary_candidate_id"] = (
+                compact_record.primary_candidate.candidate_id
             )
+            del record_payload["primary_candidate"]
+            record_payload["candidates"] = {
+                candidate_id: _compact_candidate(candidate)
+                for candidate_id, candidate in kept_candidates.items()
+            }
+            ledger_records[opportunity_key] = record_payload
+
+        history = [
+            {
+                "close": float(item.close),
+                "bar": to_plain(item.bar),
+                "trend": to_plain(item.trend),
+            }
+            for item in self._history[key]
+        ]
 
         boundary_sequences = [
             {
@@ -330,19 +336,23 @@ class AuctionEngine:
         ]
 
         return {
-            "state_schema": "AUCTION_INCREMENTAL_STATE_V2",
-            "engine_name": self.config.engine.engine_name,
-            "engine_version": self.config.engine.engine_version,
-            "config_version": self.config.engine.config_version,
-            "config_hash": self.config.stable_hash(),
-            "symbol": key,
             "history": history,
             "state_memory": to_plain(compact_state_memory),
-            "boundary_current": to_plain(self.boundary_engine._current.get(key)),
-            "boundary_last_time": to_plain(self.boundary_engine._last_time.get(key)),
+            "boundary_current": to_plain(
+                self.boundary_engine._current[key]
+                if key in self.boundary_engine._current
+                else None
+            ),
+            "boundary_last_time": to_plain(
+                self.boundary_engine._last_time[key]
+                if key in self.boundary_engine._last_time
+                else None
+            ),
             "boundary_sequences": boundary_sequences,
             "boundary_last_terminal": to_plain(
-                self.boundary_engine._last_terminal.get(key)
+                self.boundary_engine._last_terminal[key]
+                if key in self.boundary_engine._last_terminal
+                else None
             ),
             "setup_initiation": {
                 item_key: to_plain(value)
@@ -356,9 +366,17 @@ class AuctionEngine:
             },
             "setup_emitted_once": sorted(self.setup_engine._emitted_once),
             "setup_completed": sorted(self.setup_engine._completed),
-            "setup_last_time": to_plain(self.setup_engine._last_time.get(key)),
+            "setup_last_time": to_plain(
+                self.setup_engine._last_time[key]
+                if key in self.setup_engine._last_time
+                else None
+            ),
             "ledger_records": ledger_records,
-            "ledger_last_day": to_plain(self.opportunity_ledger._last_day.get(key)),
+            "ledger_last_day": to_plain(
+                self.opportunity_ledger._last_day[key]
+                if key in self.opportunity_ledger._last_day
+                else None
+            ),
         }
 
     def restore_incremental_state(
@@ -366,94 +384,130 @@ class AuctionEngine:
         symbol: str,
         payload: Mapping[str, Any],
     ) -> None:
-        """Restore plain-JSON state produced by ``export_incremental_state``."""
+        """Restore strict plain-JSON state from the previous snapshot."""
         key = str(symbol or "").strip().upper()
+        if not key:
+            raise ValueError("Auction incremental-state symbol is required")
         decoded = dict(payload)
-        expected = {
-            "state_schema": "AUCTION_INCREMENTAL_STATE_V2",
-            "engine_name": self.config.engine.engine_name,
-            "engine_version": self.config.engine.engine_version,
-            "config_version": self.config.engine.config_version,
-            "config_hash": self.config.stable_hash(),
-            "symbol": key,
+        required = {
+            "history",
+            "state_memory",
+            "boundary_current",
+            "boundary_last_time",
+            "boundary_sequences",
+            "boundary_last_terminal",
+            "setup_initiation",
+            "setup_failed",
+            "setup_emitted_once",
+            "setup_completed",
+            "setup_last_time",
+            "ledger_records",
+            "ledger_last_day",
         }
-        for field, value in expected.items():
-            if decoded.get(field) != value:
-                raise ValueError(
-                    f"Auction snapshot-state mismatch for {field}: "
-                    f"{decoded.get(field)!r} != {value!r}"
-                )
+        missing = required.difference(decoded)
+        extra = set(decoded).difference(required)
+        if missing or extra:
+            raise ValueError(
+                f"Invalid Auction continuity keys; missing={sorted(missing)} extra={sorted(extra)}"
+            )
 
         self.reset()
-        restored_history = []
-        for item in decoded.get("history") or []:
-            restored_history.append(
-                _HistoryEvidence(
-                    close=float(item["close"]),
-                    bar=BarEvidence.model_validate(item["bar"]),
-                    trend=restore_dataclass(_HistoryTrend, item["trend"]),
-                )
+        restored_history = [
+            _HistoryEvidence(
+                close=float(item["close"]),
+                bar=BarEvidence.model_validate(item["bar"]),
+                trend=restore_dataclass(_HistoryTrend, item["trend"]),
             )
+            for item in decoded["history"]
+        ]
         self._history[key] = deque(
             restored_history,
             maxlen=self.config.state.history_bars,
         )
 
-        state_memory = decoded.get("state_memory")
-        if state_memory:
+        state_memory = decoded["state_memory"]
+        if state_memory is not None:
             self.state_engine._memory[key] = restore_dataclass(
                 _StateMemory,
                 state_memory,
             )
 
-        boundary_current = decoded.get("boundary_current")
-        if boundary_current:
+        boundary_current = decoded["boundary_current"]
+        if boundary_current is not None:
             self.boundary_engine._current[key] = restore_dataclass(
                 _EpisodeMemory,
                 boundary_current,
                 overrides={"trading_day": date},
             )
-        boundary_last_time = decoded.get("boundary_last_time")
-        if boundary_last_time:
-            self.boundary_engine._last_time[key] = datetime.fromisoformat(
-                str(boundary_last_time)
+        boundary_last_time = decoded["boundary_last_time"]
+        if boundary_last_time is not None:
+            self.boundary_engine._last_time[key] = (
+                boundary_last_time
+                if isinstance(boundary_last_time, datetime)
+                else datetime.fromisoformat(str(boundary_last_time))
             )
         self.boundary_engine._sequences = {
             (key, str(item["structural_key"])): int(item["sequence"])
-            for item in (decoded.get("boundary_sequences") or [])
+            for item in decoded["boundary_sequences"]
         }
-        boundary_last_terminal = decoded.get("boundary_last_terminal")
-        if boundary_last_terminal:
+        boundary_last_terminal = decoded["boundary_last_terminal"]
+        if boundary_last_terminal is not None:
             self.boundary_engine._last_terminal[key] = dict(boundary_last_terminal)
 
         self.setup_engine._initiation = {
             item_key: restore_dataclass(_InitiationWatch, value)
-            for item_key, value in (decoded.get("setup_initiation") or {}).items()
+            for item_key, value in decoded["setup_initiation"].items()
         }
         self.setup_engine._failed = {
             item_key: restore_dataclass(_FailedWatch, value)
-            for item_key, value in (decoded.get("setup_failed") or {}).items()
+            for item_key, value in decoded["setup_failed"].items()
         }
-        self.setup_engine._emitted_once = set(
-            decoded.get("setup_emitted_once") or []
-        )
-        self.setup_engine._completed = set(
-            decoded.get("setup_completed") or []
-        )
-        setup_last_time = decoded.get("setup_last_time")
-        if setup_last_time:
-            self.setup_engine._last_time[key] = datetime.fromisoformat(
-                str(setup_last_time)
+        self.setup_engine._emitted_once = set(decoded["setup_emitted_once"])
+        self.setup_engine._completed = set(decoded["setup_completed"])
+        setup_last_time = decoded["setup_last_time"]
+        if setup_last_time is not None:
+            self.setup_engine._last_time[key] = (
+                setup_last_time
+                if isinstance(setup_last_time, datetime)
+                else datetime.fromisoformat(str(setup_last_time))
             )
 
-        self.opportunity_ledger._records = {
-            item_key: restore_dataclass(OpportunityRecord, value)
-            for item_key, value in (decoded.get("ledger_records") or {}).items()
-        }
-        ledger_last_day = decoded.get("ledger_last_day")
-        if ledger_last_day:
-            self.opportunity_ledger._last_day[key] = date.fromisoformat(
-                str(ledger_last_day)
+        restored_records: Dict[str, OpportunityRecord] = {}
+        for item_key, value in decoded["ledger_records"].items():
+            record_payload = dict(value)
+            primary_candidate_id = str(record_payload["primary_candidate_id"])
+            del record_payload["primary_candidate_id"]
+            candidate_payloads = record_payload["candidates"]
+            restored_candidates = {
+                candidate_id: _restore_candidate(
+                    candidate_payload,
+                    config_version=self.config.engine.config_version,
+                )
+                for candidate_id, candidate_payload in candidate_payloads.items()
+            }
+            if primary_candidate_id not in restored_candidates:
+                raise ValueError(
+                    f"Primary candidate is missing from Auction continuity: "
+                    f"{primary_candidate_id}"
+                )
+            record_payload["candidates"] = {
+                candidate_id: candidate.model_dump(mode="python")
+                for candidate_id, candidate in restored_candidates.items()
+            }
+            record_payload["primary_candidate"] = restored_candidates[
+                primary_candidate_id
+            ].model_dump(mode="python")
+            restored_records[item_key] = restore_dataclass(
+                OpportunityRecord,
+                record_payload,
+            )
+        self.opportunity_ledger._records = restored_records
+        ledger_last_day = decoded["ledger_last_day"]
+        if ledger_last_day is not None:
+            self.opportunity_ledger._last_day[key] = (
+                ledger_last_day
+                if isinstance(ledger_last_day, date)
+                else date.fromisoformat(str(ledger_last_day))
             )
 
     def export_checkpoint(self, symbol: str) -> Dict[str, Any]:
@@ -548,6 +602,36 @@ class AuctionEngine:
         return results
 
 
+def _compact_candidate(candidate: SetupCandidate) -> Dict[str, Any]:
+    """Persist only candidate facts required for lifecycle continuation."""
+    payload = to_plain(candidate)
+    for field in (
+        "supporting_evidence",
+        "opposing_evidence",
+        "confidence_channels",
+        "diagnostics",
+        "config_version",
+    ):
+        if field in payload:
+            del payload[field]
+    return payload
+
+
+def _restore_candidate(
+    payload: Mapping[str, Any],
+    *,
+    config_version: str,
+) -> SetupCandidate:
+    """Restore a compact candidate without persisted diagnostics/version data."""
+    candidate_payload = dict(payload)
+    candidate_payload["supporting_evidence"] = []
+    candidate_payload["opposing_evidence"] = []
+    candidate_payload["confidence_channels"] = []
+    candidate_payload["diagnostics"] = {}
+    candidate_payload["config_version"] = config_version
+    return SetupCandidate.model_validate(candidate_payload)
+
+
 def _compact_history_evidence(evidence: EvidenceSnapshot) -> _HistoryEvidence:
     """Keep only the three historical facts read by EvidenceBuilder."""
     return _HistoryEvidence(
@@ -561,22 +645,22 @@ def _compact_history_evidence(evidence: EvidenceSnapshot) -> _HistoryEvidence:
 
 
 def _snapshot_identity(snapshot: Any) -> tuple[str, datetime]:
-    if isinstance(snapshot, Mapping):
-        symbol = snapshot.get("symbol")
-        snapshot_time = snapshot.get("snapshot_time")
-    elif hasattr(snapshot, "model_dump"):
-        data = snapshot.model_dump(mode="python", include={"symbol", "snapshot_time"})
-        symbol = data.get("symbol")
-        snapshot_time = data.get("snapshot_time")
+    if hasattr(snapshot, "symbol") and hasattr(snapshot, "snapshot_time"):
+        symbol = snapshot.symbol
+        snapshot_time = snapshot.snapshot_time
+    elif isinstance(snapshot, Mapping):
+        try:
+            symbol = snapshot["symbol"]
+            snapshot_time = snapshot["snapshot_time"]
+        except KeyError as exc:
+            raise ValueError(f"Required snapshot identity field is missing: {exc.args[0]}") from exc
     else:
-        data = getattr(snapshot, "data", None)
-        symbol = getattr(snapshot, "symbol", None)
-        snapshot_time = getattr(snapshot, "snapshot_time", None)
-        if isinstance(data, Mapping):
-            symbol = symbol or data.get("symbol")
-            snapshot_time = snapshot_time or data.get("snapshot_time")
+        raise ValueError(
+            f"AuctionEngine requires SnapshotSchema or a complete validated mapping; "
+            f"received {type(snapshot)!r}"
+        )
 
-    key = str(symbol or "").strip().upper()
+    key = str(symbol).strip().upper()
     if not key:
         raise ValueError("Snapshot symbol is required")
     if isinstance(snapshot_time, str):
@@ -587,19 +671,21 @@ def _snapshot_identity(snapshot: Any) -> tuple[str, datetime]:
 
 
 def _snapshot_content_hash(snapshot: Any) -> str:
-    if isinstance(snapshot, Mapping):
+    if hasattr(snapshot, "model_dump"):
+        data = snapshot.model_dump(mode="json", by_alias=True)
+    elif isinstance(snapshot, Mapping):
         data = dict(snapshot)
-    elif hasattr(snapshot, "model_dump"):
-        data = snapshot.model_dump(mode="json")
     else:
-        raw = getattr(snapshot, "data", None)
-        if isinstance(raw, Mapping):
-            data = dict(raw)
-            data.setdefault("symbol", getattr(snapshot, "symbol", None))
-            data.setdefault("snapshot_time", getattr(snapshot, "snapshot_time", None))
-        else:
-            data = {k: v for k, v in vars(snapshot).items() if not k.startswith("_")}
-    payload = json.dumps(data, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        raise ValueError(
+            f"AuctionEngine requires SnapshotSchema or a complete validated mapping; "
+            f"received {type(snapshot)!r}"
+        )
+    payload = json.dumps(
+        data,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 

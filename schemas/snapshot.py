@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import date, datetime, time as dtime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 from sqlalchemy import Text, cast, or_, and_
 from sqlalchemy.exc import IntegrityError
 
@@ -22,6 +23,7 @@ STRICT_MODEL_CONFIG = ConfigDict(
     extra="forbid",
     arbitrary_types_allowed=True,
     populate_by_name=True,
+    validate_assignment=True,
 )
 
 
@@ -33,240 +35,196 @@ class StrictBaseModel(BaseModel):
 # Core market facts
 # -----------------------------
 class BarBlock(StrictBaseModel):
-    open: Optional[float] = None
-    high: Optional[float] = None
-    low: Optional[float] = None
-    close: Optional[float] = None
-    volume: Optional[float] = None
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+    @model_validator(mode="after")
+    def validate_ohlcv(self) -> "BarBlock":
+        values = (self.open, self.high, self.low, self.close, self.volume)
+        if not all(math.isfinite(float(value)) for value in values):
+            raise ValueError("bar OHLCV values must be finite")
+        if min(self.open, self.high, self.low, self.close) <= 0:
+            raise ValueError("bar prices must be positive")
+        if self.volume < 0:
+            raise ValueError("bar.volume cannot be negative")
+        if self.high < max(self.open, self.close, self.low):
+            raise ValueError("bar.high is inconsistent with OHLC")
+        if self.low > min(self.open, self.close, self.high):
+            raise ValueError("bar.low is inconsistent with OHLC")
+        return self
 
 
 class PrevDayBlock(StrictBaseModel):
-    open: Optional[float] = None
-    high: Optional[float] = None
-    low: Optional[float] = None
-    close: Optional[float] = None
+    open: Optional[float]
+    high: Optional[float]
+    low: Optional[float]
+    close: Optional[float]
 
 
 class TodayBlock(StrictBaseModel):
-    open: Optional[float] = None
+    open: Optional[float]
 
 
 class OpeningRangeBlock(StrictBaseModel):
-    window: str = "09:15-09:29"
-    high: Optional[float] = None
-    low: Optional[float] = None
-    ready: bool = False
+    window: str
+    high: Optional[float]
+    low: Optional[float]
+    ready: bool
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "OpeningRangeBlock":
+        if self.ready and (self.high is None or self.low is None):
+            raise ValueError("opening range high/low are required when ready=True")
+        if self.high is not None and self.low is not None and self.high <= self.low:
+            raise ValueError("opening range high must exceed low")
+        return self
 
 
 class LevelsBlock(StrictBaseModel):
-    prev_day: PrevDayBlock = Field(default_factory=PrevDayBlock)
-    today: TodayBlock = Field(default_factory=TodayBlock)
-    opening_range: OpeningRangeBlock = Field(default_factory=OpeningRangeBlock)
+    prev_day: PrevDayBlock
+    today: TodayBlock
+    opening_range: OpeningRangeBlock
 
 
 # -----------------------------
-# Indicator facts
+# Indicator facts: one current value set only
 # -----------------------------
 class EMABlock(StrictBaseModel):
-    fast: Optional[float] = None
-    mid1: Optional[float] = None
-    mid2: Optional[float] = None
-    slow: Optional[float] = None
-    ref: Optional[float] = None
+    fast: Optional[float]
+    mid1: Optional[float]
+    mid2: Optional[float]
+    slow: Optional[float]
+    ref: Optional[float]
 
 
 class HMABlock(StrictBaseModel):
-    fast: Optional[float] = None
-    mid1: Optional[float] = None
-    mid2: Optional[float] = None
-    slow: Optional[float] = None
-    state: str = "NO_TREND"
-    strength: str = "NA"
+    fast: Optional[float]
+    mid1: Optional[float]
+    mid2: Optional[float]
+    slow: Optional[float]
+    state: str
+    strength: str
+    flip_count_today: int = Field(ge=0)
 
 
 class VWAPBlock(StrictBaseModel):
-    value: Optional[float] = None
-    side: str = "UNKNOWN"
-    distance_pct: Optional[float] = None
-    distance_points: Optional[float] = None
-    distance_atr: Optional[float] = None
+    value: Optional[float]
+    side: str
+    distance_pct: Optional[float]
+    distance_points: Optional[float]
+    distance_atr: Optional[float]
+    flip_count_today: int = Field(ge=0)
 
 
 class RSIBlock(StrictBaseModel):
-    value: Optional[float] = None
-    zone: str = "NA"
+    value: Optional[float]
+    zone: str
 
 
 class ADXBlock(StrictBaseModel):
-    value: Optional[float] = None
-    band: str = "NA"
+    value: Optional[float]
+    band: str
 
 
 class ATRBlock(StrictBaseModel):
-    value: Optional[float] = None
-    band: str = "NA"
-    pct: Optional[float] = None
+    value: Optional[float]
+    band: str
+    pct: Optional[float]
 
 
 class BollingerBlock(StrictBaseModel):
-    upper: Optional[float] = None
-    mid: Optional[float] = None
-    lower: Optional[float] = None
-    bb_width: Optional[float] = None
-    position: Optional[float] = None
-    zone: str = "UNKNOWN"
+    upper: Optional[float]
+    mid: Optional[float]
+    lower: Optional[float]
+    bb_width: Optional[float]
+    position: Optional[float]
+    zone: str
 
 
 class EnvelopeBlock(StrictBaseModel):
-    hma_envelope: Optional[float] = None
-    ema_envelope: Optional[float] = None
+    hma_envelope: Optional[float]
+    ema_envelope: Optional[float]
 
 
 class IndicatorsBlock(StrictBaseModel):
-    ema: EMABlock = Field(default_factory=EMABlock)
-    hma: HMABlock = Field(default_factory=HMABlock)
-    vwap: VWAPBlock = Field(default_factory=VWAPBlock)
-    rsi: RSIBlock = Field(default_factory=RSIBlock)
-    adx: ADXBlock = Field(default_factory=ADXBlock)
-    atr: ATRBlock = Field(default_factory=ATRBlock)
-    bollinger: BollingerBlock = Field(default_factory=BollingerBlock)
-    envelopes: EnvelopeBlock = Field(default_factory=EnvelopeBlock)
+    ema: EMABlock
+    hma: HMABlock
+    vwap: VWAPBlock
+    rsi: RSIBlock
+    adx: ADXBlock
+    atr: ATRBlock
+    bollinger: BollingerBlock
+    envelopes: EnvelopeBlock
 
 
 class VolumeBlock(StrictBaseModel):
-    bar_volume: Optional[float] = None
-    bar_rvol: Optional[float] = None
-    bar_rvol_pct: Optional[float] = None
-    bar_rvol_band: str = "NA"
-    bar_volume_slope: Optional[float] = None
-    today_cum: Optional[float] = None
-    prev_day_total: Optional[float] = None
-    today_vs_prev_ratio: Optional[float] = None
-    periods: Dict[str, Any] = Field(default_factory=dict)
+    bar_volume: Optional[float]
+    bar_rvol: Optional[float]
+    bar_rvol_pct: Optional[float]
+    bar_rvol_band: str
+    bar_volume_slope: Optional[float]
+    today_cum: Optional[float]
+    prev_day_total: Optional[float]
+    today_vs_prev_ratio: Optional[float]
+    periods: Dict[str, Any]
+
+
+
+
+class DerivativesBlock(StrictBaseModel):
+    """Existing display/option-selection derivative payload, shape retained."""
+    spot_price: Any
+    future: Any
+    options_lite: Any
+    option_ladder: Any
+    option_sentiment_windows: Any
+    future_sentiment_windows: Any
 
 
 # -----------------------------
-# Time windows
+# Price-action windows
 # -----------------------------
 class MarketWindowBlock(StrictBaseModel):
-    status: str = "na"
-    bars: int = 0
-    minutes: Optional[int] = None
-    session_elapsed_minutes: Optional[float] = None
-    open: Optional[float] = None
-    high: Optional[float] = None
-    low: Optional[float] = None
-    close: Optional[float] = None
-    volume_sum: Optional[float] = None
-    avg_volume: Optional[float] = None
-    move_points: Optional[float] = None
-    move_pct: Optional[float] = None
-    move_atr: Optional[float] = None
-    range_points: Optional[float] = None
-    range_pct: Optional[float] = None
-    slope_points_per_bar: Optional[float] = None
-    slope_atr_per_bar: Optional[float] = None
-    close_position_in_range: Optional[float] = None
+    status: str
+    bars: int = Field(ge=0)
+    move_points: Optional[float]
+    move_pct: Optional[float]
+    move_atr: Optional[float]
+    range_points: Optional[float]
+    range_pct: Optional[float]
+    close_position_in_range: Optional[float]
 
 
-class NumericIndicatorWindowBlock(StrictBaseModel):
-    status: str = "na"
-    bars: int = 0
-    minutes: Optional[int] = None
-    start_value: Optional[float] = None
-    end_value: Optional[float] = None
-    high: Optional[float] = None
-    low: Optional[float] = None
-    delta: Optional[float] = None
-    slope_per_bar: Optional[float] = None
-    start_state: Optional[str] = None
-    end_state: Optional[str] = None
-    state_changed: bool = False
-    touched_upper: bool = False
-    touched_lower: bool = False
-
-
-class HMAIndicatorWindowBlock(StrictBaseModel):
-    status: str = "na"
-    bars: int = 0
-    minutes: Optional[int] = None
-    start_state: str = "UNKNOWN"
-    end_state: str = "UNKNOWN"
-    start_strength: str = "UNKNOWN"
-    end_strength: str = "UNKNOWN"
-    state_changed: bool = False
-    strength_changed: bool = False
-    flip_count: int = 0
-    bars_in_current_state: int = 0
-
-
-class VWAPIndicatorWindowBlock(StrictBaseModel):
-    status: str = "na"
-    bars: int = 0
-    minutes: Optional[int] = None
-    start_side: str = "UNKNOWN"
-    end_side: str = "UNKNOWN"
-    crossed: bool = False
-    min_distance_pct: Optional[float] = None
-    max_distance_pct: Optional[float] = None
-    end_distance_pct: Optional[float] = None
-    bars_in_current_side: int = 0
-
-
-class BollingerIndicatorWindowBlock(StrictBaseModel):
-    status: str = "na"
-    bars: int = 0
-    minutes: Optional[int] = None
-    start_zone: str = "UNKNOWN"
-    end_zone: str = "UNKNOWN"
-    zone_changed: bool = False
-    touch_upper_count: int = 0
-    touch_lower_count: int = 0
-    min_position: Optional[float] = None
-    max_position: Optional[float] = None
-    width_change_pct: Optional[float] = None
-
-
-# -----------------------------
-# Price action facts
-# -----------------------------
-class PriceActionReferenceBlock(StrictBaseModel):
-    position: str = "UNKNOWN"
-    distance_atr: Optional[float] = None
-    distance_points: Optional[float] = None
-
-
-class PriceActionWindowMoveBlock(StrictBaseModel):
-    status: str = "na"
-    session_elapsed_minutes: Optional[float] = None
-    points: Optional[float] = None
-    pct: Optional[float] = None
-    atr: Optional[float] = None
+class MarketWindowsBlock(StrictBaseModel):
+    m15: MarketWindowBlock = Field(alias="15m")
+    m30: MarketWindowBlock = Field(alias="30m")
+    m60: MarketWindowBlock = Field(alias="60m")
+    sod: MarketWindowBlock
 
 
 class PriceActionSlopeBlock(StrictBaseModel):
-    status: str = "na"
-    bars_3_atr: Optional[float] = None
-    bars_5_atr: Optional[float] = None
-    bars_3_atr_per_bar: Optional[float] = None
-    bars_5_atr_per_bar: Optional[float] = None
-    previous_3_atr_per_bar: Optional[float] = None
-    state: str = "UNKNOWN"
+    status: str
+    bars_3_atr: Optional[float]
+    bars_5_atr: Optional[float]
+    bars_3_atr_per_bar: Optional[float]
+    bars_5_atr_per_bar: Optional[float]
+    previous_3_atr_per_bar: Optional[float]
+    state: str
 
 
 class PriceActionBlock(StrictBaseModel):
-    orb: PriceActionReferenceBlock = Field(default_factory=PriceActionReferenceBlock)
-    vwap: PriceActionReferenceBlock = Field(default_factory=PriceActionReferenceBlock)
-    moves: Dict[str, PriceActionWindowMoveBlock] = Field(default_factory=dict)
-    slope: PriceActionSlopeBlock = Field(default_factory=PriceActionSlopeBlock)
+    slope: PriceActionSlopeBlock
 
 
 # -----------------------------
-# Structure block
+# Structure result
 # -----------------------------
 class StructureRangeBlock(StrictBaseModel):
     range_id: Optional[str] = None
-    version: int = 0
+    version: int = Field(default=0, ge=0)
     high: Optional[float] = None
     low: Optional[float] = None
     width_pct: Optional[float] = None
@@ -277,7 +235,7 @@ class StructureRangeBlock(StrictBaseModel):
     end_time: Optional[datetime] = None
     established_at: Optional[datetime] = None
     evidence_cutoff: Optional[datetime] = None
-    bars: int = 0
+    bars: int = Field(default=0, ge=0)
     provisional: bool = False
     breakout_eligible: bool = False
 
@@ -290,8 +248,8 @@ class BalanceMetricsBlock(StrictBaseModel):
     midpoint_drift_atr: Optional[float] = None
     upper_boundary_drift_atr: Optional[float] = None
     lower_boundary_drift_atr: Optional[float] = None
-    upper_interactions: int = 0
-    lower_interactions: int = 0
+    upper_interactions: int = Field(default=0, ge=0)
+    lower_interactions: int = Field(default=0, ge=0)
     quality: Optional[float] = None
     classification: str = "UNKNOWN"
     reason: Optional[str] = None
@@ -309,12 +267,10 @@ class RawStructureBlock(StrictBaseModel):
 
 class AcceptedStructureBlock(StrictBaseModel):
     state: str = "RANGE_ACCEPTED"
-    # Read-only compatibility for already persisted pre-neutral snapshots. New
-    # snapshots never serialize a direction on an accepted range.
     side: Optional[str] = Field(default=None, exclude=True)
     range: StructureRangeBlock = Field(default_factory=StructureRangeBlock)
     metrics: BalanceMetricsBlock = Field(default_factory=BalanceMetricsBlock)
-    age_bars: int = 0
+    age_bars: int = Field(default=0, ge=0)
     frozen: bool = True
     promoted_time: Optional[datetime] = None
     quality: Optional[float] = None
@@ -327,7 +283,7 @@ class CandidateStructureBlock(StrictBaseModel):
     side: str = "NEUTRAL"
     range: StructureRangeBlock = Field(default_factory=StructureRangeBlock)
     metrics: BalanceMetricsBlock = Field(default_factory=BalanceMetricsBlock)
-    bars_confirmed: int = 0
+    bars_confirmed: int = Field(default=0, ge=0)
     first_seen_time: Optional[datetime] = None
     quality: Optional[float] = None
     reason: Optional[str] = None
@@ -357,138 +313,286 @@ class BreakoutContextBlock(StrictBaseModel):
 
 
 class StructureBlock(StrictBaseModel):
-    raw: RawStructureBlock = Field(default_factory=RawStructureBlock)
-    accepted: AcceptedStructureBlock = Field(default_factory=AcceptedStructureBlock)
-    candidate: CandidateStructureBlock = Field(default_factory=CandidateStructureBlock)
-    recent_closes: List[RecentCloseObservationBlock] = Field(default_factory=list)
-    anchors: StructureAnchorBlock = Field(default_factory=StructureAnchorBlock)
-    breakout_context: BreakoutContextBlock = Field(default_factory=BreakoutContextBlock)
-    diagnostics: Dict[str, Any] = Field(default_factory=dict)
-    session_phase: str = "UNKNOWN"
-    previous_state: Optional[str] = None
-    previous_side: Optional[str] = None
-    count: int = 1
-    flip_count_today: int = 0
-    reason: Optional[str] = None
+    raw: RawStructureBlock
+    accepted: AcceptedStructureBlock
+    candidate: CandidateStructureBlock
+    session_phase: str
+    flip_count_today: int = Field(ge=0)
+
+    # Internal construction details are accepted by the structure calculator
+    # but are deliberately excluded from persisted/public snapshots.
+    recent_closes: List[RecentCloseObservationBlock] = Field(default_factory=list, exclude=True)
+    anchors: StructureAnchorBlock = Field(default_factory=lambda: StructureAnchorBlock(
+        pdh=None, pdl=None, orb_high=None, orb_low=None, orb_ready=False,
+        recent15_high=None, recent15_low=None, active_anchor="UNKNOWN"
+    ), exclude=True)
+    breakout_context: BreakoutContextBlock = Field(default_factory=lambda: BreakoutContextBlock(
+        swing="UNKNOWN", orb="UNKNOWN", pdh_pdl="UNKNOWN", recent15="UNKNOWN"
+    ), exclude=True)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict, exclude=True)
+    previous_state: Optional[str] = Field(default=None, exclude=True)
+    previous_side: Optional[str] = Field(default=None, exclude=True)
+    count: int = Field(default=1, ge=0, exclude=True)
+    reason: Optional[str] = Field(default=None, exclude=True)
 
 
 # -----------------------------
-# State and events
+# Private continuity memory
 # -----------------------------
-class StateMetricBlock(StrictBaseModel):
-    confirmed_state: Optional[str] = None
-    raw_state: Optional[str] = None
-    previous_state: Optional[str] = None
-    age_bars: int = 0
-    previous_age_bars: int = 0
-    candidate_state: Optional[str] = None
-    candidate_age_bars: int = 0
-    changed: bool = False
-    flip_count_today: int = 0
+class StateMemoryEntry(StrictBaseModel):
+    raw_state: str
+    state: str
+    count: int = Field(ge=0)
+    previous_state: Optional[str]
+    previous_count: int = Field(ge=0)
+    candidate_state: Optional[str]
+    candidate_count: int = Field(ge=0)
+    flip_count_today: int = Field(ge=0)
 
 
-class StructureStateContextBlock(StrictBaseModel):
-    confirmed_state: Optional[str] = None
-    # Legacy input compatibility only; range direction is no longer emitted.
-    confirmed_side: Optional[str] = Field(default=None, exclude=True)
-    raw_state: Optional[str] = None
-    raw_side: Optional[str] = None
-    previous_state: Optional[str] = None
-    previous_side: Optional[str] = None
-    age_bars: int = 0
-    changed: bool = False
-    flip_count_today: int = 0
+class StructureMemoryBar(StrictBaseModel):
+    date: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
 
 
-class StateContextBlock(StrictBaseModel):
-    hma: StateMetricBlock = Field(default_factory=StateMetricBlock)
-    hma_strength: StateMetricBlock = Field(default_factory=StateMetricBlock)
-    vwap: StateMetricBlock = Field(default_factory=StateMetricBlock)
-    rsi: StateMetricBlock = Field(default_factory=StateMetricBlock)
-    adx: StateMetricBlock = Field(default_factory=StateMetricBlock)
-    atr: StateMetricBlock = Field(default_factory=StateMetricBlock)
-    bollinger: StateMetricBlock = Field(default_factory=StateMetricBlock)
-    volume: StateMetricBlock = Field(default_factory=StateMetricBlock)
-    structure: StructureStateContextBlock = Field(default_factory=StructureStateContextBlock)
+class StructureMemoryBlock(StrictBaseModel):
+    snapshot_time: datetime
+    bars_3m: List[StructureMemoryBar]
+    bars_15m: List[StructureMemoryBar]
+    state: Dict[str, StateMemoryEntry]
 
 
-class EventBlock(StrictBaseModel):
-    k: str
-    from_: Optional[str] = None
-    to: Optional[str] = None
+class AuctionMemoryBlock(StrictBaseModel):
+    history: List[Dict[str, Any]]
+    state_memory: Optional[Dict[str, Any]]
+    boundary_current: Optional[Dict[str, Any]]
+    boundary_last_time: Optional[datetime]
+    boundary_sequences: List[Dict[str, Any]]
+    boundary_last_terminal: Optional[Dict[str, Any]]
+    setup_initiation: Dict[str, Any]
+    setup_failed: Dict[str, Any]
+    setup_emitted_once: List[str]
+    setup_completed: List[str]
+    setup_last_time: Optional[datetime]
+    ledger_records: Dict[str, Any]
+    ledger_last_day: Optional[date]
+
+
+class SnapshotMemoryBlock(StrictBaseModel):
+    structure: StructureMemoryBlock
+    auction: AuctionMemoryBlock
+
+
+# -----------------------------
+# Compact Auction public projection
+# -----------------------------
+class AuctionStateProjection(StrictBaseModel):
+    state_key: str
+    previous: str
+    current: str
+    transition_time: datetime
+    entered_at: datetime
+    expires_at: Optional[datetime]
+    reason_codes: List[str]
+
+
+class FrozenRangeProjection(StrictBaseModel):
+    range_id: str
+    version: int = Field(ge=1)
+    source: str
+    low: float
+    high: float
+    start_time: datetime
+    end_time: Optional[datetime]
+    frozen_at: datetime
+    basis: str
+    quality: Optional[float]
+
+
+class BoundaryProjection(StrictBaseModel):
+    event_key: str
+    structural_key: str
+    attempt_id: str
+    sequence: int = Field(ge=1)
+    event_time: datetime
+    first_seen_time: datetime
+    last_seen_time: datetime
+    attempt_time: Optional[datetime]
+    boundary_id: str
+    boundary_side: str
+    boundary_source: str
+    boundary_price: float
+    breakout_side: str
+    failure_side: str
+    frozen_range: FrozenRangeProjection
+    status: str
+    resolution: str
+    accepted_time: Optional[datetime]
+    failed_time: Optional[datetime]
+    expires_at: Optional[datetime]
+    current_offset_atr: Optional[float]
+    max_outside_excursion_atr: float
+    consecutive_outside_closes: int = Field(ge=0)
+    consecutive_inside_closes: int = Field(ge=0)
+    retest_detected: bool
+    terminal: bool
+    consumed: bool
+    superseded: bool
+    terminal_reason: Optional[str]
+    superseded_by: Optional[str]
+    reason_codes: List[str]
+
+
+class CandidateProjection(StrictBaseModel):
+    candidate_id: str
+    opportunity_key: str
+    family: str
+    subtype: str
+    role: str
+    side: str
+    eligibility: str
+    blockers: List[str]
+    reason_codes: List[str]
+    event_key: str
+    event_time: datetime
+    candidate_time: datetime
+    valid_until: Optional[datetime]
+    auction_state: str
+    entry_price: float
+    stop_anchor_price: Optional[float]
+    stop_anchor_type: str
+    target_basis: str
+    target_reference_price: Optional[float]
+    room_points: Optional[float]
+    room_atr: Optional[float]
+    room_pct: Optional[float]
+    entry_distance_atr: Optional[float]
+    source_boundary_id: str
+    source_boundary_status: str
+    source_boundary_resolution: str
+    source_boundary_side: str
+    source_boundary_price: float
+    source_frozen_range_id: str
+    source_frozen_range_version: int
+    terminal: bool
+    consumed: bool
+    superseded: bool
+
+
+class OpportunityProjection(StrictBaseModel):
+    opportunity_key: str
+    side: str
+    lifecycle: str
+    boundary_event_key: str
+    primary_candidate_id: str
+    primary_family: str
+    primary_subtype: str
+    primary_role: str
+    primary_eligibility: str
+    candidate_ids: List[str]
+    supporting_candidate_ids: List[str]
+    selected_candidate_id: Optional[str]
+    first_observed_time: datetime
+    last_observed_time: datetime
+    eligible_time: Optional[datetime]
+    selected_time: Optional[datetime]
+    reason_codes: List[str]
+
+
+class AuctionDecisionProjection(StrictBaseModel):
+    action: str
+    manager_action: str
+    selected_candidate_id: Optional[str]
+    selected_opportunity_key: Optional[str]
+    family: Optional[str]
+    subtype: Optional[str]
+    side: Optional[str]
+    entry_price: Optional[float]
+    stop_anchor_price: Optional[float]
+    stop_anchor_type: Optional[str]
+    target_basis: Optional[str]
+    target_reference_price: Optional[float]
+    valid_until: Optional[datetime]
+    reason_codes: List[str]
+
+
+class AuctionChange(StrictBaseModel):
+    type: str
+    entity_key: str
+    from_: Optional[str] = Field(alias="from")
+    to: Optional[str]
 
 
 class AuctionSnapshotBlock(StrictBaseModel):
-    """Pure Auction Engine result embedded in the market snapshot.
+    status: str
+    continuity_mode: str
+    previous_snapshot_time: Optional[datetime]
+    state: Optional[AuctionStateProjection]
+    boundary: Optional[BoundaryProjection]
+    candidates: List[CandidateProjection]
+    opportunities: List[OpportunityProjection]
+    decision: Optional[AuctionDecisionProjection]
+    changes: List[AuctionChange]
+    error: Optional[str]
 
-    ``continuity`` is the bounded incremental state read by the next snapshot.
-    It is not a separate checkpoint and has no persistence outside the snapshot
-    JSON itself. Signal/Advisor lifecycle data is intentionally excluded.
-    """
-
-    status: str = "NOT_RUN"
-    continuity_mode: str = "COLD_START"
-    engine_name: Optional[str] = None
-    engine_version: Optional[str] = None
-    config_version: Optional[str] = None
-    config_hash: Optional[str] = None
-    previous_snapshot_time: Optional[datetime] = None
-    elapsed_ms: Optional[float] = None
-    continuity_bytes: int = 0
-    continuity_hash: Optional[str] = None
-    continuity: Dict[str, Any] = Field(default_factory=dict)
-    state: Dict[str, Any] = Field(default_factory=dict)
-    boundary: Optional[Dict[str, Any]] = None
-    candidates: List[Dict[str, Any]] = Field(default_factory=list)
-    opportunities: List[Dict[str, Any]] = Field(default_factory=list)
-    manager_decision: Dict[str, Any] = Field(default_factory=dict)
-    local_decision: Dict[str, Any] = Field(default_factory=dict)
-    diagnostics: Dict[str, Any] = Field(default_factory=dict)
-    error: Optional[str] = None
+    @model_validator(mode="after")
+    def validate_status(self) -> "AuctionSnapshotBlock":
+        if self.status == "OK" and (self.state is None or self.decision is None):
+            raise ValueError("auction state and decision are required when status=OK")
+        return self
 
 
 # -----------------------------
 # Snapshot schema
 # -----------------------------
-class SnapshotSchema(BaseModel):
-    model_config = ConfigDict(
-        from_attributes=True,
-        populate_by_name=True,
-        extra="forbid",
-        arbitrary_types_allowed=True,
-    )
-
+class SnapshotSchema(StrictBaseModel):
+    version: str
     symbol: str
     snapshot_time: datetime
-    tf: str = "3m"
+    tf: str
 
     close: float
-    bar: BarBlock = Field(default_factory=BarBlock)
+    bar: BarBlock
 
+    # Normal DB columns. They are deliberately excluded from the JSON payload.
     ltp: Optional[float] = None
     ltp_time: Optional[datetime] = None
-    gen_signals: bool = False
+    gen_signals: bool
 
-    levels: LevelsBlock = Field(default_factory=LevelsBlock)
-    indicators: IndicatorsBlock = Field(default_factory=IndicatorsBlock)
-    volume: VolumeBlock = Field(default_factory=VolumeBlock)
-    market_windows: Dict[str, MarketWindowBlock] = Field(default_factory=dict)
-    indicator_windows: Dict[str, Dict[str, Dict[str, Any]]] = Field(default_factory=dict)
-    price_action: PriceActionBlock = Field(default_factory=PriceActionBlock)
-    structure: StructureBlock = Field(default_factory=StructureBlock)
-    state_context: StateContextBlock = Field(default_factory=StateContextBlock)
-    # Internal continuity cache used by snapshot generation to avoid replaying
-    # the whole session on every 3m tick. Consumers should use structure and
-    # state_context; this is only generation state.
-    state_memory: Dict[str, Any] = Field(default_factory=dict)
-    # Bounded 3m/15m candle ring used only to advance structure from the
-    # immediately previous snapshot. This prevents repeated structure-frame
-    # discovery from the full fetched session on consecutive ticks.
-    structure_memory: Dict[str, Any] = Field(default_factory=dict)
-    events: List[EventBlock] = Field(default_factory=list)
-    derivatives: Dict[str, Any] = Field(default_factory=dict)
-    auction: AuctionSnapshotBlock = Field(default_factory=AuctionSnapshotBlock)
-    generation_diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    levels: LevelsBlock
+    indicators: IndicatorsBlock
+    volume: VolumeBlock
+    market_windows: MarketWindowsBlock
+    price_action: PriceActionBlock
+    structure: StructureBlock
+    derivatives: DerivativesBlock
+    auction: AuctionSnapshotBlock
+    memory: SnapshotMemoryBlock
+
+    @field_validator("version", "symbol", "tf")
+    @classmethod
+    def require_nonempty_text(cls, value: str) -> str:
+        text = str(value).strip()
+        if not text:
+            raise ValueError("snapshot identity fields cannot be empty")
+        return text
+
+    @model_validator(mode="after")
+    def validate_snapshot_contract(self) -> "SnapshotSchema":
+        if not math.isfinite(float(self.close)) or self.close <= 0:
+            raise ValueError("snapshot.close must be a positive finite value")
+        tolerance = max(1e-9, abs(self.close) * 1e-9)
+        if abs(self.close - self.bar.close) > tolerance:
+            raise ValueError("snapshot.close must equal snapshot.bar.close")
+        if self.memory.structure.snapshot_time != self.snapshot_time:
+            raise ValueError("memory.structure.snapshot_time must equal snapshot_time")
+        if self.ltp is not None and (not math.isfinite(float(self.ltp)) or self.ltp <= 0):
+            raise ValueError("snapshot.ltp must be positive when present")
+        return self
 
     def to_db_dict(self) -> Dict[str, Any]:
         raw = self.model_dump(
@@ -500,31 +604,8 @@ class SnapshotSchema(BaseModel):
 
     @staticmethod
     def from_db_dict(dump: Dict[str, Any]) -> "SnapshotSchema":
-        if not dump:
+        if not isinstance(dump, dict) or not dump:
             raise ValueError("Empty snapshot dump")
-
-        # Older rows may still contain the retired schema_version metadata.
-        # Ignore it while loading; newly generated snapshots no longer write it.
-        if "schema_version" in dump:
-            dump = dict(dump)
-            dump.pop("schema_version", None)
-
-        ts = dump.get("snapshot_time")
-        if isinstance(ts, str):
-            try:
-                dump = dict(dump)
-                dump["snapshot_time"] = datetime.fromisoformat(ts)
-            except Exception:
-                pass
-
-        ltp_ts = dump.get("ltp_time")
-        if isinstance(ltp_ts, str):
-            try:
-                dump = dict(dump)
-                dump["ltp_time"] = datetime.fromisoformat(ltp_ts)
-            except Exception:
-                pass
-
         return SnapshotSchema.model_validate(dump)
 
     @staticmethod
@@ -538,8 +619,10 @@ class SnapshotSchema(BaseModel):
         exists.
         """
         raw = snapshot.to_db_dict()
-        ltp_val = snapshot.ltp if snapshot.ltp is not None else snapshot.close
-        ltp_time_val = snapshot.ltp_time if snapshot.ltp_time is not None else snapshot.snapshot_time
+        if snapshot.ltp is None or snapshot.ltp_time is None:
+            raise ValueError("snapshot.ltp and snapshot.ltp_time are required for persistence")
+        ltp_val = snapshot.ltp
+        ltp_time_val = snapshot.ltp_time
 
         with get_trades_db() as db:
             existing = (
@@ -628,9 +711,14 @@ class SnapshotSchema(BaseModel):
             if not rec:
                 return None
 
-            existing = rec.data or {}
-            existing.update(update_data or {})
-            rec.data = sanitize_json(existing)
+            if not isinstance(rec.data, dict):
+                raise ValueError("Existing snapshot payload must be an object")
+            if not isinstance(update_data, dict):
+                raise TypeError("Snapshot update_data must be an object")
+            merged = dict(rec.data)
+            merged.update(update_data)
+            validated = SnapshotSchema.from_db_dict(merged)
+            rec.data = validated.to_db_dict()
             db.commit()
             db.refresh(rec)
             data = rec.data
@@ -803,12 +891,13 @@ class SnapshotSchema(BaseModel):
             try:
                 raw = row.data_text
                 payload = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
-                payload.setdefault("symbol", str(row.symbol).strip().upper())
-                payload.setdefault("snapshot_time", row.snapshot_time)
-                if row.ltp is not None:
-                    payload["ltp"] = float(row.ltp)
-                if row.ltp_time is not None:
-                    payload["ltp_time"] = row.ltp_time
+                if payload["symbol"] != str(row.symbol).strip().upper():
+                    raise ValueError("Snapshot JSON symbol differs from DB symbol")
+                payload_time = datetime.fromisoformat(payload["snapshot_time"]) if isinstance(payload["snapshot_time"], str) else payload["snapshot_time"]
+                if payload_time.replace(tzinfo=None) != row.snapshot_time.replace(tzinfo=None):
+                    raise ValueError("Snapshot JSON time differs from DB snapshot_time")
+                payload["ltp"] = float(row.ltp) if row.ltp is not None else None
+                payload["ltp_time"] = row.ltp_time
                 snapshots.append(SnapshotSchema.from_db_dict(payload))
             except Exception as exc:
                 raise ValueError(
@@ -875,12 +964,13 @@ class SnapshotSchema(BaseModel):
             try:
                 raw = row.data_text
                 payload = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
-                payload.setdefault("symbol", str(row.symbol).strip().upper())
-                payload.setdefault("snapshot_time", row.snapshot_time)
-                if row.ltp is not None:
-                    payload["ltp"] = float(row.ltp)
-                if row.ltp_time is not None:
-                    payload["ltp_time"] = row.ltp_time
+                if payload["symbol"] != str(row.symbol).strip().upper():
+                    raise ValueError("Snapshot JSON symbol differs from DB symbol")
+                payload_time = datetime.fromisoformat(payload["snapshot_time"]) if isinstance(payload["snapshot_time"], str) else payload["snapshot_time"]
+                if payload_time.replace(tzinfo=None) != row.snapshot_time.replace(tzinfo=None):
+                    raise ValueError("Snapshot JSON time differs from DB snapshot_time")
+                payload["ltp"] = float(row.ltp) if row.ltp is not None else None
+                payload["ltp_time"] = row.ltp_time
                 snapshots.append(SnapshotSchema.from_db_dict(payload))
             except Exception as exc:
                 raise ValueError(

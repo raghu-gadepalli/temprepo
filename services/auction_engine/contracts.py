@@ -761,6 +761,7 @@ class SetupCandidate(ContractModel):
     consumed: bool = False
     superseded: bool = False
     valid_until: Optional[datetime] = None
+    dynamic_watch: bool = False
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
     config_version: str = Field(min_length=1)
 

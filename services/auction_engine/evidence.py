@@ -72,16 +72,14 @@ class EvidenceBuilder:
         equity_ref: Optional[str] = None,
     ) -> EvidenceSnapshot:
         data = _snapshot_dict(snapshot)
-        symbol = str(data.get("symbol") or "").strip().upper()
-        snapshot_time = _as_datetime(data.get("snapshot_time"))
+        symbol = str(data["symbol"]).strip().upper()
+        snapshot_time = _as_datetime(data["snapshot_time"])
         if not symbol:
             raise EvidenceBuildError("Snapshot symbol is required")
         if snapshot_time is None:
             raise EvidenceBuildError("Snapshot snapshot_time is required")
 
-        close = _positive_float(data.get("close"))
-        if close is None:
-            close = _positive_float(_path(data, "bar.close"))
+        close = _positive_float(data["close"])
         if close is None:
             raise EvidenceBuildError(f"Snapshot close is invalid for {symbol} @ {snapshot_time}")
 
@@ -109,10 +107,10 @@ class EvidenceBuilder:
 
         return EvidenceSnapshot(
             symbol=symbol,
-            equity_ref=equity_ref or _string_or_none(data.get("equity_ref")),
+            equity_ref=equity_ref,
             trading_day=snapshot_time.date(),
             snapshot_time=snapshot_time,
-            snapshot_id=_string_or_none(data.get("snapshot_id")),
+            snapshot_id=None,
             close=close,
             atr=atr,
             bar=bar,
@@ -142,23 +140,21 @@ class EvidenceBuilder:
         high = _positive_float(_path(data, "bar.high"))
         low = _positive_float(_path(data, "bar.low"))
         volume = _nonnegative_float(_path(data, "bar.volume"))
-        if volume is None:
-            volume = _nonnegative_float(_path(data, "volume.bar_volume"))
 
-        if open_price is None:
-            missing.append("bar.open")
-            open_price = close
-        if high is None:
-            missing.append("bar.high")
-            high = max(open_price, close)
-        if low is None:
-            missing.append("bar.low")
-            low = min(open_price, close)
-
-        # Defensive normalisation for historical rows with rounded/inconsistent
-        # OHLC fields.  The original values remain visible in raw_facts.
-        high = max(high, open_price, close)
-        low = min(low, open_price, close)
+        invalid = [
+            name
+            for name, value in (
+                ("bar.open", open_price),
+                ("bar.high", high),
+                ("bar.low", low),
+                ("bar.volume", volume),
+            )
+            if value is None
+        ]
+        if invalid:
+            raise EvidenceBuildError(
+                f"Validated snapshot contains invalid primary bar fields: {invalid}"
+            )
         candle_range = max(high - low, 0.0)
         move_points = close - open_price
         move_atr = move_points / atr if atr else None
@@ -202,8 +198,8 @@ class EvidenceBuilder:
     ) -> SourceQuality:
         missing = list(bar_missing)
         for block in self.cfg.required_top_level_blocks:
-            value = data.get(block)
-            if value is None or (isinstance(value, Mapping) and not value):
+            value = data[block]
+            if value is None:
                 missing.append(block)
 
         history_bars = _as_int(_path(data, "market_windows.sod.bars"), default=0)
@@ -1172,14 +1168,14 @@ class EvidenceBuilder:
                 "candidate_active": _path(data, "structure.candidate.active"),
                 "candidate_range_id": _path(data, "structure.candidate.range.range_id"),
                 "candidate_range_version": _path(data, "structure.candidate.range.version"),
-                "structure_flip_count": _path(data, "state_context.structure.flip_count_today"),
+                "structure_flip_count": _path(data, "structure.flip_count_today"),
             },
             "source_states": {
                 "hma": _path(data, "indicators.hma.state"),
                 "hma_strength": _path(data, "indicators.hma.strength"),
-                "hma_flip_count": _path(data, "state_context.hma.flip_count_today"),
+                "hma_flip_count": _path(data, "indicators.hma.flip_count_today"),
                 "vwap": _path(data, "indicators.vwap.side"),
-                "vwap_flip_count": _path(data, "state_context.vwap.flip_count_today"),
+                "vwap_flip_count": _path(data, "indicators.vwap.flip_count_today"),
             },
             "source_windows": {
                 "sod": _compact_mapping(_path(data, "market_windows.sod")),
@@ -1199,30 +1195,27 @@ class EvidenceBuilder:
 
 
 def _snapshot_dict(snapshot: Any) -> Dict[str, Any]:
+    if hasattr(snapshot, "model_dump"):
+        return dict(snapshot.model_dump(mode="python", by_alias=True))
     if isinstance(snapshot, Mapping):
         return dict(snapshot)
-    if hasattr(snapshot, "model_dump"):
-        return dict(snapshot.model_dump(mode="python"))
-    data = getattr(snapshot, "data", None)
-    if isinstance(data, Mapping):
-        out = dict(data)
-        out.setdefault("symbol", getattr(snapshot, "symbol", None))
-        out.setdefault("snapshot_time", getattr(snapshot, "snapshot_time", None))
-        return out
-    if hasattr(snapshot, "__dict__"):
-        return {k: v for k, v in vars(snapshot).items() if not k.startswith("_")}
-    raise EvidenceBuildError(f"Unsupported snapshot type: {type(snapshot)!r}")
+    raise EvidenceBuildError(
+        f"Auction evidence requires SnapshotSchema or a complete validated mapping; "
+        f"received {type(snapshot)!r}"
+    )
 
 
-def _path(data: Any, path: str, default: Any = None) -> Any:
+def _path(data: Any, path: str) -> Any:
     current = data
+    traversed = []
     for part in path.split("."):
-        if isinstance(current, Mapping):
-            current = current.get(part, default)
-        else:
-            current = getattr(current, part, default)
-        if current is default:
-            return default
+        traversed.append(part)
+        try:
+            current = current[part] if isinstance(current, Mapping) else getattr(current, part)
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise EvidenceBuildError(
+                f"Required snapshot path is missing: {'.'.join(traversed)}"
+            ) from exc
     return current
 
 
