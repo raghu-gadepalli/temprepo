@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from schemas.snapshot import SnapshotSchema
 from services.auction_engine.engine import AuctionEngine
+from services.snapshot.snapshot_generator import _symbol_last_snapshot
 from services.auction_engine.snapshot_adapter import (
     empty_auction_block,
     empty_auction_memory,
@@ -276,6 +277,29 @@ class AuctionSnapshotStateTests(unittest.TestCase):
         ])
         self.assertEqual(previous.auction.status, "OK")
         self.assertIsInstance(previous.auction.changes, list)
+
+    def test_stale_or_future_symbol_cache_is_rejected_before_schema_validation(self):
+        class CachedSymbol:
+            symbol = "TEST"
+            last_snapshot = {
+                "snapshot_time": self.ts + timedelta(hours=5),
+                "legacy_market_windows": {},
+            }
+
+        self.assertIsNone(
+            _symbol_last_snapshot(CachedSymbol(), self.ts)
+        )
+
+    def test_immediately_previous_legacy_cache_fails_strict_validation(self):
+        class CachedSymbol:
+            symbol = "TEST"
+            last_snapshot = {
+                "snapshot_time": self.ts - timedelta(minutes=3),
+                "legacy_market_windows": {},
+            }
+
+        with self.assertRaises(ValidationError):
+            _symbol_last_snapshot(CachedSymbol(), self.ts)
 
     def test_schema_rejects_missing_mismatch_and_obsolete_fields(self):
         valid = self._rows()[0].model_dump(mode="python", by_alias=True)

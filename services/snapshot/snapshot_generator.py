@@ -474,23 +474,35 @@ STRUCTURE_STATE_KEYS = (
 )
 
 
-def _parse_snapshot_payload(value: Any) -> Optional[SnapshotSchema]:
-    """Parse one complete persisted snapshot without compatibility fallbacks."""
+def _snapshot_payload_mapping(value: Any) -> Optional[Dict[str, Any]]:
+    """Decode a persisted snapshot payload without interpreting field values."""
     if value is None or value == "":
         return None
     if isinstance(value, SnapshotSchema):
-        return value
+        return value.model_dump(mode="python", by_alias=True)
     if isinstance(value, str):
         parsed = json.loads(value)
         if not isinstance(parsed, dict):
             raise ValueError("Snapshot JSON root must be an object")
-        return SnapshotSchema.from_db_dict(parsed)
+        return parsed
     if isinstance(value, dict):
-        return SnapshotSchema.from_db_dict(value)
+        return value
     if hasattr(value, "model_dump"):
         parsed = value.model_dump(mode="python", by_alias=True)
-        return SnapshotSchema.from_db_dict(parsed)
+        if not isinstance(parsed, dict):
+            raise ValueError("Snapshot model_dump root must be an object")
+        return parsed
     raise TypeError(f"Unsupported snapshot payload type: {type(value)!r}")
+
+
+def _parse_snapshot_payload(value: Any) -> Optional[SnapshotSchema]:
+    """Strictly validate one complete persisted snapshot payload."""
+    if isinstance(value, SnapshotSchema):
+        return value
+    parsed = _snapshot_payload_mapping(value)
+    if parsed is None:
+        return None
+    return SnapshotSchema.from_db_dict(parsed)
 
 
 def _to_ist_datetime(value: Any) -> datetime:
@@ -504,11 +516,54 @@ def _to_ist_datetime(value: Any) -> datetime:
     return ts.to_pydatetime()
 
 
-def _symbol_last_snapshot(sym: Any) -> Optional[SnapshotSchema]:
+def _symbol_last_snapshot(
+    sym: Any,
+    snap_time: datetime,
+) -> Optional[SnapshotSchema]:
+    """Return the cache only when it can be the immediate continuity input.
+
+    Replay commonly starts at the beginning of a session while ``symbols`` still
+    carries the final snapshot from an earlier run. That future or stale cache
+    entry is not a candidate continuity record and must not be schema-validated.
+    A temporally eligible cache entry is always validated strictly; an old or
+    malformed immediately-previous payload still fails rather than cold-starting
+    silently.
+    """
     if sym is None:
         return None
+
     raw = getattr(sym, "last_snapshot")
-    return _parse_snapshot_payload(raw)
+    if isinstance(raw, SnapshotSchema):
+        previous_time = _to_ist_datetime(raw.snapshot_time)
+        payload = None
+    else:
+        payload = _snapshot_payload_mapping(raw)
+        if payload is None:
+            return None
+        if "snapshot_time" not in payload:
+            raise ValueError("Cached snapshot is missing required snapshot_time")
+        previous_time = _to_ist_datetime(payload["snapshot_time"])
+
+    current_time = _to_ist_datetime(snap_time)
+    if previous_time.date() != current_time.date() or previous_time >= current_time:
+        return None
+
+    max_gap_minutes = float(SNAPSHOT_CONFIG.service.tick_minutes) + 0.5
+    gap_minutes = (current_time - previous_time).total_seconds() / 60.0
+    if gap_minutes > max_gap_minutes:
+        logger.warning(
+            "symbol_snapshot_cache_not_immediate symbol=%s previous=%s current=%s "
+            "gap_minutes=%.3f; cache ignored before schema validation",
+            getattr(sym, "symbol"),
+            previous_time,
+            current_time,
+            gap_minutes,
+        )
+        return None
+
+    if isinstance(raw, SnapshotSchema):
+        return raw
+    return SnapshotSchema.from_db_dict(payload)
 
 
 def _inflate_structure_state_memory(previous: SnapshotSchema) -> Dict[str, Any]:
@@ -997,7 +1052,7 @@ class SnapshotGenerator:
         sym = SymbolSchema.fetch_symbol(self.symbol)
         if sym is None:
             raise ValueError(f"Symbol configuration is missing: {self.symbol}")
-        symbol_snapshot = _symbol_last_snapshot(sym)
+        symbol_snapshot = _symbol_last_snapshot(sym, snap_time)
 
         # Structure uses one explicit continuity mode. A valid immediately
         # previous snapshot advances incrementally; otherwise the current
