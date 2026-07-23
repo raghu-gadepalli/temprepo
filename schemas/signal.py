@@ -478,6 +478,13 @@ class SignalSchema(BaseModel):
     # Fetchers
     # -----------------------------------------------------------------
     @staticmethod
+    def fetch_by_signal_id_strict(signal_id: str) -> Optional["SignalSchema"]:
+        """Read one signal by identity and propagate database/validation failures."""
+        with get_trades_db() as db:
+            rec = db.query(SignalORM).filter(SignalORM.signal_id == signal_id).one_or_none()
+        return SignalSchema.model_validate(rec) if rec is not None else None
+
+    @staticmethod
     def fetch_by_signal_id(signal_id: str) -> Optional["SignalSchema"]:
         try:
             with get_trades_db() as db:
@@ -486,6 +493,22 @@ class SignalSchema(BaseModel):
         except Exception:
             logger.exception("fetch_by_signal_id failed | signal_id=%s", signal_id)
             return None
+
+    @staticmethod
+    def fetch_active_signal_strict(equity_ref: str, lifecycle: str) -> Optional["SignalSchema"]:
+        """Read the OPEN signal and propagate database/validation failures."""
+        with get_trades_db() as db:
+            rec = (
+                db.query(SignalORM)
+                .filter(
+                    SignalORM.equity_ref == equity_ref,
+                    SignalORM.lifecycle == lifecycle,
+                    SignalORM.status == SignalStatus.OPEN.value,
+                )
+                .order_by(SignalORM.last_eval_time.desc(), SignalORM.id.desc())
+                .first()
+            )
+        return SignalSchema.model_validate(rec) if rec is not None else None
 
     @staticmethod
     def fetch_active_signal(equity_ref: str, lifecycle: str) -> Optional["SignalSchema"]:

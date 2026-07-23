@@ -87,6 +87,17 @@ class SymbolSchema(BaseModel, frozen=True):
             return None
 
     @staticmethod
+    def fetch_symbol_strict(symbol_str: str) -> Optional["SymbolSchema"]:
+        """Read one enabled symbol and propagate database/validation failures."""
+        with get_trades_db() as db:
+            rec = (
+                db.query(SymbolORM)
+                .filter(SymbolORM.symbol == symbol_str, SymbolORM.enabled == True)
+                .one_or_none()
+            )
+        return SymbolSchema.model_validate(rec) if rec is not None else None
+
+    @staticmethod
     def fetch_symbol(symbol_str: str) -> Optional["SymbolSchema"]:
         try:
             with get_trades_db() as db:

@@ -14,7 +14,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from logconfig import setup_logging
 from configs.signal_config import SIGNAL_CONFIG
 from schemas.snapshot import SnapshotSchema
-from schemas.stock_setup_state import StockSetupStateSchema
 from services.signals.signal_generator import SignalGenerator
 
 # centralized day gate (holidays/weekends/whitelist/blackout)
@@ -26,7 +25,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 START_TIME      = dtime.fromisoformat(conf["window_start"])                # e.g. "09:16:00"
 END_TIME        = dtime.fromisoformat(conf["window_end"])                  # e.g. "15:30:00"
-RETRY_INTERVAL  = int(conf.get("retry_interval_seconds", 15))              # logging only
+RETRY_INTERVAL  = int(conf["retry_interval_seconds"])              # logging only
 LOG_FILE        = conf["log_file"]
 
 logger: Optional[logging.Logger] = None
@@ -69,9 +68,8 @@ def wait_for_window() -> bool:
 def tick(now: datetime) -> Optional[datetime]:
     """Process unprocessed snapshots in chronological groups.
 
-    ``now`` controls service logging/window behavior only. Setup lifecycle
-    expiry is evaluated at each group's snapshot_time so live and replay share
-    identical chronology.
+    ``now`` controls service logging/window behavior only. Auction has already
+    completed setup evaluation inside each validated snapshot.
     """
     try:
         snaps: List[SnapshotSchema] = SnapshotSchema.fetch_unprocessed()
@@ -85,28 +83,11 @@ def tick(now: datetime) -> Optional[datetime]:
 
     logger.info("Processing %d unprocessed snapshots", len(snaps))
     last_snapshot_time: Optional[datetime] = None
-
     for snapshot_time, grouped in groupby(snaps, key=lambda snap: snap.snapshot_time):
         group = list(grouped)
         if not isinstance(snapshot_time, datetime):
             raise ValueError("Signal service encountered snapshot without snapshot_time")
         last_snapshot_time = snapshot_time
-
-        try:
-            expired = StockSetupStateSchema.expire_due_states(
-                snapshot_time=snapshot_time,
-                trading_day=snapshot_time.date(),
-            )
-            if expired:
-                logger.info(
-                    "Expired %d overdue setup-state rows @ snapshot=%s",
-                    expired,
-                    snapshot_time,
-                )
-        except Exception:
-            logger.exception("Failed setup-state expiry sweep @ snapshot=%s", snapshot_time)
-            raise
-
         for snap in group:
             ok = False
             try:
@@ -149,52 +130,21 @@ def main():
     if not wait_for_window():
         return
 
-    last_snapshot_time: Optional[datetime] = None
-    service_stopped_after_window = False
     try:
         while True:
             now = datetime.now(IST)
 
             # Only window check here (day policy already gated by allow_run_today)
             if not in_window(now):
-                service_stopped_after_window = True
                 logger.info("Reached signal window end at %s; exiting", END_TIME)
                 break
 
-            processed_snapshot_time = tick(now)
-            if processed_snapshot_time is not None:
-                last_snapshot_time = processed_snapshot_time
+            tick(now)
             sleep_to_next_interval()
 
     except KeyboardInterrupt:
         logger.info("Interrupted; stopping")
     finally:
-        # Do not synthesize lifecycle time from service shutdown wall-clock.
-        # When at least one market snapshot was processed, terminalize using the
-        # latest observed snapshot time; otherwise leave state untouched.
-        if last_snapshot_time is not None:
-            try:
-                expired = StockSetupStateSchema.expire_due_states(
-                    snapshot_time=last_snapshot_time,
-                    trading_day=last_snapshot_time.date(),
-                    reason=(
-                        "SETUP_STATE_EXPIRED_END_OF_WINDOW"
-                        if service_stopped_after_window
-                        else "SETUP_STATE_EXPIRED_BY_SWEEP"
-                    ),
-                    force_all_active=service_stopped_after_window,
-                )
-                if expired:
-                    logger.info(
-                        "Final setup-state expiry sweep expired %d rows @ snapshot=%s",
-                        expired,
-                        last_snapshot_time,
-                    )
-            except Exception:
-                logger.exception(
-                    "Final setup-state expiry sweep failed @ snapshot=%s",
-                    last_snapshot_time,
-                )
         logger.info("=== Signal Service stopped ===")
 
 if __name__ == "__main__":
