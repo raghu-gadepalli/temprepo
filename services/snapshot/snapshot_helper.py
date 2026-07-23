@@ -2548,7 +2548,7 @@ def _close_position_in_range(close: Optional[float], low: Optional[float], high:
     span = float(high) - float(low)
     if span == 0:
         # Flat candle/window: high == low. Treat the close as neutral inside
-        # the range instead of writing null and breaking Evidence V2 replay.
+        # the range instead of writing null and breaking strict snapshot replay.
         return 0.5
     pos = float((float(close) - float(low)) / span)
     # Defensive clamp for occasional vendor rounding / bad ticks.

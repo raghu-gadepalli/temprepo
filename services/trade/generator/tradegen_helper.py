@@ -58,7 +58,7 @@ from sqlalchemy import or_
 from configs.trade_config import TRADE_CONFIG
 from configs.monitor_config import MONITOR_CONFIG
 from configs.execution_config import EXECUTION_CONFIG
-from enums.enums import EntryStatus, ExitStatus
+from enums.enums import EntryStatus, ExitStatus, SignalStatus
 from schemas.signal import SignalSchema
 from schemas.snapshot import SnapshotSchema
 from schemas.symbol import SymbolSchema
@@ -126,27 +126,8 @@ def _min_eq_amt() -> Decimal:
 # policy helpers
 # =============================================================================
 
-def _services_trade_policy() -> Dict[str, Any]:
-    return TRADE_CONFIG.policy.model_dump(mode="python")
-
-
-def _policy_list(key: str, default: List[str]) -> List[str]:
-    pol = _services_trade_policy()
-    v = pol.get(key, None)
-    if isinstance(v, list) and v:
-        return [str(x).upper().strip() for x in v if str(x).strip()]
-    return [str(x).upper().strip() for x in default if str(x).strip()]
-
-
-def _ui_allowed_stages() -> List[str]:
-    return _policy_list("ui_allowed_stages", ["TRACKING", "QUALIFIED", "ACTIONABLE"])
-
-
 def _terminal_statuses() -> List[str]:
-    return _policy_list(
-        "terminal_statuses",
-        ["INVALIDATED", "EXPIRED", "REPLACED", "CLOSED", "CANCELLED", "BLOCKED"],
-    )
+    return [status.value for status in SignalStatus if status is not SignalStatus.OPEN]
 
 
 # =============================================================================
@@ -490,12 +471,13 @@ def _setup_initial_levels_for_leg(
 ) -> Dict[str, Any]:
     """Return signal setup-level-derived initial SL for one trade leg.
 
-    Evidence V2 signals must persist setup_levels at CREATE time. Trade
+    Auction downstream V2 signals must persist setup_levels at CREATE time. Trade
     generation must not rediscover structure/reversal levels from snapshots.
     If setup_levels is absent or invalid, trade creation for the leg fails
     loudly so the signal layer can be fixed.
 
-    The unused snapshot/ATR parameters are kept for call-site compatibility.
+    Snapshot and ATR are accepted because the common leg-builder signature supplies them;
+    this function intentionally does not use them to rediscover setup geometry.
     """
     return _setup_levels_initial_levels_for_leg(
         signal=signal,
@@ -1740,9 +1722,9 @@ class TradeGenHelper:
 
         risk_ref_eq = _snapshot_close(snapshot)
 
-        choice = (instrument_choice or "MULTI").strip().upper()
-        if choice == "AUTO":
-            choice = "MULTI"
+        choice = str(instrument_choice).strip().upper()
+        if choice not in {"EQ", "FUT", "CE", "PE", "MULTI"}:
+            raise ValueError(f"Unsupported instrument_choice: {instrument_choice!r}")
 
         explicit_symbol = str(selected_trade_symbol or "").strip().upper()
         explicit_entry = _safe_num(selected_entry_price, None)
@@ -1829,9 +1811,7 @@ class TradeGenHelper:
             _add_leg("CE", _resolve_atm_option_symbol(signal, is_call=True))
         elif choice == "PE":
             _add_leg("PE", _resolve_atm_option_symbol(signal, is_call=False))
-        elif choice == "OPT":
-            _add_leg(opt_inst, _resolve_atm_option_symbol(signal, is_call=want_call))
-        else:
+        else:  # MULTI
             if int(getattr(user, "equity", 0) or 0) == 1:
                 _add_leg("EQ", getattr(signal, "symbol", None))
             if int(getattr(user, "futures", 0) or 0) == 1:
@@ -1862,7 +1842,7 @@ class TradeGenHelper:
     def _persist_plan(plan: TradePlan) -> List[UserTradeSchema]:
         created: List[UserTradeSchema] = []
         for leg in plan.legs:
-            signal_id = getattr(plan.signal, "signal_id", None) or getattr(plan.signal, "signal_id", None)
+            signal_id = getattr(plan.signal, "signal_id", None)
             try:
                 uid = str(getattr(plan.user, "userid", "") or "").strip()
                 signal_ref = str(signal_id or "").strip()
@@ -1906,7 +1886,7 @@ class TradeGenHelper:
                     )
                     continue
 
-                # Second guard: exact broker symbol must not be duplicated while
+                # Third guard: exact broker symbol must not be duplicated while
                 # still open, even if it came from another signal.
                 existing = _existing_open_trades_for_symbol(
                     userid=uid,
@@ -2147,7 +2127,6 @@ class TradeGenHelper:
         form["fields"]["product_editable"] = True
         form["product"] = _normalized_product_for_inst(form.get("selected_instrument") or "EQ")
         form["entry_eligibility"] = decision_dict
-        form["trade_validation"] = decision_dict  # compatibility alias
         decision_details = decision_dict.get("details") if isinstance(decision_dict.get("details"), dict) else {}
         form["entry_context"] = {
             "origin": "SIGNAL",
@@ -2164,7 +2143,6 @@ class TradeGenHelper:
         }
         if decision.decision == "WAIT":
             form["requires_confirmation"] = True
-            form["requires_override"] = True  # compatibility alias
             form["entry_warning"] = ", ".join(decision.reasons or [])
             form["validation_warning"] = form["entry_warning"]
 
@@ -2662,7 +2640,6 @@ class TradeGenHelper:
         instrument_choice: str = "MULTI",
         source: str = "AUTOGEN",
         confirm_entry_warning: bool = False,
-        override_validation: bool = False,
         requested_product: Any = None,
         selected_trade_symbol: Optional[str] = None,
         selected_quantity: Optional[int] = None,
@@ -2674,8 +2651,7 @@ class TradeGenHelper:
         # Use the same validation path for AUTO and manual signal-based trade
         # creation. AUTO must be strictly allowed. Manual creation may proceed
         # through a defensive-but-nonterminal posture only after an explicit
-        # ``confirm_entry_warning``. ``override_validation`` is accepted only as
-        # a temporary compatibility alias and cannot bypass hard exit posture.
+        # ``confirm_entry_warning``. Hard lifecycle exit postures cannot be overridden.
         user = UserSchema.fetch_user(userid)
         signal = TradeGenHelper._resolve_signal(signal_id)
 
@@ -2695,7 +2671,7 @@ class TradeGenHelper:
         src = str(source or "").strip().upper()
         if src in ("AUTOGEN", "TRADE_GENERATOR"):
             validation_mode = MODE_AUTO
-        elif confirm_entry_warning or override_validation:
+        elif confirm_entry_warning:
             validation_mode = MODE_MANUAL_CONFIRM
         else:
             validation_mode = MODE_MANUAL_PREVIEW

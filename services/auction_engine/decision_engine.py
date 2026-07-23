@@ -2,8 +2,7 @@
 
 Setup Manager owns stock-local opportunity selection. This layer validates the
 selected candidate and converts the manager result into a signal-agnostic local
-assessment. It does not apply Advisor policy, inspect active signals/trades, or
-build a signal payload.
+assessment. It does not inspect active signals/trades or build persistence payloads.
 """
 from __future__ import annotations
 
@@ -35,9 +34,6 @@ class DecisionEngine:
         diagnostics = {
             "decision_scope": "LOCAL_AUCTION_ONLY",
             "signal_lifecycle_applied": False,
-            "active_signal_context_applied": False,
-            "advisor_context_applied": False,
-            "signal_payload_created": False,
             "manager_intent": manager.action.value,
         }
 

@@ -160,7 +160,7 @@
   }
 
   function normalizeRow(r) {
-    const entryPrice = num(r.entry_price ?? r.signal_price ?? 0) ?? 0;
+    const entryPrice = num(r.entry_price ?? 0) ?? 0;
     const qty = num(r.qty ?? r.quantity ?? 0) ?? 0;
     const last = num(r.last_price ?? entryPrice) ?? entryPrice;
 
@@ -174,8 +174,7 @@
       id: r.id ?? null,
       userid: r.userid ?? "",
 
-      entry_plan_time: r.entry_plan_time ?? r.signal_date ?? "",
-      signal_date: r.signal_date ?? r.entry_plan_time ?? "",
+      entry_plan_time: r.entry_plan_time ?? "",
       execution_time: r.execution_time ?? "",
       date: r.date ?? "",
       origin: upper(r.origin, "UNKNOWN"),
@@ -188,7 +187,6 @@
       trade_type: r.trade_type ?? "–",
 
       product: r.product ?? "MIS",
-      signal_price: num(r.signal_price ?? entryPrice) ?? entryPrice,
       entry_price: entryPrice,
       quantity: qty,
       qty: qty,
@@ -307,7 +305,7 @@
 
       DT.row.add([
         esc(r.userid || "—"),
-        esc(r.entry_plan_time || r.signal_date || r.date || "–"),
+        esc(r.entry_plan_time || r.date || "–"),
         esc(originLabel(r.origin)),
         esc(r.symbol),
         `${esc(r.instrument_type)} / ${esc(r.product || "MIS")} ${renderModeBadge(r.execution_mode)}`,
@@ -339,7 +337,7 @@
     $("#oe-head-side").text(row.trade_type || "BUY");
     $("#oe-head-price").text(fmtMoney(row.entry_price));
 
-    $("#oe-entry-time").text(row.entry_plan_time || row.signal_date || row.date || "—");
+    $("#oe-entry-time").text(row.entry_plan_time || row.date || "—");
     $("#oe-origin").text(originLabel(row.origin));
     $("#oe-management-mode").text(managementLabel(row.management_mode));
     $("#oe-signal-reference").text(row.signal_reference || "—");

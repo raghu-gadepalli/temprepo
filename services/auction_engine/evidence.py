@@ -3,7 +3,7 @@
 Phase 2 is report-only.  This module converts one completed ``SnapshotSchema``
 (or an equivalent dictionary) into objective, typed evidence.  It deliberately
 uses current and prior snapshots only and does not discover a setup, create a
-signal, write ``stock_setup_state``, or alter the existing Evidence V2 path.
+signal, write external lifecycle state, or invoke a second decision engine.
 
 The builder reuses neutral snapshot facts such as OHLC, VWAP, dynamic range,
 market windows and indicator values.  Existing setup labels/conclusions are not
@@ -936,7 +936,7 @@ class EvidenceBuilder:
         if not isinstance(derivatives, Mapping):
             raise EvidenceBuildError("snapshot.derivatives must be a mapping")
 
-        preferred = tuple(self.config.advisor.derivatives_preferred_windows)
+        preferred = tuple(self.config.evidence.derivatives_preferred_windows)
         option_windows = derivatives["option_sentiment_windows"]
         future_windows = derivatives["future_sentiment_windows"]
         option_key, option_row = _preferred_derivatives_window(

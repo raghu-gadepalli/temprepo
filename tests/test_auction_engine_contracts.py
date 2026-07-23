@@ -32,14 +32,11 @@ from services.auction_engine.contracts import (
     EvidenceFact,
     EvidencePolarity,
     EvidenceSnapshot,
-    FinalAction,
-    FinalDecision,
     FrozenRange,
     ManagerAction,
     ManagerDecision,
     SetupCandidate,
     SetupFamily,
-    SignalCreatePayload,
     TradeSide,
     stable_key,
 )
@@ -50,8 +47,6 @@ class AuctionEngineConfigTests(unittest.TestCase):
         self.assertFalse(AUCTION_ENGINE_CONFIG.engine.enabled)
         self.assertFalse(AUCTION_ENGINE_CONFIG.engine.replace_current_signal_path)
         self.assertFalse(AUCTION_ENGINE_CONFIG.decision.create_enabled)
-        self.assertFalse(AUCTION_ENGINE_CONFIG.persistence.write_enabled)
-        self.assertTrue(AUCTION_ENGINE_CONFIG.advisor.observation_only)
 
     def test_config_hash_is_stable_and_json_safe(self) -> None:
         first = AUCTION_ENGINE_CONFIG.stable_hash()
@@ -214,48 +209,6 @@ class AuctionEngineContractTests(unittest.TestCase):
         payload["blockers"] = ("NO_ROOM",)
         with self.assertRaises(ValidationError):
             SetupCandidate.model_validate(payload)
-
-    def test_create_decision_requires_matching_payload(self) -> None:
-        candidate = self._candidate()
-        manager = ManagerDecision(
-            symbol="TEST",
-            snapshot_time=self.ts,
-            action=ManagerAction.SELECT,
-            selected_candidate_id=candidate.candidate_id,
-            config_version=self.version,
-        )
-        with self.assertRaises(ValidationError):
-            FinalDecision(
-                symbol="TEST",
-                trading_day=self.ts.date(),
-                snapshot_time=self.ts,
-                action=FinalAction.CREATE,
-                selected_candidate=candidate,
-                manager_decision=manager,
-                config_version=self.version,
-            )
-
-        signal_payload = SignalCreatePayload(
-            equity_ref="eq-test",
-            symbol="TEST",
-            snapshot_time=self.ts,
-            lifecycle="EVIDENCE_V2",
-            setup_label="BREAKOUT_INITIATION",
-            side=TradeSide.BUY,
-            meta_json={"initiated_setup_label": "BREAKOUT_INITIATION"},
-        )
-        decision = FinalDecision(
-            symbol="TEST",
-            trading_day=self.ts.date(),
-            snapshot_time=self.ts,
-            action=FinalAction.CREATE,
-            selected_candidate=candidate,
-            manager_decision=manager,
-            signal_payload=signal_payload,
-            config_version=self.version,
-        )
-        self.assertEqual(decision.action, FinalAction.CREATE)
-        json.dumps(decision.to_storage_dict())
 
     def test_auction_state_rejects_future_transition(self) -> None:
         with self.assertRaises(ValidationError):

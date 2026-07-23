@@ -2,8 +2,7 @@
 
 The engine owns evidence interpretation, auction state, boundary episodes,
 setup candidates, the stock-day opportunity ledger, local arbitration and the
-final local opportunity assessment. It does not read signal/trade state, apply
-Advisor policy, create signal payloads, or perform database writes.
+final local opportunity assessment. It does not read signal/trade state, create persistence payloads or perform database writes.
 """
 
 from __future__ import annotations
@@ -58,8 +57,8 @@ class _HistoryEvidence:
 class AuctionEngine:
     """Chronological pure Auction Engine.
 
-    Checkpoint methods remain temporarily for compatibility with the parallel
-    branch and will be removed when snapshot-carried state is introduced.
+    Incremental-state methods serialize the bounded Auction memory carried by
+    the strict snapshot contract. They do not read or write a database table.
     """
 
     def __init__(
@@ -213,14 +212,11 @@ class AuctionEngine:
             candidates=candidates,
             manager_decision=manager,
             local_decision=local_decision,
-            advisor_decisions=(),
-            final_decision=None,
             diagnostics={
                 "phase": "PURE_ANALYTICAL_CORE",
                 "decision_scope": "LOCAL_AUCTION_ONLY",
                 "signal_lifecycle_applied": False,
                 "active_signal_context_applied": False,
-                "advisor_context_applied": False,
                 "opportunity_consumption_applied": False,
                 "proposed_state": state_evaluation.proposed_state.value,
                 "transitioned": state_evaluation.transitioned,

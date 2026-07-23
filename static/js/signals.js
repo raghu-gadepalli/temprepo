@@ -81,19 +81,8 @@
 
   function currentSetupLabel(row) {
     const direct = String(row?.current_setup || "").trim().toUpperCase();
-    if (direct) return direct;
-
-    const candidates = [
-      getPath(row, "meta.current_evidence.setup_label", ""),
-      getPath(row, "meta.current_evidence.primary_candidate.setup_label", ""),
-      getPath(row, "meta.active_signal_evidence.primary_candidate.setup_label", ""),
-      getPath(row, "meta.active_signal_evidence.top_same_side_candidate.setup_label", "")
-    ];
-    for (const value of candidates) {
-      const label = String(value || "").trim().toUpperCase();
-      if (label) return label;
-    }
-    return signalSetupLabel(row);
+    if (!direct) throw new Error("Signal row is missing current_setup");
+    return direct;
   }
 
   function buildTradePayload(signalRow) {
@@ -125,7 +114,7 @@
     const terminalStatuses = new Set([
       "INVALIDATED", "EXPIRED", "REPLACED", "CLOSED", "CANCELLED", "BLOCKED"
     ]);
-    const posture = upper(row?.management_posture || row?.active_evidence_action);
+    const posture = upper(row?.management_posture);
     const tradeAction = upper(row?.lifecycle_trade_action);
     if (terminalStatuses.has(status)) return `Signal is ${status.toLowerCase()}.`;
     if (["EXIT_BIAS", "FORCE_EXIT"].includes(stage)) return "Signal is in an exit posture and cannot create a new trade.";
@@ -136,7 +125,7 @@
 
   function signalTradeWarning(row) {
     const stage = upper(row?.stage);
-    const posture = upper(row?.management_posture || row?.active_evidence_action);
+    const posture = upper(row?.management_posture);
     if (["PROTECT", "TRANSITION", "WEAKENING"].includes(stage) || posture === "CAUTION") {
       return "Manual confirmation required for the current defensive signal posture.";
     }
@@ -441,7 +430,7 @@
       `${setup} ${side} signal.`,
       `Signal lifecycle: ${safeStr(row?.stage)} / ${safeStr(row?.status)}.`,
       `Auction: ${safeStr(row?.auction_action)} / ${safeStr(row?.auction_state)}.`,
-      `Management posture: ${safeStr(row?.management_posture || row?.active_evidence_action)}.`,
+      `Management posture: ${safeStr(row?.management_posture)}.`,
       `Directional alignment: ${safeStr(row?.directional_alignment)}.`,
       `Lifecycle reason: ${safeStr(row?.lifecycle_reason || row?.reason)}.`
     ];
@@ -460,10 +449,10 @@
       ["Setup", safeStr(displaySetup(signalSetupLabel(row)))],
       ["Signal Stage", stageBadge(row.stage)],
       ["Signal Status", statusBadge(row.status)],
-      ["Management Posture", escHtml(safeStr(row?.management_posture || row?.active_evidence_action))],
+      ["Management Posture", escHtml(safeStr(row?.management_posture))],
       ["Current Trade Instruction", escHtml(safeStr(row?.lifecycle_trade_action))],
       ["Directional Alignment", escHtml(safeStr(row?.directional_alignment))],
-      ["Lifecycle Reason", escHtml(safeStr(row?.lifecycle_reason || row?.active_evidence_reason || row?.reason))],
+      ["Lifecycle Reason", escHtml(safeStr(row?.lifecycle_reason || row?.reason))],
       ["Confidence", escHtml(confidence)],
       ["Quality", escHtml(quality)]
     ];

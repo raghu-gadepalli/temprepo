@@ -58,7 +58,7 @@ class StrictAuctionTradeMonitorContractTests(unittest.TestCase):
 
     def test_valid_signal_contract_parses_exact_identity(self):
         context = AuctionTradeSignalContext.from_signal(_signal())
-        self.assertEqual("AUCTION_SIGNAL_DOWNSTREAM_V1", context.contract_version)
+        self.assertEqual("AUCTION_SIGNAL_DOWNSTREAM_V2", context.contract_version)
         self.assertEqual("ACTIVE", context.stage)
         self.assertEqual("STRENGTHEN", context.management_posture)
         self.assertTrue(context.is_strengthening)
@@ -166,13 +166,11 @@ class StrictAuctionTradeMonitorContractTests(unittest.TestCase):
         signal.meta_json["signal"]["stage"] = "EXIT_BIAS"
         signal.meta_json["lifecycle"]["stage"] = "EXIT_BIAS"
         signal.meta_json["lifecycle"]["trade_action"] = "EXIT_POSITION"
-        evidence = signal.meta_json["active_signal_evidence"]
-        evidence["stage"] = "EXIT_BIAS"
-        evidence["active_evidence_action"] = "EXIT"
-        evidence["evidence_action"] = "EXIT"
-        evidence["trade_action"] = "EXIT_POSITION"
-        evidence["should_exit_signal"] = True
-        evidence["target_expansion_allowed"] = False
+        management = signal.meta_json["management"]
+        management["stage"] = "EXIT_BIAS"
+        management["action"] = "EXIT"
+        management["should_exit_signal"] = True
+        management["target_expansion_allowed"] = False
         context = AuctionTradeSignalContext.from_signal(signal)
         self.assertTrue(context.requires_exit)
         decision = TradeMonHelper.evaluate(
@@ -266,7 +264,7 @@ class StrictAuctionTradeMonitorContractTests(unittest.TestCase):
         self.assertIn("strict TradeMonitor audit was not persisted", source)
         self.assertNotIn("trade monitor audit failed", source)
 
-    def test_replay_has_overridable_defaults_and_signal_exit_mode(self):
+    def test_replay_has_overridable_adaptive_multi_defaults(self):
         root = Path(__file__).resolve().parents[1]
         source = (
             root / "tests" / "replay_auction_signal_trade_pipeline.py"
@@ -274,7 +272,9 @@ class StrictAuctionTradeMonitorContractTests(unittest.TestCase):
         self.assertIn('DEFAULT_TRADING_DAY = "2026-07-20"', source)
         self.assertIn('DEFAULT_SYMBOLS = "COFORGE"', source)
         self.assertIn('DEFAULT_USERID = "DR1812"', source)
-        self.assertIn('DEFAULT_TEST_MODE = "SIGNAL_EXIT"', source)
+        self.assertIn('DEFAULT_INSTRUMENT_CHOICE = "MULTI"', source)
+        self.assertIn('DEFAULT_TEST_MODE = "ADAPTIVE_EXIT"', source)
+        self.assertIn('DEFAULT_REQUIRE_DERIVATIVES = True', source)
         self.assertIn("argparse.BooleanOptionalAction", source)
         self.assertIn("_deterministic_replay_clock", source)
         self.assertIn("SIGNAL_LIFECYCLE_EXIT", source)
@@ -296,13 +296,11 @@ class StrictAuctionTradeMonitorContractTests(unittest.TestCase):
         signal.meta_json["signal"]["stage"] = "EXIT_BIAS"
         signal.meta_json["lifecycle"]["stage"] = "EXIT_BIAS"
         signal.meta_json["lifecycle"]["trade_action"] = "EXIT_POSITION"
-        evidence = signal.meta_json["active_signal_evidence"]
-        evidence["stage"] = "EXIT_BIAS"
-        evidence["active_evidence_action"] = "EXIT"
-        evidence["evidence_action"] = "EXIT"
-        evidence["trade_action"] = "EXIT_POSITION"
-        evidence["should_exit_signal"] = True
-        evidence["target_expansion_allowed"] = False
+        management = signal.meta_json["management"]
+        management["stage"] = "EXIT_BIAS"
+        management["action"] = "EXIT"
+        management["should_exit_signal"] = True
+        management["target_expansion_allowed"] = False
         contract = AuctionTradeSignalContext.from_signal(signal)
         ctx = SimpleNamespace(
             signal_contract=contract,

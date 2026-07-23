@@ -1,6 +1,6 @@
 # models.py
 
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import (
     DECIMAL,
     BigInteger,
@@ -432,56 +432,6 @@ class DerivativesChain(Base):
             f"<DerivativesChain"
             f"{self.symbol} @ {self.snapshot_time}>"
         )
-
-# -----------------------------------
-# Persistent setup state / pre-entry memory
-# -----------------------------------
-
-class StockSetupState(Base):
-    __tablename__ = "stock_setup_state"
-
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-
-    trading_day = Column(Date, nullable=False)
-    equity_ref = Column(String(32), nullable=False)
-    symbol = Column(String(32), nullable=False)
-    lifecycle = Column(String(64), nullable=False, default="DEFAULT")
-    setup = Column(String(64), nullable=False)
-    side = Column(String(8), nullable=False)
-
-    state = Column(String(32), nullable=False)
-    state_reason = Column(String(255), nullable=True)
-
-    first_seen_time = Column(DateTime, nullable=True)
-    last_seen_time = Column(DateTime, nullable=True)
-    expires_at = Column(DateTime, nullable=True)
-    age_bars = Column(Integer, nullable=True)
-
-    discovery_price = Column(DECIMAL(16, 6), nullable=True)
-    discovery_extreme_price = Column(DECIMAL(16, 6), nullable=True)
-    confirmation_price = Column(DECIMAL(16, 6), nullable=True)
-    confirmation_time = Column(DateTime, nullable=True)
-    reference_price = Column(DECIMAL(16, 6), nullable=True)
-    reference_source = Column(String(64), nullable=True)
-    signal_id = Column(String(36), nullable=True)
-
-    state_json = Column(JSON, nullable=True)
-
-    # Setup lifecycle timestamps are supplied from snapshot/replay time.
-    # Database wall-clock defaults are deliberately forbidden so missing
-    # observation time fails instead of silently corrupting event chronology.
-    created_at = Column(DateTime, nullable=False)
-    updated_at = Column(DateTime, nullable=False)
-
-    __table_args__ = (
-        UniqueConstraint("trading_day", "equity_ref", "setup", "side", name="uq_stock_setup_state_day_ref_setup_side"),
-        Index("idx_stock_setup_state_lookup", "trading_day", "equity_ref", "setup", "side", "state"),
-        Index("idx_stock_setup_state_expiry", "trading_day", "state", "expires_at"),
-        Index("idx_stock_setup_state_symbol_time", "symbol", "last_seen_time"),
-    )
-
-    def __repr__(self):
-        return f"<StockSetupState {self.trading_day} {self.equity_ref} {self.setup} {self.side} {self.state}>"
 
 
 # -----------------------------------
@@ -1036,100 +986,3 @@ class Alert(Base):
 
     def __repr__(self):
         return f"<Alert id={self.id} etime={self.etime} message='{self.message}'>"
-
-# -----------------------------------
-# Auction Engine Opportunity Ledger
-# -----------------------------------
-
-class StockOpportunity(Base):
-    """Current projection of one immutable operational opportunity."""
-
-    __tablename__ = "stock_opportunities"
-    __table_args__ = (
-        UniqueConstraint("opportunity_key", name="uk_stock_opportunity_key"),
-        Index("idx_stock_opportunity_symbol_day", "symbol", "trading_day"),
-        Index("idx_stock_opportunity_active", "symbol", "trading_day", "lifecycle_state", "side"),
-        Index("idx_stock_opportunity_boundary", "boundary_event_key"),
-        {"info": {"intraday": True}},
-    )
-
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    trading_day = Column(Date, nullable=False)
-    symbol = Column(String(50), nullable=False)
-    opportunity_key = Column(String(255), nullable=False)
-    boundary_event_key = Column(String(255), nullable=False)
-    range_id = Column(String(255), nullable=True)
-    side = Column(String(8), nullable=False)
-    primary_setup_family = Column(String(50), nullable=False)
-    primary_setup_subtype = Column(String(100), nullable=False)
-    primary_candidate_id = Column(String(255), nullable=False)
-    primary_candidate_role = Column(String(50), nullable=False)
-    lifecycle_state = Column(String(30), nullable=False)
-    attempt_time = Column(DateTime, nullable=True)
-    first_observed_time = Column(DateTime, nullable=False)
-    last_observed_time = Column(DateTime, nullable=False)
-    eligible_time = Column(DateTime, nullable=True)
-    terminal_time = Column(DateTime, nullable=True)
-    selected_time = Column(DateTime, nullable=True)
-    consumed_time = Column(DateTime, nullable=True)
-    entry_anchor_price = Column(Numeric(14, 4), nullable=True)
-    boundary_price = Column(Numeric(14, 4), nullable=True)
-    stop_anchor_price = Column(Numeric(14, 4), nullable=True)
-    target_basis = Column(String(100), nullable=True)
-    target_reference_price = Column(Numeric(14, 4), nullable=True)
-    source_auction_state = Column(String(50), nullable=True)
-    established_trend_side = Column(String(8), nullable=True)
-    candidate_interpretations_json = Column(JSON, nullable=False)
-    event_history_json = Column(JSON, nullable=False)
-    reason_codes_json = Column(JSON, nullable=False)
-    diagnostics_json = Column(JSON, nullable=False)
-    config_version = Column(String(100), nullable=False)
-    signal_id = Column(String(36), nullable=True)
-    created_at = Column(DateTime, nullable=False)
-    updated_at = Column(DateTime, nullable=False)
-
-
-# -----------------------------------
-# Auction Engine Restart Checkpoint
-# -----------------------------------
-
-class StockEngineCheckpoint(Base):
-    """One complete recoverable Auction Engine state per symbol/day."""
-
-    __tablename__ = "stock_engine_checkpoints"
-    __table_args__ = (
-        UniqueConstraint(
-            "trading_day", "symbol", "engine_name",
-            name="uk_stock_engine_checkpoint_day_symbol_engine",
-        ),
-        Index(
-            "idx_stock_engine_checkpoint_lookup",
-            "trading_day", "engine_name", "checkpoint_status",
-        ),
-        Index(
-            "idx_stock_engine_checkpoint_time",
-            "symbol", "last_processed_snapshot_time",
-        ),
-        {"info": {"intraday": True}},
-    )
-
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    trading_day = Column(Date, nullable=False)
-    symbol = Column(String(50), nullable=False)
-    engine_name = Column(String(64), nullable=False)
-    engine_version = Column(String(32), nullable=False)
-    config_version = Column(String(100), nullable=False)
-    last_processed_snapshot_time = Column(DateTime, nullable=False)
-    last_snapshot_hash = Column(String(64), nullable=True)
-    checkpoint_status = Column(String(32), nullable=False, default="ACTIVE")
-    checkpoint_version = Column(Integer, nullable=False, default=1)
-    state_json = Column(JSON, nullable=False)
-    diagnostics_json = Column(JSON, nullable=False)
-    created_at = Column(DateTime, nullable=False)
-    updated_at = Column(DateTime, nullable=False)
-
-    def __repr__(self):
-        return (
-            f"<StockEngineCheckpoint {self.trading_day} {self.symbol} "
-            f"{self.engine_name} @ {self.last_processed_snapshot_time}>"
-        )

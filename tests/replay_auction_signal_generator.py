@@ -122,9 +122,9 @@ def _downstream_meta(signal: SignalSchema) -> Dict[str, Dict[str, Any]]:
         "downstream_contract",
         "signal",
         "lifecycle",
-        "active_signal_evidence",
+        "management",
         "setup_levels",
-        "initiated_setup",
+        "auction_signal",
     )
     missing = [key for key in required if key not in meta]
     if missing:
@@ -140,7 +140,7 @@ def _downstream_meta(signal: SignalSchema) -> Dict[str, Dict[str, Any]]:
             )
         output[key] = value
     version = output["downstream_contract"]["version"]
-    if version != "AUCTION_SIGNAL_DOWNSTREAM_V1":
+    if version != "AUCTION_SIGNAL_DOWNSTREAM_V2":
         raise ValueError(
             f"Signal {signal.signal_id} downstream contract version is {version}"
         )
@@ -205,7 +205,7 @@ def _signal_rows(
         downstream_contract = downstream["downstream_contract"]
         signal_block = downstream["signal"]
         lifecycle_block = downstream["lifecycle"]
-        active_evidence = downstream["active_signal_evidence"]
+        management = downstream["management"]
         setup_levels = downstream["setup_levels"]
         result.append(sanitize_json({
             "signal_id": signal.signal_id,
@@ -238,12 +238,12 @@ def _signal_rows(
             "downstream_signal_action": signal_block["signal_action"],
             "downstream_signal_state": signal_block["signal_state"],
             "downstream_trade_action": lifecycle_block["trade_action"],
-            "active_evidence_action": active_evidence["active_evidence_action"],
-            "active_evidence_reason_code": active_evidence["reason_code"],
-            "trail_mode": active_evidence["trail_mode"],
-            "exit_pressure": active_evidence["exit_pressure"],
-            "target_expansion_allowed": active_evidence["target_expansion_allowed"],
-            "should_exit_signal": active_evidence["should_exit_signal"],
+            "management_posture": management["action"],
+            "management_reason_code": management["reason_code"],
+            "trail_mode": management["trail_mode"],
+            "exit_pressure": management["exit_pressure"],
+            "target_expansion_allowed": management["target_expansion_allowed"],
+            "should_exit_signal": management["should_exit_signal"],
             "setup_reference_price": setup_levels["reference_price"],
             "setup_reference_source": setup_levels["reference_source"],
             "posture_history_count": len(history),
@@ -301,7 +301,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     action_counts: Counter[str] = Counter()
     stage_counts: Counter[str] = Counter()
     status_counts: Counter[str] = Counter()
-    active_evidence_action_counts: Counter[str] = Counter()
+    management_posture_counts: Counter[str] = Counter()
     trade_action_counts: Counter[str] = Counter()
     should_exit_signal_count = 0
     for index, snapshot in enumerate(snapshots, start=1):
@@ -321,8 +321,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         signal_reason = latest_signal.status_reason if latest_signal is not None else None
         latest_lifecycle_action = None
         latest_alignment = None
-        active_evidence_action = None
-        active_evidence_reason_code = None
+        management_posture = None
+        management_reason_code = None
         trail_mode = None
         exit_pressure = None
         target_expansion_allowed = None
@@ -343,21 +343,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             latest_lifecycle_action = lifecycle_payload["signal_action"]
             latest_alignment = lifecycle_payload["directional_alignment"]
             downstream = _downstream_meta(latest_signal)
-            active_evidence = downstream["active_signal_evidence"]
+            management = downstream["management"]
             lifecycle_block = downstream["lifecycle"]
             signal_block = downstream["signal"]
             setup_levels = downstream["setup_levels"]
             downstream_contract_version = downstream["downstream_contract"]["version"]
-            active_evidence_action = active_evidence["active_evidence_action"]
-            active_evidence_reason_code = active_evidence["reason_code"]
-            trail_mode = active_evidence["trail_mode"]
-            exit_pressure = active_evidence["exit_pressure"]
-            target_expansion_allowed = active_evidence["target_expansion_allowed"]
-            should_exit_signal = active_evidence["should_exit_signal"]
+            management_posture = management["management_posture"]
+            management_reason_code = management["reason_code"]
+            trail_mode = management["trail_mode"]
+            exit_pressure = management["exit_pressure"]
+            target_expansion_allowed = management["target_expansion_allowed"]
+            should_exit_signal = management["should_exit_signal"]
             downstream_trade_action = lifecycle_block["trade_action"]
             downstream_signal_state = signal_block["signal_state"]
             setup_reference_price = setup_levels["reference_price"]
-            active_evidence_action_counts[str(active_evidence_action)] += 1
+            management_posture_counts[str(management_posture)] += 1
             trade_action_counts[str(downstream_trade_action)] += 1
             if bool(should_exit_signal):
                 should_exit_signal_count += 1
@@ -382,8 +382,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "downstream_contract_version": downstream_contract_version,
             "downstream_signal_state": downstream_signal_state,
             "downstream_trade_action": downstream_trade_action,
-            "active_evidence_action": active_evidence_action,
-            "active_evidence_reason_code": active_evidence_reason_code,
+            "management_posture": management_posture,
+            "management_reason_code": management_reason_code,
             "trail_mode": trail_mode,
             "exit_pressure": exit_pressure,
             "target_expansion_allowed": target_expansion_allowed,
@@ -412,8 +412,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "signal_action_counts": dict(sorted(action_counts.items())),
         "signal_stage_observation_counts": dict(sorted(stage_counts.items())),
         "signal_status_observation_counts": dict(sorted(status_counts.items())),
-        "active_evidence_action_counts": dict(
-            sorted(active_evidence_action_counts.items())
+        "management_posture_counts": dict(
+            sorted(management_posture_counts.items())
         ),
         "downstream_trade_action_counts": dict(sorted(trade_action_counts.items())),
         "should_exit_signal_observations": should_exit_signal_count,
@@ -434,8 +434,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "signal_status_observation_counts": json.dumps(
             summary["signal_status_observation_counts"], sort_keys=True
         ),
-        "active_evidence_action_counts": json.dumps(
-            summary["active_evidence_action_counts"], sort_keys=True
+        "management_posture_counts": json.dumps(
+            summary["management_posture_counts"], sort_keys=True
         ),
         "downstream_trade_action_counts": json.dumps(
             summary["downstream_trade_action_counts"], sort_keys=True

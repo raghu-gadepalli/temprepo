@@ -1,8 +1,7 @@
 """Pure cross-opportunity arbitration for the Auction Engine.
 
 The manager consumes the factual stock-day opportunity ledger. It never
-recomputes setup eligibility, reads signal/trade state, or applies Advisor
-context. Candidate aliases are already collapsed by ``opportunity_key``; the
+recomputes setup eligibility, reads signal/trade state, or applies external signal/trade context. Candidate aliases are already collapsed by ``opportunity_key``; the
 manager selects an actually ELIGIBLE alias, considers fresh WATCH opposition
 explicitly, and derives rotation from historical local selections.
 """
@@ -70,7 +69,6 @@ class SetupManager:
         diagnostics: Dict[str, object] = {
             "decision_scope": "LOCAL_AUCTION_ONLY",
             "signal_context_applied": False,
-            "advisor_context_applied": False,
             "unique_opportunity_count": len(records),
             "active_eligible_count": len(active),
             "active_watch_count": len(watches),

@@ -3,14 +3,10 @@
 This package exposes strict contracts plus a causal Common Evidence Ledger, a
 chronological Auction State Engine, unified boundary episodes, setup candidates,
 a stock-day opportunity ledger, deterministic local opportunity arbitration and
-a signal-agnostic local decision. It does not read signal/trade state, apply
-Advisor policy, create signal payloads or write persistent engine state.
+a signal-agnostic local decision. It does not read signal/trade state, create persistence payloads or write engine state.
 """
 
 from services.auction_engine.contracts import (
-    AdvisorChannel,
-    AdvisorDecision,
-    AdvisorRecommendation,
     AuctionEngineResult,
     AuctionState,
     AuctionStateName,
@@ -32,8 +28,6 @@ from services.auction_engine.contracts import (
     EvidencePolarity,
     EvidenceSnapshot,
     ExtensionEvidence,
-    FinalAction,
-    FinalDecision,
     LocalDecision,
     LocalDecisionAction,
     FrozenRange,
@@ -48,7 +42,6 @@ from services.auction_engine.contracts import (
     RunManifest,
     SetupCandidate,
     SetupFamily,
-    SignalCreatePayload,
     SourceQuality,
     StoredStateEnvelope,
     TradeSide,
@@ -84,10 +77,8 @@ __all__ = [
     "SetupFamily",
     "CandidateEligibility",
     "CandidateRole",
-    "AdvisorRecommendation",
     "ContextAlignment",
     "ManagerAction",
-    "FinalAction",
     "LocalDecisionAction",
     "ContractModel",
     "Reason",
@@ -108,11 +99,7 @@ __all__ = [
     "FrozenRange",
     "BoundaryEpisode",
     "SetupCandidate",
-    "AdvisorChannel",
-    "AdvisorDecision",
     "ManagerDecision",
-    "SignalCreatePayload",
-    "FinalDecision",
     "LocalDecision",
     "StoredStateEnvelope",
     "AuctionEngineResult",

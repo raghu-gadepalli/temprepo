@@ -2,7 +2,7 @@
 
 Phase 2.5 retains the episode-oriented
 auction lifecycle.  It remains report-only and in-memory: no setup candidates,
-signals, processed flags or ``stock_setup_state`` rows are written.
+signals, processed flags, or external lifecycle rows are written.
 
 Key guarantees
 --------------

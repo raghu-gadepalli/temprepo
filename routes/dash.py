@@ -486,7 +486,6 @@ def _to_orders_row(tr):
         "management_mode": _trade_management_mode(tr),
 
         "entry_plan_time": _fmt_ist(_trade_entry_display_time(tr)),
-        "signal_date": _fmt_ist(_trade_entry_display_time(tr)),  # compatibility alias
         "execution_time": _fmt_ist(getattr(tr, "entry_exec_time", None)),
         "date": _fmt_ist(getattr(tr, "last_time", None)),
 
@@ -495,8 +494,6 @@ def _to_orders_row(tr):
         "instrument_type": getattr(tr, "instrument_type", "") or "",
         "trade_type": getattr(tr, "trade_type", "") or "",
         "product": getattr(tr, "product", "") or "",
-
-        "signal_price": _safe_float(getattr(tr, "signal_price", None), display_entry_price),  # compatibility alias
 
         "entry_price": display_entry_price,
         "planned_entry_price": planned_entry_price,
@@ -594,7 +591,6 @@ def _to_position_trade_row(tr):
         "trade_type": getattr(tr, "trade_type", "") or "",
 
         "entry_plan_time": _fmt_ist(_trade_entry_display_time(tr)),
-        "entry_time": _fmt_ist(_trade_entry_display_time(tr)),  # compatibility alias
         "execution_time": _fmt_ist(getattr(tr, "entry_exec_time", None)),
         "entry_exec_time": _fmt_ist(getattr(tr, "entry_exec_time", None)),
         "entry_price": _trade_entry_display_price(tr),
@@ -800,8 +796,6 @@ def _trade_preview_summary(userid: str, result: dict) -> dict:
     result = result or {}
     form = result.get("trade_form") if isinstance(result.get("trade_form"), dict) else {}
     validation = form.get("entry_eligibility") if isinstance(form.get("entry_eligibility"), dict) else {}
-    if not validation:
-        validation = form.get("trade_validation") if isinstance(form.get("trade_validation"), dict) else {}
     details = result.get("details") if isinstance(result.get("details"), dict) else {}
     if not validation and details.get("decision"):
         validation = details
@@ -815,8 +809,7 @@ def _trade_preview_summary(userid: str, result: dict) -> dict:
         "decision": decision,
         "allowed": bool(validation.get("allowed")) if validation else decision == "ALLOW",
         "entry_decision": _safe_str(validation.get("entry_decision"), ""),
-        "requires_confirmation": bool(form.get("requires_confirmation") or form.get("requires_override") or decision == "WAIT"),
-        "requires_override": bool(form.get("requires_confirmation") or form.get("requires_override") or decision == "WAIT"),
+        "requires_confirmation": bool(form.get("requires_confirmation") or decision == "WAIT"),
         "reasons": reasons,
         "warnings": warnings,
         "error": result.get("error"),
@@ -991,12 +984,7 @@ def trading_create_trade():
             signal_id = str(payload.get("signal_id") or "").strip()
             instrument_choice = str(payload.get("instrument_choice") or "MULTI").strip().upper()
             requested_product = str(payload.get("product") or "MIS").strip().upper()
-            confirm_entry_warning = bool(
-                payload.get("confirm_entry_warning")
-                or payload.get("override_validation")
-                or payload.get("override")
-                or False
-            )
+            confirm_entry_warning = bool(payload.get("confirm_entry_warning") or False)
             selected_trade_symbol = str(payload.get("trade_symbol") or "").strip().upper()
             selected_quantity = _safe_int(payload.get("quantity") or payload.get("qty") or 0, 0)
             selected_lots = _safe_int(payload.get("lots") or 0, 0)

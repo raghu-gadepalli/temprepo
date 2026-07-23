@@ -9,8 +9,8 @@ Design rules
 * Models are frozen after validation.
 * Decision-time contracts contain only current and prior information.
 * Future MFE/MAE is isolated in ``OutcomeMetrics`` and cannot be attached to an
-  ``EvidenceSnapshot`` or used by a ``FinalDecision``.
-* Every CREATE decision carries an explicit, adapter-ready signal payload.
+  ``EvidenceSnapshot`` or local Auction decision.
+* Local Auction decisions remain signal-agnostic; SignalGenerator owns persistence.
 * Reason codes and independent confidence channels remain visible; no layer is
   represented by one opaque score.
 """
@@ -147,12 +147,6 @@ class CandidateRole(StringEnum):
     FAILED_RESOLUTION_ENTRY = "FAILED_RESOLUTION_ENTRY"
 
 
-class AdvisorRecommendation(StringEnum):
-    ALLOW = "ALLOW"
-    WATCH = "WATCH"
-    BLOCK = "BLOCK"
-
-
 class ContextAlignment(StringEnum):
     SUPPORT = "SUPPORT"
     CONFLICT = "CONFLICT"
@@ -167,31 +161,12 @@ class ManagerAction(StringEnum):
     NO_ACTION = "NO_ACTION"
 
 
-class FinalAction(StringEnum):
-    """Legacy signal-lifecycle action used by the parallel Auction service.
-
-    The pure Auction Engine no longer emits this action. It is retained during
-    the transition so the old parallel runner can be removed in a later patch
-    without making this first refactor unnecessarily broad.
-    """
-
-    CREATE = "CREATE"
-    DEFER = "DEFER"
-    BLOCK = "BLOCK"
-    INVALIDATE = "INVALIDATE"
-    HOLD = "HOLD"
-    NO_ACTION = "NO_ACTION"
-    STRENGTHEN = "STRENGTHEN"
-    WEAKEN = "WEAKEN"
-
-
 class LocalDecisionAction(StringEnum):
     """Pure market/opportunity outcome emitted by the Auction Engine.
 
     These values deliberately avoid signal-lifecycle verbs. A downstream
     SignalGenerator may later translate LOCAL_CONFIRMED into CREATE, UPDATE,
-    HOLD or INVALIDATE after it loads active signal state and applies Advisor
-    context.
+    HOLD or INVALIDATE after it loads the exact active signal state.
     """
 
     NO_OPPORTUNITY = "NO_LOCAL_OPPORTUNITY"
@@ -216,7 +191,7 @@ class ContractModel(BaseModel):
     model_config = CONTRACT_CONFIG
 
     def to_storage_dict(self, *, exclude_none: bool = True) -> Dict[str, Any]:
-        """Return a JSON-safe payload for reports or ``stock_setup_state``."""
+        """Return a JSON-safe payload for reports and snapshot continuity."""
 
         return self.model_dump(mode="json", exclude_none=exclude_none)
 
@@ -462,7 +437,7 @@ class MarketContextEvidence(ContractModel):
 
 class DerivativesContextEvidence(ContractModel):
     # Absolute directional interpretation from the current derivatives schema.
-    # Candidate-relative SUPPORT/CONFLICT is produced later by ContextAdvisor.
+    # Candidate-relative interpretation is not part of this factual evidence block.
     futures_bias: DirectionalBias = DirectionalBias.UNKNOWN
     options_bias: DirectionalBias = DirectionalBias.UNKNOWN
     futures_alignment: ContextAlignment = ContextAlignment.UNKNOWN
@@ -809,44 +784,6 @@ class SetupCandidate(ContractModel):
         return self
 
 
-class AdvisorChannel(ContractModel):
-    name: str = Field(min_length=1)
-    alignment: ContextAlignment = ContextAlignment.UNKNOWN
-    quality: QualityStatus = QualityStatus.UNKNOWN
-    score: Optional[float] = Field(default=None, ge=0.0, le=100.0)
-    reason_codes: Tuple[str, ...] = ()
-    diagnostics: Dict[str, Any] = Field(default_factory=dict)
-
-
-class AdvisorDecision(ContractModel):
-    symbol: str = Field(min_length=1)
-    snapshot_time: datetime
-    family: SetupFamily
-    side: TradeSide
-    candidate_id: str = Field(min_length=1)
-    recommendation: AdvisorRecommendation
-    stock_day_alignment: ContextAlignment = ContextAlignment.UNKNOWN
-    market_alignment: ContextAlignment = ContextAlignment.UNKNOWN
-    derivatives_alignment: ContextAlignment = ContextAlignment.UNKNOWN
-    trend_conflict: bool = False
-    maturity_risk: bool = False
-    data_quality: QualityStatus = QualityStatus.UNKNOWN
-    channels: Tuple[AdvisorChannel, ...] = ()
-    reason_codes: Tuple[str, ...] = ()
-    valid_until: Optional[datetime] = None
-    observation_only: bool = True
-    diagnostics: Dict[str, Any] = Field(default_factory=dict)
-    config_version: str = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def _validate_advisor(self) -> "AdvisorDecision":
-        if self.side not in (TradeSide.BUY, TradeSide.SELL):
-            raise ValueError("AdvisorDecision.side must be BUY or SELL")
-        if self.valid_until is not None and self.valid_until < self.snapshot_time:
-            raise ValueError("AdvisorDecision.valid_until cannot precede snapshot_time")
-        return self
-
-
 class ManagerDecision(ContractModel):
     symbol: str = Field(min_length=1)
     snapshot_time: datetime
@@ -869,96 +806,11 @@ class ManagerDecision(ContractModel):
         return self
 
 
-class SignalCreatePayload(ContractModel):
-    """Neutral payload consumed later by an existing-lifecycle adapter."""
-
-    equity_ref: str = Field(min_length=1)
-    symbol: str = Field(min_length=1)
-    snapshot_time: datetime
-    lifecycle: str = Field(min_length=1)
-    setup_label: str = Field(min_length=1)
-    side: TradeSide
-    stage: str = "ACTIVE"
-    status_reason: str = ""
-    criteria_json: Dict[str, Any] = Field(default_factory=dict)
-    snapshot_json: Dict[str, Any] = Field(default_factory=dict)
-    meta_json: Dict[str, Any] = Field(default_factory=dict)
-    analytics: Dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("setup_label", "lifecycle", "stage", mode="before")
-    @classmethod
-    def _normalise_labels(cls, value: Any) -> str:
-        text = str(value or "").strip().upper()
-        if not text:
-            raise ValueError("Signal payload label is required")
-        return text
-
-    @model_validator(mode="after")
-    def _validate_payload(self) -> "SignalCreatePayload":
-        if self.side not in (TradeSide.BUY, TradeSide.SELL):
-            raise ValueError("SignalCreatePayload.side must be BUY or SELL")
-        initiated = (
-            self.meta_json["initiated_setup_label"]
-            if "initiated_setup_label" in self.meta_json
-            else None
-        )
-        if initiated is not None and str(initiated).strip().upper() != self.setup_label:
-            raise ValueError("meta_json initiated_setup_label must match setup_label")
-        return self
-
-
-class FinalDecision(ContractModel):
-    symbol: str = Field(min_length=1)
-    trading_day: date
-    snapshot_time: datetime
-    action: FinalAction
-    selected_candidate: Optional[SetupCandidate] = None
-    manager_decision: ManagerDecision
-    advisor_decision: Optional[AdvisorDecision] = None
-    active_signal_id: Optional[str] = None
-    reason_codes: Tuple[str, ...] = ()
-    reasons: Tuple[Reason, ...] = ()
-    signal_payload: Optional[SignalCreatePayload] = None
-    valid_until: Optional[datetime] = None
-    diagnostics: Dict[str, Any] = Field(default_factory=dict)
-    config_version: str = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def _validate_final_decision(self) -> "FinalDecision":
-        if self.trading_day != self.snapshot_time.date():
-            raise ValueError("FinalDecision.trading_day must match snapshot_time")
-        if self.manager_decision.symbol != self.symbol:
-            raise ValueError("ManagerDecision symbol must match FinalDecision symbol")
-        if self.manager_decision.snapshot_time != self.snapshot_time:
-            raise ValueError("ManagerDecision snapshot_time must match FinalDecision")
-        if self.action is FinalAction.CREATE:
-            if self.selected_candidate is None:
-                raise ValueError("CREATE requires selected_candidate")
-            if self.signal_payload is None:
-                raise ValueError("CREATE requires signal_payload")
-            if self.signal_payload.symbol != self.symbol:
-                raise ValueError("Signal payload symbol must match FinalDecision")
-            if self.signal_payload.snapshot_time != self.snapshot_time:
-                raise ValueError("Signal payload snapshot_time must match FinalDecision")
-            if self.signal_payload.side is not self.selected_candidate.side:
-                raise ValueError("Signal payload side must match selected candidate")
-            if self.signal_payload.setup_label != self.selected_candidate.family.value:
-                raise ValueError("Signal payload setup_label must match candidate family")
-        elif self.signal_payload is not None:
-            raise ValueError("Only CREATE may carry signal_payload")
-        if self.action is FinalAction.INVALIDATE and not self.active_signal_id:
-            raise ValueError("INVALIDATE requires active_signal_id")
-        if self.valid_until is not None and self.valid_until < self.snapshot_time:
-            raise ValueError("FinalDecision.valid_until cannot precede snapshot_time")
-        return self
-
-
 class LocalDecision(ContractModel):
     """Signal-agnostic local Auction Engine assessment.
 
     The contract contains only the Setup Manager conclusion and the currently
-    selected local candidate. It has no active-signal, Advisor or signal-payload
-    fields.
+    selected local candidate. It has no active-signal or persistence-payload fields.
     """
 
     symbol: str = Field(min_length=1)
@@ -1029,11 +881,6 @@ class AuctionEngineResult(ContractModel):
     local_decision: LocalDecision
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
-    # Transitional fields retained only so old report/persistence code can be
-    # removed in a later patch. The pure engine always leaves them empty.
-    advisor_decisions: Tuple[AdvisorDecision, ...] = ()
-    final_decision: Optional[FinalDecision] = None
-
     @model_validator(mode="after")
     def _validate_result_alignment(self) -> "AuctionEngineResult":
         objects = (
@@ -1042,8 +889,6 @@ class AuctionEngineResult(ContractModel):
             self.manager_decision,
             self.local_decision,
         )
-        if self.final_decision is not None:
-            objects = (*objects, self.final_decision)
         for obj in objects:
             if obj.symbol != self.symbol or obj.snapshot_time != self.snapshot_time:
                 raise ValueError("AuctionEngineResult contracts must share symbol/snapshot_time")
@@ -1138,14 +983,12 @@ __all__ = [
     "TradeSide", "BoundarySide", "DirectionalBias", "QualityStatus",
     "EvidencePolarity", "AuctionStateName", "BoundaryEpisodeStatus",
     "BoundaryResolution", "SetupFamily", "CandidateEligibility", "CandidateRole",
-    "AdvisorRecommendation", "ContextAlignment", "ManagerAction", "FinalAction",
-    "LocalDecisionAction",
+    "ContextAlignment", "ManagerAction", "LocalDecisionAction",
     "ContractModel", "Reason", "SourceQuality", "EvidenceFact", "ConfidenceChannel",
     "BarEvidence", "PriceActionEvidence", "BoundaryObservation", "TrendEvidence",
     "CompressionEvidence", "ExtensionEvidence", "OpportunityEvidence",
     "MarketContextEvidence", "DerivativesContextEvidence", "EvidenceSnapshot",
     "AuctionState", "FrozenRange", "BoundaryEpisode", "SetupCandidate",
-    "AdvisorChannel", "AdvisorDecision", "ManagerDecision", "SignalCreatePayload",
-    "FinalDecision", "LocalDecision", "StoredStateEnvelope", "AuctionEngineResult", "RunManifest",
+    "ManagerDecision", "LocalDecision", "StoredStateEnvelope", "AuctionEngineResult", "RunManifest",
     "OutcomeMetrics", "stable_key",
 ]

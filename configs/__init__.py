@@ -1,6 +1,5 @@
 """Typed configuration objects for AutoTrades."""
 
-from configs.evidence_config import EVIDENCE_CONFIG
 from configs.signal_config import SIGNAL_CONFIG
 from configs.snapshot_config import SNAPSHOT_CONFIG
 from configs.derivatives_config import DERIVATIVES_CONFIG
@@ -13,7 +12,6 @@ from configs.broker_config import BROKER_CONFIG
 from configs.audit_config import AUDIT_CONFIG
 
 __all__ = [
-    "EVIDENCE_CONFIG",
     "SIGNAL_CONFIG",
     "SNAPSHOT_CONFIG",
     "DERIVATIVES_CONFIG",

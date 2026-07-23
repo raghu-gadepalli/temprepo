@@ -14,21 +14,21 @@ Pipeline per persisted snapshot
 Safety and scope
 ----------------
 - Does NOT regenerate snapshots or Auction.
-- Does NOT read/write stock_setup_state, stock_opportunities, or checkpoints.
+- Does not read or write any retired Auction persistence tables.
 - Does NOT mark snapshots processed.
 - Forces snapshot pricing and requires a VIRTUAL replay user.
 - Restricts executor and monitor reads to the selected userid, trading day,
   and underlying symbols so unrelated live/test trades cannot be touched.
 - Optional cleanup is explicit and restricted to the selected replay scope.
 
-Default COFORGE signal-exit command (PowerShell)
+Default COFORGE adaptive multi-instrument command (PowerShell)
 --------------------------------------------------
 
     $env:PYTHONPATH = "$PWD;$PWD\\tests"
     python tests/replay_auction_signal_trade_pipeline.py
 
 The defaults are declared near the top of this file. Every value can be
-overridden from the command line, for example ``--test-mode ADAPTIVE_EXIT``.
+overridden from the command line, for example ``--test-mode SIGNAL_EXIT``.
 """
 from __future__ import annotations
 
@@ -81,11 +81,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_TRADING_DAY = "2026-07-20"
 DEFAULT_SYMBOLS = "COFORGE"
 DEFAULT_USERID = "DR1812"
-DEFAULT_INSTRUMENT_CHOICE = "EQ"
-DEFAULT_TEST_MODE = "SIGNAL_EXIT"
+DEFAULT_INSTRUMENT_CHOICE = "MULTI"
+DEFAULT_TEST_MODE = "ADAPTIVE_EXIT"
 DEFAULT_CLEAR_RUN_DATA = True
 DEFAULT_REQUIRE_TRADE = True
 DEFAULT_REQUIRE_EXIT = True
+DEFAULT_REQUIRE_DERIVATIVES = True
 DEFAULT_REPORT_DIR = "reports"
 
 _EXPECTED_TRADEGEN_NONFATAL = {
@@ -153,6 +154,15 @@ def _args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=DEFAULT_REQUIRE_EXIT,
         help=f"Require at least one FILLED exit (default: {DEFAULT_REQUIRE_EXIT})",
+    )
+    parser.add_argument(
+        "--require-derivatives",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_REQUIRE_DERIVATIVES,
+        help=(
+            "Require strict FUT and directional-option creation/pricing validation "
+            f"(default: {DEFAULT_REQUIRE_DERIVATIVES})"
+        ),
     )
     parser.add_argument("--start-time", help="Optional inclusive HH:MM[:SS] filter")
     parser.add_argument("--end-time", help="Optional inclusive HH:MM[:SS] filter")
@@ -274,12 +284,15 @@ def _validate_replay_user(userid: str, instrument_choice: str) -> UserSchema:
     if _enum_str(getattr(user, "execution_mode", None)) != "VIRTUAL":
         failures.append("users.execution_mode must be VIRTUAL")
 
-    if instrument_choice == "EQ" and int(getattr(user, "equity", 0) or 0) != 1:
-        failures.append("users.equity must be 1 for EQ replay")
-    if instrument_choice == "FUT" and int(getattr(user, "futures", 0) or 0) != 1:
-        failures.append("users.futures must be 1 for FUT replay")
-    if instrument_choice in {"CE", "PE"} and int(getattr(user, "options", 0) or 0) != 1:
-        failures.append("users.options must be 1 for option replay")
+    requires_equity = instrument_choice in {"EQ", "MULTI"}
+    requires_futures = instrument_choice in {"FUT", "MULTI"}
+    requires_options = instrument_choice in {"CE", "PE", "MULTI"}
+    if requires_equity and int(getattr(user, "equity", 0) or 0) != 1:
+        failures.append("users.equity must be 1")
+    if requires_futures and int(getattr(user, "futures", 0) or 0) != 1:
+        failures.append("users.futures must be 1")
+    if requires_options and int(getattr(user, "options", 0) or 0) != 1:
+        failures.append("users.options must be 1")
 
     if failures:
         raise ValueError(
@@ -645,16 +658,16 @@ def _signal_context(signal: Optional[SignalSchema]) -> Dict[str, Any]:
     version = str(
         _required_value(contract, "version", "signal.meta_json.downstream_contract")
     ).strip()
-    if version != "AUCTION_SIGNAL_DOWNSTREAM_V1":
+    if version != "AUCTION_SIGNAL_DOWNSTREAM_V2":
         raise ValueError(f"Unsupported signal downstream contract: {version}")
 
     lifecycle = _required_mapping(
         _required_value(meta, "lifecycle", "signal.meta_json"),
         "signal.meta_json.lifecycle",
     )
-    evidence = _required_mapping(
-        _required_value(meta, "active_signal_evidence", "signal.meta_json"),
-        "signal.meta_json.active_signal_evidence",
+    management = _required_mapping(
+        _required_value(meta, "management", "signal.meta_json"),
+        "signal.meta_json.management",
     )
     setup_levels = _required_mapping(
         _required_value(meta, "setup_levels", "signal.meta_json"),
@@ -667,22 +680,22 @@ def _signal_context(signal: Optional[SignalSchema]) -> Dict[str, Any]:
         "signal_status": signal.status.value,
         "signal_reason": signal.status_reason,
         "management_posture": _required_value(
-            evidence, "active_evidence_action", "signal.meta_json.active_signal_evidence"
+            management, "action", "signal.meta_json.management"
         ),
         "lifecycle_trade_action": _required_value(
             lifecycle, "trade_action", "signal.meta_json.lifecycle"
         ),
         "should_exit_signal": _required_value(
-            evidence, "should_exit_signal", "signal.meta_json.active_signal_evidence"
+            management, "should_exit_signal", "signal.meta_json.management"
         ),
         "signal_auction_action": _required_value(
-            evidence, "auction_action", "signal.meta_json.active_signal_evidence"
+            management, "auction_action", "signal.meta_json.management"
         ),
         "signal_auction_state": _required_value(
-            evidence, "auction_state", "signal.meta_json.active_signal_evidence"
+            management, "auction_state", "signal.meta_json.management"
         ),
         "signal_directional_alignment": _required_value(
-            evidence, "directional_alignment", "signal.meta_json.active_signal_evidence"
+            management, "directional_alignment", "signal.meta_json.management"
         ),
         "opportunity_key": _required_value(
             setup_levels, "opportunity_key", "signal.meta_json.setup_levels"
@@ -873,6 +886,150 @@ def _validate_replay_timestamps(
                     f"trade {trade.id} {field} escaped replay day: {value}"
                 )
 
+def _snapshot_time_naive_ist(value: datetime) -> datetime:
+    return value.astimezone(IST).replace(tzinfo=None) if value.tzinfo else value
+
+
+def _derivative_quote_for_trade(
+    *, snapshot: SnapshotSchema, trade: UserTradeSchema
+) -> Dict[str, Any]:
+    instrument_type = trade.instrument_type.value
+    derivatives = snapshot.derivatives.model_dump(mode="python")
+
+    if instrument_type == "FUT":
+        future = _required_mapping(
+            _required_value(derivatives, "future", "snapshot.derivatives"),
+            "snapshot.derivatives.future",
+        )
+        expected_symbol = str(
+            _required_value(future, "instrument", "snapshot.derivatives.future")
+        ).strip().upper()
+        expected_price = float(
+            _required_value(future, "last_price", "snapshot.derivatives.future")
+        )
+    elif instrument_type in {"CE", "PE"}:
+        ladder = _required_mapping(
+            _required_value(derivatives, "option_ladder", "snapshot.derivatives"),
+            "snapshot.derivatives.option_ladder",
+        )
+        side_key = "calls" if instrument_type == "CE" else "puts"
+        contracts = _required_value(
+            ladder, side_key, "snapshot.derivatives.option_ladder"
+        )
+        if not isinstance(contracts, list):
+            raise TypeError(
+                f"snapshot.derivatives.option_ladder.{side_key} must be an array"
+            )
+        matches = []
+        for contract in contracts:
+            if not isinstance(contract, dict):
+                raise TypeError(
+                    f"snapshot.derivatives.option_ladder.{side_key} entries must be objects"
+                )
+            contract_symbol = str(
+                _required_value(contract, "symbol", f"option_ladder.{side_key}")
+            ).strip().upper()
+            if contract_symbol == trade.symbol.strip().upper():
+                matches.append(contract)
+        if len(matches) != 1:
+            raise ValueError(
+                f"Expected exactly one derivative quote for {trade.symbol}; "
+                f"found {len(matches)}"
+            )
+        contract = matches[0]
+        expected_symbol = str(
+            _required_value(contract, "symbol", f"option_ladder.{side_key}")
+        ).strip().upper()
+        expected_price = float(
+            _required_value(contract, "ltp", f"option_ladder.{side_key}")
+        )
+    else:
+        raise ValueError(
+            f"Derivative quote validation does not support {instrument_type}"
+        )
+
+    if expected_price <= 0:
+        raise ValueError(f"Derivative quote for {expected_symbol} must be positive")
+    return {
+        "expected_symbol": expected_symbol,
+        "expected_entry_price": expected_price,
+        "snapshot_time": snapshot.snapshot_time,
+    }
+
+
+def _derivative_validation_rows(
+    *, snapshots: List[SnapshotSchema], trades: List[UserTradeSchema]
+) -> List[Dict[str, Any]]:
+    by_key = {
+        (
+            snapshot.symbol.strip().upper(),
+            _snapshot_time_naive_ist(snapshot.snapshot_time),
+        ): snapshot
+        for snapshot in snapshots
+    }
+    rows: List[Dict[str, Any]] = []
+    for trade in trades:
+        instrument_type = trade.instrument_type.value
+        if instrument_type not in {"FUT", "CE", "PE"}:
+            continue
+        if trade.entry_time is None:
+            raise ValueError(f"Derivative trade {trade.id} is missing entry_time")
+        key = (
+            trade.equity_ref.strip().upper(),
+            _snapshot_time_naive_ist(trade.entry_time),
+        )
+        if key not in by_key:
+            raise LookupError(f"No entry snapshot for derivative trade {trade.id}: {key}")
+        quote = _derivative_quote_for_trade(snapshot=by_key[key], trade=trade)
+        planned = float(trade.entry_price)
+        executed = (
+            float(trade.executed_entry_price)
+            if trade.executed_entry_price is not None
+            else None
+        )
+        tolerance = max(1e-9, abs(quote["expected_entry_price"]) * 1e-9)
+        symbol_matches = trade.symbol.strip().upper() == quote["expected_symbol"]
+        planned_matches = abs(planned - quote["expected_entry_price"]) <= tolerance
+        executed_matches = (
+            executed is not None
+            and abs(executed - quote["expected_entry_price"]) <= tolerance
+        )
+        rows.append(
+            {
+                "trade_id": trade.id,
+                "instrument_type": instrument_type,
+                "trade_symbol": trade.symbol,
+                "entry_snapshot_time": quote["snapshot_time"],
+                "expected_symbol": quote["expected_symbol"],
+                "expected_entry_price": quote["expected_entry_price"],
+                "planned_entry_price": planned,
+                "executed_entry_price": executed,
+                "symbol_matches": symbol_matches,
+                "planned_price_matches": planned_matches,
+                "executed_price_matches": executed_matches,
+                "validation_status": (
+                    "PASSED"
+                    if symbol_matches and planned_matches and executed_matches
+                    else "FAILED"
+                ),
+            }
+        )
+    return rows
+
+
+def _validate_derivative_coverage(
+    *, trades: List[UserTradeSchema], rows: List[Dict[str, Any]]
+) -> None:
+    instruments = {trade.instrument_type.value for trade in trades}
+    if "FUT" not in instruments:
+        raise AssertionError("Derivative replay did not create a FUT trade")
+    if not ({"CE", "PE"} & instruments):
+        raise AssertionError("Derivative replay did not create an option trade")
+    failed = [row for row in rows if row["validation_status"] != "PASSED"]
+    if failed:
+        raise AssertionError(f"Derivative entry quote validation failed: {failed}")
+
+
 def _record_validation_failure(
     failures: List[Dict[str, Any]],
     *,
@@ -930,7 +1087,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     logger.info(
         "Resolved replay configuration | date=%s symbols=%s userid=%s "
-        "instrument=%s test_mode=%s clear=%s require_trade=%s require_exit=%s report_dir=%s",
+        "instrument=%s test_mode=%s clear=%s require_trade=%s require_exit=%s require_derivatives=%s report_dir=%s",
         trading_day,
         symbols,
         userid,
@@ -939,6 +1096,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         bool(args.clear_run_data),
         bool(args.require_trade),
         bool(args.require_exit),
+        bool(args.require_derivatives),
         report_dir,
     )
     _validate_replay_user(userid, instrument_choice)
@@ -1212,6 +1370,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ),
     )
 
+    derivative_rows: List[Dict[str, Any]] = []
+    try:
+        derivative_rows = _derivative_validation_rows(
+            snapshots=snapshots, trades=final_trades
+        )
+    except Exception as exc:
+        _record_validation_failure(
+            validation_failures,
+            code="DERIVATIVE_VALIDATION_BUILD",
+            message=str(exc),
+            details={"error_type": type(exc).__name__},
+        )
+    if args.require_derivatives:
+        _capture_validation(
+            validation_failures,
+            code="DERIVATIVE_COVERAGE",
+            validator=lambda: _validate_derivative_coverage(
+                trades=final_trades, rows=derivative_rows
+            ),
+        )
+
     if test_mode == "SIGNAL_EXIT":
         if first_signal_exit_request_time is None:
             _record_validation_failure(
@@ -1364,6 +1543,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "test_mode": test_mode,
             "adaptive_target_exit_enabled": test_mode == "ADAPTIVE_EXIT",
             "adaptive_stop_exit_enabled": test_mode == "ADAPTIVE_EXIT",
+            "derivatives_enabled": instrument_choice in {"FUT", "CE", "PE", "MULTI"},
+            "require_derivatives": bool(args.require_derivatives),
+            "derivative_validation_rows": len(derivative_rows),
+            "derivative_validation_failures": sum(
+                1 for row in derivative_rows if row["validation_status"] != "PASSED"
+            ),
             "first_signal_exit_request_time": first_signal_exit_request_time,
             "lifecycle": lifecycle,
             "snapshots": len(snapshots),
@@ -1425,6 +1610,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     _write_csv(
         prefix.with_name(prefix.name + "_validation.csv"),
         validation_failures,
+    )
+    _write_csv(
+        prefix.with_name(prefix.name + "_derivative_validation.csv"),
+        derivative_rows,
     )
 
     prefix.with_name(prefix.name + "_summary.json").write_text(

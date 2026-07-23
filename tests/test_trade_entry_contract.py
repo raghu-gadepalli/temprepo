@@ -7,14 +7,11 @@ Auction replay scripts, trade execution, or database writes.
 
 from __future__ import annotations
 
-import os
-import sys
 import unittest
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from services.trade.generator.tradegen_validator import (
     DOWNSTREAM_CONTRACT_VERSION,
@@ -49,8 +46,6 @@ def make_signal(
     trade_action: str = "HOLD_POSITION",
     should_exit: bool = False,
     status: str = "OPEN",
-    confidence=None,
-    quality=None,
 ):
     setup_levels = {
         "entry_price": 100.0,
@@ -64,34 +59,62 @@ def make_signal(
         "setup_subtype": "CONTINUATION_ACCEPTANCE",
         "side": "BUY",
     }
+    setup_levels["contract_version"] = DOWNSTREAM_CONTRACT_VERSION
+    setup_levels["source"] = "AUCTION"
+    reason = f"TEST_{stage}_{posture}"
+    alignment = "ALIGNED" if posture == "STRENGTHEN" else "NEUTRAL"
     meta = {
         "downstream_contract": {
             "version": DOWNSTREAM_CONTRACT_VERSION,
             "source": "AUCTION_SIGNAL_GENERATOR",
         },
         "signal": {
+            "contract_version": DOWNSTREAM_CONTRACT_VERSION,
             "stage": stage,
+            "status": status,
+            "side": "BUY",
+            "setup_label": "ACCEPTED_BREAKOUT",
+            "primary_pattern": "CONTINUATION_ACCEPTANCE",
             "signal_action": "HOLD",
             "signal_state": "MANAGE",
-            "signal_reason": f"TEST_{stage}_{posture}",
-            "trade_action": trade_action,
-            "confidence": confidence,
-            "quality": quality,
+            "signal_reason": reason,
         },
         "lifecycle": {
+            "contract_version": DOWNSTREAM_CONTRACT_VERSION,
             "stage": stage,
+            "status": status,
+            "side": "BUY",
             "trade_action": trade_action,
             "signal_action": "HOLD",
+            "signal_state": "MANAGE",
+            "signal_reason": reason,
         },
-        "active_signal_evidence": {
-            "active_evidence_action": posture,
-            "evidence_action": posture,
+        "management": {
+            "contract_version": DOWNSTREAM_CONTRACT_VERSION,
+            "action": posture,
+            "reason_code": reason,
+            "stage": stage,
+            "signal_status": status,
+            "side": "BUY",
+            "setup_family": "ACCEPTED_BREAKOUT",
+            "setup_subtype": "CONTINUATION_ACCEPTANCE",
+            "opportunity_key": "OPPORTUNITY:test",
+            "candidate_id": "CANDIDATE:test",
+            "boundary_event_key": "BOUNDARY_EVENT:test",
             "should_exit_signal": should_exit,
             "auction_action": "LOCAL_CONFIRMED",
             "auction_state": "ORDERLY_UPTREND",
-            "directional_alignment": "ALIGNED" if posture == "STRENGTHEN" else "NEUTRAL",
+            "directional_alignment": alignment,
         },
         "setup_levels": setup_levels,
+        "auction_signal": {
+            "opportunity_key": "OPPORTUNITY:test",
+            "candidate_id": "CANDIDATE:test",
+            "boundary_event_key": "BOUNDARY_EVENT:test",
+            "setup_family": "ACCEPTED_BREAKOUT",
+            "setup_subtype": "CONTINUATION_ACCEPTANCE",
+            "side": "BUY",
+        },
     }
     return SimpleNamespace(
         signal_id="SIGNAL:test",
@@ -171,11 +194,6 @@ class TradeEntryLifecycleTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "db unavailable"):
                 TradeDecisionHelper.evaluate(user=make_user(), signal=signal, mode=MODE_AUTO)
-
-    def test_confidence_and_quality_remain_not_emitted(self):
-        decision = self.evaluate(signal=make_signal(confidence=None, quality=None))
-        self.assertIsNone(decision.details["confidence"])
-        self.assertIsNone(decision.details["quality"])
 
     def test_setup_levels_have_one_canonical_path(self):
         signal = make_signal()

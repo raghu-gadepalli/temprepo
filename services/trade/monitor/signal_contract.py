@@ -3,7 +3,7 @@
 
 TradeMonitor does not rank peer signals, recompute evidence, infer confidence, or
 search compatibility paths. A signal-linked trade must resolve the exact source
-signal and that signal must carry the current ``AUCTION_SIGNAL_DOWNSTREAM_V1``
+signal and that signal must carry the current ``AUCTION_SIGNAL_DOWNSTREAM_V2``
 contract emitted by SignalGenerator.
 """
 
@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any, Mapping, Optional
 
 
-CONTRACT_VERSION = "AUCTION_SIGNAL_DOWNSTREAM_V1"
+CONTRACT_VERSION = "AUCTION_SIGNAL_DOWNSTREAM_V2"
 _ALLOWED_STAGES = {
     "DISCOVERY",
     "BUILDING",
@@ -187,32 +187,23 @@ class AuctionTradeSignalContext:
         downstream = _required_mapping(meta, "downstream_contract", "signal.meta_json")
         signal_block = _required_mapping(meta, "signal", "signal.meta_json")
         lifecycle = _required_mapping(meta, "lifecycle", "signal.meta_json")
-        evidence = _required_mapping(meta, "active_signal_evidence", "signal.meta_json")
+        management = _required_mapping(meta, "management", "signal.meta_json")
         setup_levels = _required_mapping(meta, "setup_levels", "signal.meta_json")
         identity = _required_mapping(meta, "auction_signal", "signal.meta_json")
 
         version = _required_raw_text(downstream, "version", "downstream_contract")
         _assert_equal("downstream contract version", version, CONTRACT_VERSION)
-        _assert_equal(
-            "signal block contract version",
-            _required_raw_text(signal_block, "contract_version", "signal"),
-            CONTRACT_VERSION,
-        )
-        _assert_equal(
-            "lifecycle contract version",
-            _required_raw_text(lifecycle, "contract_version", "lifecycle"),
-            CONTRACT_VERSION,
-        )
-        _assert_equal(
-            "active evidence contract version",
-            _required_raw_text(evidence, "contract_version", "active_signal_evidence"),
-            CONTRACT_VERSION,
-        )
-        _assert_equal(
-            "setup levels contract version",
-            _required_raw_text(setup_levels, "contract_version", "setup_levels"),
-            CONTRACT_VERSION,
-        )
+        for block_name, block in (
+            ("signal", signal_block),
+            ("lifecycle", lifecycle),
+            ("management", management),
+            ("setup_levels", setup_levels),
+        ):
+            _assert_equal(
+                f"{block_name} contract version",
+                _required_raw_text(block, "contract_version", block_name),
+                CONTRACT_VERSION,
+            )
 
         side = _required_text(signal_block, "side", "signal")
         setup_family = _required_text(signal_block, "setup_label", "signal")
@@ -227,47 +218,34 @@ class AuctionTradeSignalContext:
         lifecycle_reason_2 = _required_raw_text(lifecycle, "signal_reason", "lifecycle")
         trade_action = _required_text(lifecycle, "trade_action", "lifecycle")
 
-        management_posture = _required_text(
-            evidence,
-            "active_evidence_action",
-            "active_signal_evidence",
-        )
-        evidence_action_alias = _required_text(
-            evidence,
-            "evidence_action",
-            "active_signal_evidence",
-        )
-        management_reason = _required_raw_text(
-            evidence,
-            "reason_code",
-            "active_signal_evidence",
-        )
-        evidence_stage = _required_text(evidence, "stage", "active_signal_evidence")
-        evidence_side = _required_text(evidence, "active_side", "active_signal_evidence")
-        evidence_status = _required_text(evidence, "signal_status", "active_signal_evidence")
-        auction_action = _required_text(evidence, "auction_action", "active_signal_evidence")
-        auction_state = _required_text(evidence, "auction_state", "active_signal_evidence")
+        management_posture = _required_text(management, "action", "management")
+        management_reason = _required_raw_text(management, "reason_code", "management")
+        management_stage = _required_text(management, "stage", "management")
+        management_side = _required_text(management, "side", "management")
+        management_status = _required_text(management, "signal_status", "management")
+        auction_action = _required_text(management, "auction_action", "management")
+        auction_state = _required_text(management, "auction_state", "management")
         directional_alignment = _required_text(
-            evidence,
+            management,
             "directional_alignment",
-            "active_signal_evidence",
+            "management",
         )
         target_expansion_allowed = _required_bool(
-            evidence,
+            management,
             "target_expansion_allowed",
-            "active_signal_evidence",
+            "management",
         )
         should_exit = _required_bool(
-            evidence,
+            management,
             "should_exit_signal",
-            "active_signal_evidence",
+            "management",
         )
-        trail_mode = _required_text(evidence, "trail_mode", "active_signal_evidence")
-        exit_pressure = _required_text(evidence, "exit_pressure", "active_signal_evidence")
+        trail_mode = _required_text(management, "trail_mode", "management")
+        exit_pressure = _required_text(management, "exit_pressure", "management")
         snapshot_time = _required_datetime_text(
-            evidence,
+            management,
             "snapshot_time",
-            "active_signal_evidence",
+            "management",
         )
 
         opportunity_key = _required_raw_text(setup_levels, "opportunity_key", "setup_levels")
@@ -283,88 +261,33 @@ class AuctionTradeSignalContext:
         _assert_equal("ORM setup", setup_family, orm_setup)
         _assert_equal("ORM stage", stage, orm_stage)
         _assert_equal("signal/lifecycle stage", stage, lifecycle_stage)
-        _assert_equal("signal/evidence stage", stage, evidence_stage)
+        _assert_equal("signal/management stage", stage, management_stage)
         _assert_equal("signal/lifecycle action", signal_action, lifecycle_action)
         _assert_equal("signal/lifecycle state", signal_state, lifecycle_state)
         _assert_equal("signal/lifecycle reason", lifecycle_reason, lifecycle_reason_2)
-        _assert_equal("signal/evidence side", side, evidence_side)
-        _assert_equal("ORM/evidence status", orm_status, evidence_status)
-        _assert_equal("evidence action alias", management_posture, evidence_action_alias)
-        _assert_equal(
-            "setup levels/identity opportunity",
-            opportunity_key,
-            _required_raw_text(identity, "opportunity_key", "auction_signal"),
+        _assert_equal("signal/management side", side, management_side)
+        _assert_equal("ORM/management status", orm_status, management_status)
+
+        identity_checks = (
+            ("opportunity", opportunity_key, "opportunity_key", False),
+            ("candidate", candidate_id, "candidate_id", False),
+            ("boundary", boundary_event_key, "boundary_event_key", False),
+            ("setup", setup_family, "setup_family", True),
+            ("subtype", setup_subtype, "setup_subtype", True),
+            ("side", side, "side", True),
         )
-        _assert_equal(
-            "setup levels/identity candidate",
-            candidate_id,
-            _required_raw_text(identity, "candidate_id", "auction_signal"),
-        )
-        _assert_equal(
-            "setup levels/identity boundary",
-            boundary_event_key,
-            _required_raw_text(identity, "boundary_event_key", "auction_signal"),
-        )
-        _assert_equal(
-            "setup levels/identity setup",
-            setup_family,
-            _required_text(identity, "setup_family", "auction_signal"),
-        )
-        _assert_equal(
-            "setup levels/identity subtype",
-            setup_subtype,
-            _required_text(identity, "setup_subtype", "auction_signal"),
-        )
-        _assert_equal(
-            "setup levels/identity side",
-            side,
-            _required_text(identity, "side", "auction_signal"),
-        )
-        _assert_equal(
-            "active evidence opportunity",
-            opportunity_key,
-            _required_raw_text(
-                evidence,
-                "active_opportunity_key",
-                "active_signal_evidence",
-            ),
-        )
-        _assert_equal(
-            "active evidence candidate",
-            candidate_id,
-            _required_raw_text(
-                evidence,
-                "active_candidate_id",
-                "active_signal_evidence",
-            ),
-        )
-        _assert_equal(
-            "active evidence boundary",
-            boundary_event_key,
-            _required_raw_text(
-                evidence,
-                "active_boundary_event_key",
-                "active_signal_evidence",
-            ),
-        )
-        _assert_equal(
-            "active evidence setup",
-            setup_family,
-            _required_text(
-                evidence,
-                "active_setup_label",
-                "active_signal_evidence",
-            ),
-        )
-        _assert_equal(
-            "active evidence subtype",
-            setup_subtype,
-            _required_text(
-                evidence,
-                "active_setup_subtype",
-                "active_signal_evidence",
-            ),
-        )
+        for label, expected, key, uppercase in identity_checks:
+            reader = _required_text if uppercase else _required_raw_text
+            _assert_equal(
+                f"setup levels/identity {label}",
+                expected,
+                reader(identity, key, "auction_signal"),
+            )
+            _assert_equal(
+                f"setup levels/management {label}",
+                expected,
+                reader(management, key, "management"),
+            )
 
         if stage not in _ALLOWED_STAGES:
             raise ValueError(f"unsupported signal stage: {stage}")
@@ -383,7 +306,7 @@ class AuctionTradeSignalContext:
         )
         if should_exit != derived_exit:
             raise ValueError(
-                "active_signal_evidence.should_exit_signal is inconsistent with "
+                "management.should_exit_signal is inconsistent with "
                 "stage/status/posture/trade_action"
             )
         if target_expansion_allowed and not (

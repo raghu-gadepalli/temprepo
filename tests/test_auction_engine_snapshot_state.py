@@ -18,7 +18,7 @@ from services.auction_engine.snapshot_adapter import (
     empty_auction_memory,
     enrich_snapshot_with_auction,
 )
-from test_auction_engine_phase2 import _snapshot, _test_config
+from tests.auction_test_fixtures import _snapshot, _test_config
 
 
 _STATE_KEYS = (

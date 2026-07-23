@@ -8,7 +8,7 @@ of an already-created trade.
 
 Patch 5.3 rules
 ---------------
-- Parse only ``AUCTION_SIGNAL_DOWNSTREAM_V1``.
+- Parse only ``AUCTION_SIGNAL_DOWNSTREAM_V2``.
 - Automatic entry is allowed only for ACTIVE/EXPAND + STRENGTHEN.
 - Defensive postures require an explicit manual confirmation.
 - EXIT_BIAS/FORCE_EXIT/EXIT/should_exit_signal are hard blocks in every mode.
@@ -29,7 +29,7 @@ from schemas.user_trade import UserTradeSchema
 from utils.datetime_utils import business_now_naive, to_ist_naive
 
 
-DOWNSTREAM_CONTRACT_VERSION = "AUCTION_SIGNAL_DOWNSTREAM_V1"
+DOWNSTREAM_CONTRACT_VERSION = "AUCTION_SIGNAL_DOWNSTREAM_V2"
 
 ACTIVE_ENTRY_STATUSES = {"CREATED", "READY", "SUBMITTED", "FILLED"}
 TERMINAL_EXIT_STATUSES = {"FILLED", "CANCELLED"}
@@ -53,10 +53,6 @@ TRADE_DECISION_BLOCK = "BLOCK"
 MODE_AUTO = "AUTO"
 MODE_MANUAL_PREVIEW = "MANUAL_PREVIEW"
 MODE_MANUAL_CONFIRM = "MANUAL_CONFIRM"
-# Backward-compatible import name.  Its semantics are now limited to soft
-# entry-warning confirmation; it cannot bypass a hard lifecycle exit posture.
-MODE_MANUAL_OVERRIDE = MODE_MANUAL_CONFIRM
-
 
 @dataclass
 class TradeDecision:
@@ -126,113 +122,213 @@ def _optional_float(value: Any) -> Optional[float]:
     return float(value)
 
 
-def _decision_policy() -> Dict[str, Any]:
-    return TRADE_CONFIG.policy.decision.model_dump(mode="python")
+def _decision_policy_value(key: str) -> Any:
+    policy = TRADE_CONFIG.policy.decision
+    if not hasattr(policy, key):
+        raise AttributeError(f"trade decision policy field is required: {key}")
+    return getattr(policy, key)
 
 
-def _policy_bool(key: str, default: bool) -> bool:
-    return bool(_decision_policy().get(key, default))
+def _policy_bool(key: str) -> bool:
+    value = _decision_policy_value(key)
+    if not isinstance(value, bool):
+        raise TypeError(f"trade decision policy {key} must be boolean")
+    return value
 
 
-def _policy_str(key: str, default: str) -> str:
-    return str(_decision_policy().get(key, default) or default).strip()
+def _policy_str(key: str) -> str:
+    value = str(_decision_policy_value(key)).strip()
+    if not value:
+        raise ValueError(f"trade decision policy {key} cannot be blank")
+    return value
 
 
 def _full_meta(signal: SignalSchema) -> Dict[str, Any]:
     return _as_dict(getattr(signal, "meta_json", None), path="signal.meta_json")
 
 
+def _required_block(meta: Dict[str, Any], key: str) -> Dict[str, Any]:
+    if key not in meta:
+        raise ValueError(f"signal.meta_json.{key} is required")
+    return _as_dict(meta[key], path=f"signal.meta_json.{key}")
+
+
 def _downstream_context(signal: SignalSchema) -> Dict[str, Any]:
     meta = _full_meta(signal)
-    contract = _as_dict(meta.get("downstream_contract"), path="signal.meta_json.downstream_contract")
+    contract = _required_block(meta, "downstream_contract")
+    signal_block = _required_block(meta, "signal")
+    lifecycle = _required_block(meta, "lifecycle")
+    management = _required_block(meta, "management")
+    setup_levels = _required_block(meta, "setup_levels")
+    auction_signal = _required_block(meta, "auction_signal")
+
     version = _required_text(contract, "version", path="signal.meta_json.downstream_contract")
     if version != DOWNSTREAM_CONTRACT_VERSION:
         raise ValueError(
             "Unsupported downstream contract version: "
             f"expected={DOWNSTREAM_CONTRACT_VERSION} actual={version}"
         )
-
-    signal_block = _as_dict(meta.get("signal"), path="signal.meta_json.signal")
-    lifecycle = _as_dict(meta.get("lifecycle"), path="signal.meta_json.lifecycle")
-    evidence = _as_dict(meta.get("active_signal_evidence"), path="signal.meta_json.active_signal_evidence")
-    setup_levels = _as_dict(meta.get("setup_levels"), path="signal.meta_json.setup_levels")
+    for block_name, block in (
+        ("signal", signal_block),
+        ("lifecycle", lifecycle),
+        ("management", management),
+        ("setup_levels", setup_levels),
+    ):
+        block_version = _required_text(
+            block,
+            "contract_version",
+            path=f"signal.meta_json.{block_name}",
+        )
+        if block_version != version:
+            raise ValueError(f"{block_name} contract version mismatch")
 
     stage = _enum_str(getattr(signal, "stage", None))
     if not stage:
-        stage = _enum_str(signal_block.get("stage"))
-    if not stage:
         raise ValueError("signal stage is required")
-
     status = _enum_str(getattr(signal, "status", None))
     if not status:
         raise ValueError("signal status is required")
 
-    evidence_action = _enum_str(
-        evidence.get("active_evidence_action")
-        if "active_evidence_action" in evidence
-        else evidence.get("evidence_action")
-    )
-    if not evidence_action:
-        raise ValueError("active_signal_evidence.active_evidence_action is required")
+    signal_stage = _required_text(signal_block, "stage", path="signal.meta_json.signal").upper()
+    lifecycle_stage = _required_text(lifecycle, "stage", path="signal.meta_json.lifecycle").upper()
+    management_stage = _required_text(management, "stage", path="signal.meta_json.management").upper()
+    if len({stage, signal_stage, lifecycle_stage, management_stage}) != 1:
+        raise ValueError("signal stage mismatch across ORM and downstream contract")
 
-    lifecycle_trade_action = _enum_str(
-        lifecycle.get("trade_action")
-        if "trade_action" in lifecycle
-        else signal_block.get("trade_action")
-    )
-    if not lifecycle_trade_action:
-        raise ValueError("lifecycle.trade_action is required")
+    signal_status = _required_text(signal_block, "status", path="signal.meta_json.signal").upper()
+    lifecycle_status = _required_text(lifecycle, "status", path="signal.meta_json.lifecycle").upper()
+    management_status = _required_text(
+        management,
+        "signal_status",
+        path="signal.meta_json.management",
+    ).upper()
+    if len({status, signal_status, lifecycle_status, management_status}) != 1:
+        raise ValueError("signal status mismatch across ORM and downstream contract")
 
+    management_posture = _required_text(
+        management,
+        "action",
+        path="signal.meta_json.management",
+    ).upper()
+    lifecycle_trade_action = _required_text(
+        lifecycle,
+        "trade_action",
+        path="signal.meta_json.lifecycle",
+    ).upper()
     should_exit = _required_bool(
-        evidence,
+        management,
         "should_exit_signal",
-        path="signal.meta_json.active_signal_evidence",
+        path="signal.meta_json.management",
     )
 
-    setup_family = _required_text(setup_levels, "setup_label", path="signal.meta_json.setup_levels").upper()
+    setup_family = _required_text(
+        setup_levels,
+        "setup_label",
+        path="signal.meta_json.setup_levels",
+    ).upper()
     persisted_setup = _enum_str(getattr(signal, "setup", None))
     if persisted_setup != setup_family:
         raise ValueError(
             f"signal setup identity mismatch persisted={persisted_setup} setup_levels={setup_family}"
         )
 
-    opportunity_key = _required_text(setup_levels, "opportunity_key", path="signal.meta_json.setup_levels")
-    candidate_id = _required_text(setup_levels, "candidate_id", path="signal.meta_json.setup_levels")
+    opportunity_key = _required_text(
+        setup_levels,
+        "opportunity_key",
+        path="signal.meta_json.setup_levels",
+    )
+    candidate_id = _required_text(
+        setup_levels,
+        "candidate_id",
+        path="signal.meta_json.setup_levels",
+    )
     boundary_event_key = _required_text(
         setup_levels,
         "boundary_event_key",
         path="signal.meta_json.setup_levels",
     )
+    setup_subtype = _required_text(
+        setup_levels,
+        "setup_subtype",
+        path="signal.meta_json.setup_levels",
+    ).upper()
+    side = _enum_str(getattr(signal, "side", None))
 
-    signal_reason = str(signal_block.get("signal_reason") or getattr(signal, "status_reason", "") or "").strip()
-    auction_action = _enum_str(evidence.get("auction_action"))
-    auction_state = _enum_str(evidence.get("auction_state"))
-    alignment = _enum_str(evidence.get("directional_alignment"))
+    identity_expected = {
+        "opportunity_key": opportunity_key,
+        "candidate_id": candidate_id,
+        "boundary_event_key": boundary_event_key,
+        "setup_family": setup_family,
+        "setup_subtype": setup_subtype,
+        "side": side,
+    }
+    for key, expected in identity_expected.items():
+        management_value = _required_text(
+            management,
+            key,
+            path="signal.meta_json.management",
+        )
+        identity_value = _required_text(
+            auction_signal,
+            key,
+            path="signal.meta_json.auction_signal",
+        )
+        if key in {"setup_family", "setup_subtype", "side"}:
+            management_value = management_value.upper()
+            identity_value = identity_value.upper()
+        if management_value != expected or identity_value != expected:
+            raise ValueError(f"Auction identity mismatch for {key}")
 
-    confidence = _optional_float(signal_block.get("confidence"))
-    quality = signal_block.get("quality")
-    if quality is not None:
-        quality = str(quality).strip() or None
+    signal_reason = _required_text(
+        signal_block,
+        "signal_reason",
+        path="signal.meta_json.signal",
+    )
+    management_reason = _required_text(
+        management,
+        "reason_code",
+        path="signal.meta_json.management",
+    )
+    if signal_reason != management_reason:
+        raise ValueError("signal and management reason mismatch")
 
     return {
         "contract_version": version,
         "signal_stage": stage,
         "signal_status": status,
-        "signal_action": _enum_str(signal_block.get("signal_action")),
-        "signal_state": _enum_str(signal_block.get("signal_state")),
+        "signal_action": _required_text(
+            signal_block,
+            "signal_action",
+            path="signal.meta_json.signal",
+        ).upper(),
+        "signal_state": _required_text(
+            signal_block,
+            "signal_state",
+            path="signal.meta_json.signal",
+        ).upper(),
         "lifecycle_trade_action": lifecycle_trade_action,
-        "management_posture": evidence_action,
+        "management_posture": management_posture,
         "lifecycle_reason": signal_reason,
-        "auction_action": auction_action,
-        "auction_state": auction_state,
-        "directional_alignment": alignment,
+        "auction_action": _required_text(
+            management,
+            "auction_action",
+            path="signal.meta_json.management",
+        ).upper(),
+        "auction_state": _required_text(
+            management,
+            "auction_state",
+            path="signal.meta_json.management",
+        ).upper(),
+        "directional_alignment": _required_text(
+            management,
+            "directional_alignment",
+            path="signal.meta_json.management",
+        ).upper(),
         "should_exit_signal": should_exit,
         "opportunity_key": opportunity_key,
         "candidate_id": candidate_id,
         "boundary_event_key": boundary_event_key,
         "setup_family": setup_family,
-        "confidence": confidence,
-        "quality": quality,
     }
 
 
@@ -301,7 +397,7 @@ def _signal_created_time(signal: SignalSchema):
 
 
 def _manual_entry_warnings(signal: SignalSchema) -> tuple[List[str], Dict[str, Any]]:
-    if not _policy_bool("manual_entry_warning_enabled", True):
+    if not _policy_bool("manual_entry_warning_enabled"):
         return [], {}
 
     prices = _signal_entry_prices(signal)
@@ -311,8 +407,8 @@ def _manual_entry_warnings(signal: SignalSchema) -> tuple[List[str], Dict[str, A
     if created_time is not None:
         age_minutes = max(0.0, (now - created_time).total_seconds() / 60.0)
 
-    delay_threshold = float(_decision_policy().get("manual_entry_delay_warning_minutes", 6.0) or 6.0)
-    move_threshold = float(_decision_policy().get("manual_entry_move_warning_pct", 0.50) or 0.50)
+    delay_threshold = float(_decision_policy_value("manual_entry_delay_warning_minutes"))
+    move_threshold = float(_decision_policy_value("manual_entry_move_warning_pct"))
     move_pct = prices["directional_move_pct"]
     delayed = age_minutes is not None and age_minutes >= max(0.0, delay_threshold)
     moved = move_pct is not None and move_pct >= max(0.0, move_threshold)
@@ -344,7 +440,7 @@ def _manual_entry_warnings(signal: SignalSchema) -> tuple[List[str], Dict[str, A
 
 
 def _price_entry_decision(signal: SignalSchema, *, mode: str, warnings: List[str]) -> Optional[TradeDecision]:
-    if not _policy_bool("signal_entry_not_in_loss_enabled", True):
+    if not _policy_bool("signal_entry_not_in_loss_enabled"):
         return None
     if mode == MODE_MANUAL_CONFIRM:
         return None
@@ -366,7 +462,7 @@ def _price_entry_decision(signal: SignalSchema, *, mode: str, warnings: List[str
     if created is None or created <= 0 or current is None or current <= 0:
         details["not_in_loss"] = False
         return TradeDecision.wait(
-            _policy_str("signal_entry_wait_price_missing_code", "SIGNAL_ENTRY_WAIT_PRICE_UNAVAILABLE"),
+            _policy_str("signal_entry_wait_price_missing_code"),
             warnings=warnings,
             details=details,
         )
@@ -377,7 +473,7 @@ def _price_entry_decision(signal: SignalSchema, *, mode: str, warnings: List[str
     if not_in_loss:
         return None
     return TradeDecision.wait(
-        _policy_str("signal_entry_wait_in_loss_code", "SIGNAL_ENTRY_WAIT_NOT_IN_LOSS"),
+        _policy_str("signal_entry_wait_in_loss_code"),
         warnings=warnings,
         details=details,
     )
@@ -484,10 +580,10 @@ class TradeDecisionHelper:
             price_decision.details = {**details, **price_decision.details}
             return price_decision
 
-        if _policy_bool("block_duplicate_signal_trade", True) and _active_trade_exists(userid, signal_id):
+        if _policy_bool("block_duplicate_signal_trade") and _active_trade_exists(userid, signal_id):
             return TradeDecision.block("active_trade_exists_for_signal", warnings=warnings, details=details)
 
-        if _policy_bool("block_duplicate_symbol_trade", True):
+        if _policy_bool("block_duplicate_symbol_trade"):
             equity_ref = _symbol_family(signal)
             family_has_active = _active_symbol_family_trade_exists(userid, equity_ref)
             details["duplicate_symbol_check"] = {

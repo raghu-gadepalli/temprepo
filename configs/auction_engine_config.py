@@ -1,14 +1,8 @@
-"""Strict Phase-1 configuration for the AutoTrades auction-state engine.
+"""Strict configuration for the snapshot-integrated Auction Engine.
 
-This module is intentionally non-invasive.  Importing it does not replace the
-current Evidence V2 signal path and does not create, update, or persist signals.
-The new engine remains disabled until its report-only implementation is wired in
-and accepted.
-
-The configuration tree mirrors the architecture layers so later implementation
-code has one versioned source of truth rather than scattered module constants.
-Architecture switches and lifecycle rules are defined here; setup thresholds are
-added only when the corresponding engine layer is implemented and reviewed.
+Auction owns local market interpretation and snapshot-carried continuity.
+SignalGenerator owns signal persistence and lifecycle; Auction performs no
+database persistence and reads no active signal or trade state.
 """
 
 from __future__ import annotations
@@ -39,7 +33,7 @@ class AuctionEngineRuntimeConfig(BaseModel):
 
     engine_name: str = "AUCTION_STATE_SIGNAL_ENGINE"
     engine_version: str = "0.5.4"
-    config_version: str = "AUCTION_ENGINE_PHASE5A4_PERSISTENCE_RESTART_V1"
+    config_version: str = "AUCTION_ENGINE_STRICT_LOCAL_V2"
 
     timezone: str = "Asia/Kolkata"
     snapshot_interval_minutes: float = Field(default=3.0, gt=0.0)
@@ -128,6 +122,7 @@ class AuctionEvidenceConfig(BaseModel):
 
     minimum_history_bars: int = Field(default=5, ge=1)
     floating_point_tolerance: float = Field(default=1e-9, gt=0.0)
+    derivatives_preferred_windows: Tuple[str, ...] = ("15m", "5m", "60m", "sod")
 
     # Phase-2 report defaults. These are evidence-description thresholds, not
     # setup-entry thresholds. They remain versioned and observation-only.
@@ -466,38 +461,6 @@ class ExhaustionPolicyConfig(BaseModel):
     indicators_may_support_but_not_trigger: bool = True
 
 
-class AuctionAdvisorConfig(BaseModel):
-    """Broader stock-day, market and derivatives context policy."""
-
-    model_config = STRICT_CONFIG
-
-    enabled: bool = True
-    observation_only: bool = True
-    enforcement_enabled: bool = False
-    enforcement_mode: Literal["LOG_ONLY", "WATCH_ENFORCED", "FULL_ENFORCEMENT"] = "LOG_ONLY"
-
-    # Local stock-day structure is owned by auction state + opportunity ledger
-    # + Setup Manager.  The thin Advisor consumes only orthogonal context.
-    stock_day_context_enabled: bool = False
-    market_context_enabled: bool = False
-    derivatives_context_enabled: bool = True
-    data_quality_enabled: bool = True
-    nifty_context_enabled: bool = False
-    banknifty_context_enabled: bool = False
-    vix_context_enabled: bool = False
-    sector_context_enabled: bool = False
-    deferred_context_status: Literal["NOT_EVALUATED"] = "NOT_EVALUATED"
-
-    stale_or_missing_is_unknown: bool = True
-    unknown_is_automatic_block: bool = False
-    advisor_may_discover_setup: bool = False
-    advisor_may_change_local_setup_facts: bool = False
-
-    recommendations: Tuple[str, ...] = ("ALLOW", "WATCH", "BLOCK")
-    watch_valid_minutes: float = Field(default=6.5, gt=0.0)
-    derivatives_preferred_windows: Tuple[str, ...] = ("15m", "5m", "60m", "sod")
-
-
 class AuctionDecisionPolicyConfig(BaseModel):
     """Opportunity Router, Setup Manager and final deterministic action policy."""
 
@@ -511,53 +474,18 @@ class AuctionDecisionPolicyConfig(BaseModel):
     rank_opposition_by_freshness_and_structure: bool = True
     stale_candidates_must_not_influence_decision: bool = True
     terminal_candidates_must_not_influence_decision: bool = True
-    active_signal_context_enabled: bool = True
-    active_context_final_decision_enabled: bool = True
 
     no_candidate_action: Literal["HOLD", "NO_ACTION"] = "HOLD"
     ineligible_state_action: Literal["BLOCK"] = "BLOCK"
     unresolved_material_opposition_action: Literal["DEFER"] = "DEFER"
-    advisor_watch_action: Literal["DEFER", "BLOCK"] = "DEFER"
-    advisor_block_action: Literal["BLOCK"] = "BLOCK"
 
-    one_signal_per_stock_day_cap: bool = False
     hide_reasons_in_opaque_score: bool = False
 
     # Phase-4A cross-opportunity arbitration.  These do not redefine setup
     # eligibility; they only control reconciliation of already-valid records.
     rotation_lookback_minutes: float = Field(default=90.0, gt=0.0)
     rotation_side_switches_to_defer: int = Field(default=2, ge=1)
-    simulated_consumption_enabled: bool = True
-    active_context_mode: Literal["LOG_ONLY", "FULL_ENFORCEMENT"] = "LOG_ONLY"
-    active_signal_lifecycle: str = "DEFAULT"
     unresolved_watch_opposition_enabled: bool = True
-
-
-class AuctionPersistenceConfig(BaseModel):
-    """Existing-schema persistence controls for later replay integration."""
-
-    model_config = STRICT_CONFIG
-
-    enabled: bool = False
-    write_enabled: bool = False
-    restore_enabled: bool = False
-
-    use_existing_stock_setup_state_schema: bool = True
-    schema_change_required: bool = True
-    use_separate_opportunity_tables: bool = False
-    opportunity_table_name: str = "stock_opportunities"
-    event_history_storage: Literal["JSON"] = "JSON"
-    snapshot_time_is_source_of_truth: bool = True
-    protect_terminal_and_consumed_events: bool = True
-    persist_config_version: bool = True
-    persist_reason_codes: bool = True
-
-    state_namespaces: Tuple[str, ...] = (
-        "AUCTION_STATE",
-        "BOUNDARY_RESOLUTION",
-        "EXHAUSTION_REVERSAL",
-        "REACCELERATION_OBSERVER",
-    )
 
 
 class AuctionDiagnosticsConfig(BaseModel):
@@ -573,9 +501,7 @@ class AuctionDiagnosticsConfig(BaseModel):
     include_boundary_progression: bool = True
     include_all_candidates: bool = True
     include_ineligible_candidates: bool = True
-    include_advisor_channels: bool = True
     include_manager_opposition: bool = True
-    include_final_decision_reasons: bool = True
 
     outcome_horizons_bars: Tuple[int, ...] = (3, 6, 9)
     include_full_session_outcomes: bool = True
@@ -609,9 +535,7 @@ class AuctionEngineConfig(BaseModel):
     failure: FailedOutcomePolicyConfig = Field(default_factory=FailedOutcomePolicyConfig)
     continuation: ContinuationPolicyConfig = Field(default_factory=ContinuationPolicyConfig)
     exhaustion: ExhaustionPolicyConfig = Field(default_factory=ExhaustionPolicyConfig)
-    advisor: AuctionAdvisorConfig = Field(default_factory=AuctionAdvisorConfig)
     decision: AuctionDecisionPolicyConfig = Field(default_factory=AuctionDecisionPolicyConfig)
-    persistence: AuctionPersistenceConfig = Field(default_factory=AuctionPersistenceConfig)
     diagnostics: AuctionDiagnosticsConfig = Field(default_factory=AuctionDiagnosticsConfig)
 
     @model_validator(mode="after")
@@ -620,10 +544,6 @@ class AuctionEngineConfig(BaseModel):
             raise ValueError("The current signal path cannot be replaced by a disabled engine")
         if self.decision.create_enabled and not self.engine.enabled:
             raise ValueError("CREATE cannot be enabled while the engine is disabled")
-        if self.persistence.write_enabled and not self.persistence.enabled:
-            raise ValueError("Persistence writes require persistence.enabled=True")
-        if self.advisor.enforcement_enabled and self.advisor.observation_only:
-            raise ValueError("Advisor enforcement conflicts with observation_only=True")
         return self
 
     def resolved_dict(self) -> Dict[str, Any]:
@@ -657,9 +577,7 @@ __all__ = [
     "FailedOutcomePolicyConfig",
     "ContinuationPolicyConfig",
     "ExhaustionPolicyConfig",
-    "AuctionAdvisorConfig",
     "AuctionDecisionPolicyConfig",
-    "AuctionPersistenceConfig",
     "AuctionDiagnosticsConfig",
     "AuctionEngineConfig",
     "AUCTION_ENGINE_CONFIG",

@@ -498,11 +498,6 @@ def main():
     logger.info("init_intraday_reset @ %s", reset_now.isoformat())
 
     try:
-        # stock_setup_state is trading-day scoped. Daily reset is driven by
-        # scheduler wall-clock, not by a market observation, so it must not
-        # manufacture lifecycle transitions. Prior-day rows cannot affect the
-        # new trading day because trading_day is part of their natural key.
-
         if ARCHIVE_BEFORE_TRUNCATE:
             try:
                 archive_intraday_data()

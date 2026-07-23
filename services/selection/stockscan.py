@@ -6,8 +6,8 @@ first 1-minute candle, scans the monthly enabled EQ universe directly from
 broker candle/quote data, and marks the selected symbols active for the day.
 
 It deliberately does not create signals, evaluate setups, or touch
-symbols.generate_signals. StockAdvisor/EvidenceEvaluator handle per-snapshot
-tradeability later.
+symbols.generate_signals. SnapshotGenerator and Auction own per-snapshot
+market interpretation; SignalGenerator owns signal lifecycle.
 """
 
 from __future__ import annotations

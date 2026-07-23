@@ -122,11 +122,11 @@
     setText("tem-head-symbol", row?.symbol || "—");
     setText("tem-head-type", row?.instrument_type || row?.type || "EQ");
     setText("tem-head-side", row?.trade_type || row?.side || "BUY");
-    setText("tem-head-price", fmtMoney(row?.entry_price ?? row?.signal_price ?? 0));
+    setText("tem-head-price", fmtMoney(row?.entry_price ?? 0));
 
     setVal("tem-product", row?.product || "MIS");
     setVal("tem-execution-mode", row?.execution_mode || "VIRTUAL");
-    setVal("tem-entry-price", fmtNum(row?.entry_price ?? row?.signal_price ?? 0));
+    setVal("tem-entry-price", fmtNum(row?.entry_price ?? 0));
     setVal("tem-qty", row?.quantity ?? row?.qty ?? "");
     setVal("tem-last-price", fmtNum(row?.last_price ?? 0));
     setVal("tem-last-pnl", fmtNum(row?.last_pnl_value ?? row?.pnl_value ?? row?.pnl ?? 0));

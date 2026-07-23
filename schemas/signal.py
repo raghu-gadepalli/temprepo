@@ -115,85 +115,72 @@ def _get_path(d: Any, path: str) -> Any:
 
 
 
-VALID_SETUP_LABELS = {
-    "EXHAUSTION_REVERSAL",
-    "FAILED_BREAKOUT",
-    "ACCEPTED_BREAKOUT",
-}
-
-
-def _current_setup_label(meta: Any, originating_setup: str) -> str:
-    """Return mutable current evidence without changing setup provenance."""
-    if not isinstance(meta, dict):
-        return originating_setup
-
-    candidates = [
-        _get_path(meta, "current_evidence.setup_label"),
-        _get_path(meta, "current_evidence.primary_candidate.setup_label"),
-        _get_path(meta, "active_signal_evidence.primary_candidate.setup_label"),
-        _get_path(meta, "active_signal_evidence.top_same_side_candidate.setup_label"),
-    ]
-    for value in candidates:
-        label = str(value or "").strip().upper()
-        if label in VALID_SETUP_LABELS:
-            return label
-    return originating_setup
-
-
-def _active_evidence_ui(meta: Any) -> Dict[str, Any]:
-    if not isinstance(meta, dict):
-        return {}
-    active = meta.get("active_signal_evidence")
-    if not isinstance(active, dict):
-        active = _get_path(meta, "current_evidence.active_signal_evidence")
-    return active if isinstance(active, dict) else {}
+DOWNSTREAM_CONTRACT_VERSION = "AUCTION_SIGNAL_DOWNSTREAM_V2"
 
 
 def _require_setup_label(value: Any, *, source: str) -> str:
-    """Return a normalized setup label, or fail loudly.
-
-    setup is a first-class DB column.  It must be supplied explicitly by the
-    caller; lifecycle/JSON payload values are intentionally not used as substitutes.
-    """
+    """Return a normalized setup label, or fail loudly."""
     label = str(value or "").strip().upper()
     if not label:
         raise ValueError(f"Missing required signal setup from {source}")
     return label
 
 
-def _meta_initiated_setup_labels(meta_json: Any) -> tuple[Optional[str], Optional[str]]:
-    """Return nested and explicit immutable setup labels from signal metadata."""
+def _require_meta_block(meta_json: Any, key: str, *, source: str) -> Dict[str, Any]:
     if not isinstance(meta_json, dict):
-        return None, None
-    initiated = meta_json.get("initiated_setup")
-    nested = None
-    if isinstance(initiated, dict):
-        nested = str(initiated.get("setup_label") or "").strip().upper() or None
-    explicit = str(meta_json.get("initiated_setup_label") or "").strip().upper() or None
-    return nested, explicit
+        raise ValueError(f"{source}.meta_json must be an object")
+    if key not in meta_json:
+        raise ValueError(f"{source}.meta_json.{key} is required")
+    block = meta_json[key]
+    if not isinstance(block, dict):
+        raise ValueError(f"{source}.meta_json.{key} must be an object")
+    return block
 
 
-def _assert_setup_identity(*, persisted_setup: Any, requested_setup: Any = None, meta_json: Any = None, source: str) -> str:
-    """Validate the immutable setup identity for one signal instance."""
+def _assert_setup_identity(
+    *,
+    persisted_setup: Any,
+    requested_setup: Any = None,
+    meta_json: Any = None,
+    source: str,
+) -> str:
+    """Validate immutable setup identity through the strict Auction V2 contract."""
     persisted = _require_setup_label(persisted_setup, source=f"{source}.persisted_setup")
     requested = (
         _require_setup_label(requested_setup, source=f"{source}.requested_setup")
         if requested_setup is not None
         else persisted
     )
-    nested, explicit = _meta_initiated_setup_labels(meta_json)
-    mismatches = [x for x in (requested, nested, explicit) if x and x != persisted]
-    if mismatches:
+    if requested != persisted:
         raise ValueError(
             f"SIGNAL_SETUP_IMMUTABLE_MISMATCH source={source} "
-            f"persisted={persisted} requested={requested} "
-            f"initiated={nested} explicit={explicit}"
+            f"persisted={persisted} requested={requested}"
         )
-    if nested and explicit and nested != explicit:
+    if meta_json is None:
+        return persisted
+
+    contract = _require_meta_block(meta_json, "downstream_contract", source=source)
+    if "version" not in contract:
+        raise ValueError(f"{source}.meta_json.downstream_contract.version is required")
+    if str(contract["version"]).strip() != DOWNSTREAM_CONTRACT_VERSION:
         raise ValueError(
-            f"SIGNAL_SETUP_METADATA_MISMATCH source={source} "
-            f"initiated={nested} explicit={explicit}"
+            f"{source} requires {DOWNSTREAM_CONTRACT_VERSION}; "
+            f"actual={contract['version']}"
         )
+    setup_levels = _require_meta_block(meta_json, "setup_levels", source=source)
+    auction_signal = _require_meta_block(meta_json, "auction_signal", source=source)
+    for path, block, key in (
+        ("setup_levels.setup_label", setup_levels, "setup_label"),
+        ("auction_signal.setup_family", auction_signal, "setup_family"),
+    ):
+        if key not in block:
+            raise ValueError(f"{source}.meta_json.{path} is required")
+        label = _require_setup_label(block[key], source=f"{source}.meta_json.{path}")
+        if label != persisted:
+            raise ValueError(
+                f"SIGNAL_SETUP_METADATA_MISMATCH source={source} "
+                f"persisted={persisted} metadata={label} path={path}"
+            )
     return persisted
 
 
@@ -214,7 +201,7 @@ def _is_qualified_stage(stage_value: str) -> bool:
 
 
 # -------------------------------------------------------------------
-# Lightweight read model used only by Auction Engine active-context replay.
+# Lightweight read model used only by narrow signal queries.
 # It intentionally excludes large JSON payloads so one day-context lookup
 # cannot trigger a MySQL filesort over wide signal rows.
 # -------------------------------------------------------------------
@@ -377,19 +364,30 @@ class SignalSchema(BaseModel):
             reason = self.status_reason
         reason = str(reason).strip().lower() if reason is not None else None
 
-        setup_label = _require_setup_label(self.setup, source="SignalSchema.to_ui_row")
-        current_setup = _current_setup_label(meta, setup_label)
-        active_evidence = _active_evidence_ui(meta)
-        signal_block = meta.get("signal") if isinstance(meta.get("signal"), dict) else {}
-        lifecycle_block = meta.get("lifecycle") if isinstance(meta.get("lifecycle"), dict) else {}
-        setup_levels = meta.get("setup_levels") if isinstance(meta.get("setup_levels"), dict) else {}
-        downstream_contract = meta.get("downstream_contract") if isinstance(meta.get("downstream_contract"), dict) else {}
+        setup_label = _assert_setup_identity(
+            persisted_setup=self.setup,
+            meta_json=meta,
+            source="SignalSchema.to_ui_row",
+        )
+        signal_block = _require_meta_block(meta, "signal", source="SignalSchema.to_ui_row")
+        lifecycle_block = _require_meta_block(meta, "lifecycle", source="SignalSchema.to_ui_row")
+        management = _require_meta_block(meta, "management", source="SignalSchema.to_ui_row")
+        setup_levels = _require_meta_block(meta, "setup_levels", source="SignalSchema.to_ui_row")
+        downstream_contract = _require_meta_block(
+            meta,
+            "downstream_contract",
+            source="SignalSchema.to_ui_row",
+        )
+        version = str(downstream_contract["version"]).strip() if "version" in downstream_contract else ""
+        if version != DOWNSTREAM_CONTRACT_VERSION:
+            raise ValueError(
+                "Signal UI requires current downstream contract: "
+                f"expected={DOWNSTREAM_CONTRACT_VERSION} actual={version}"
+            )
 
-        management_posture = str(
-            active_evidence.get("active_evidence_action")
-            or active_evidence.get("evidence_action")
-            or ""
-        ).strip().upper() or None
+        management_posture = str(management["action"]).strip().upper()
+        current_setup = str(management["setup_family"]).strip().upper()
+        lifecycle_trade_action = str(lifecycle_block["trade_action"]).strip().upper()
 
         return {
             "signal_id": self.signal_id,
@@ -399,29 +397,22 @@ class SignalSchema(BaseModel):
             "setup": setup_label,
             "current_setup": current_setup,
             "setup_transitioned": current_setup != setup_label,
-            "active_evidence_action": management_posture,  # compatibility alias
             "management_posture": management_posture,
-            "active_evidence_reason": str(active_evidence.get("reason_code") or "").strip().upper() or None,
-            "lifecycle_reason": str(signal_block.get("signal_reason") or self.status_reason or "").strip() or None,
-            "lifecycle_trade_action": str(
-                lifecycle_block.get("trade_action")
-                or signal_block.get("trade_action")
-                or ""
-            ).strip().upper() or None,
-            "should_exit_signal": bool(active_evidence.get("should_exit_signal")) if "should_exit_signal" in active_evidence else False,
-            "auction_action": str(active_evidence.get("auction_action") or "").strip().upper() or None,
-            "auction_state": str(active_evidence.get("auction_state") or "").strip().upper() or None,
-            "directional_alignment": str(active_evidence.get("directional_alignment") or "").strip().upper() or None,
-            "downstream_contract_version": str(downstream_contract.get("version") or "").strip() or None,
-            "opportunity_key": setup_levels.get("opportunity_key"),
-            "candidate_id": setup_levels.get("candidate_id"),
-            "boundary_event_key": setup_levels.get("boundary_event_key"),
-            "setup_reference_price": _num(setup_levels.get("reference_price"), 2),
-            "setup_reference_source": setup_levels.get("reference_source"),
-            "confidence": _num(signal_block.get("confidence"), 2),
-            "quality": signal_block.get("quality"),
-            "active_evidence_support_score": _num(active_evidence.get("support_score"), 2),
-            "active_evidence_opposition_score": _num(active_evidence.get("opposition_score"), 2),
+            "management_reason_code": str(management["reason_code"]).strip().upper(),
+            "lifecycle_reason": str(signal_block["signal_reason"]).strip(),
+            "lifecycle_trade_action": lifecycle_trade_action,
+            "should_exit_signal": bool(management["should_exit_signal"]),
+            "auction_action": str(management["auction_action"]).strip().upper(),
+            "auction_state": str(management["auction_state"]).strip().upper(),
+            "directional_alignment": str(management["directional_alignment"]).strip().upper(),
+            "downstream_contract_version": version,
+            "opportunity_key": setup_levels["opportunity_key"],
+            "candidate_id": setup_levels["candidate_id"],
+            "boundary_event_key": setup_levels["boundary_event_key"],
+            "setup_reference_price": _num(setup_levels["reference_price"], 2),
+            "setup_reference_source": setup_levels["reference_source"],
+            "confidence": None,
+            "quality": None,
             "side": _enum_to_str(self.side).upper(),
 
             "stage": _enum_to_str(self.stage).upper(),
@@ -571,7 +562,7 @@ class SignalSchema(BaseModel):
     ) -> List[SignalActiveContextRow]:
         """Load narrow signal projections whose lifetime can overlap one day.
 
-        Active-context replay needs only identity, side, lifecycle and timing.
+        Narrow consumers need only identity, side, lifecycle and timing.
         Querying full ORM rows would also select large JSON payloads; combining
         that with SQL ORDER BY can exhaust MySQL's per-thread sort buffer on
         the VPS.  This projection deliberately performs no database sort.  The
@@ -649,7 +640,7 @@ class SignalSchema(BaseModel):
             return None
 
     @staticmethod
-    def fetch_for_advisor_review(
+    def fetch_for_signal_review(
         *,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
@@ -657,7 +648,7 @@ class SignalSchema(BaseModel):
         setups: Optional[List[str]] = None,
         limit: Optional[int] = None,
     ) -> List["SignalSchema"]:
-        """Fetch signal rows for after-market Advisor review.
+        """Fetch signal rows for after-market signal review.
 
         This is intentionally DB-backed so review scripts do not depend on wide
         exported CSVs.  Filtering uses last_snapshot_time because that is the
@@ -705,7 +696,7 @@ class SignalSchema(BaseModel):
             return rows
         except Exception:
             logger.exception(
-                "fetch_for_advisor_review failed | start=%s end=%s symbols=%s setups=%s limit=%s",
+                "fetch_for_signal_review failed | start=%s end=%s symbols=%s setups=%s limit=%s",
                 start_db,
                 end_db,
                 clean_symbols,

@@ -2,7 +2,7 @@
 
 The setup engine interprets the already-causal Evidence Ledger, persistent
 Auction State and immutable Unified Boundary Episode.  It does **not** discover
-its own boundaries, mutate auction state, call the Advisor, select a winning
+its own boundaries, mutate auction state, call external context, select a winning
 setup, persist state or create a signal.
 
 Phase-3B.2 candidate families

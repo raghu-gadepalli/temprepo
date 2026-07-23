@@ -284,8 +284,7 @@ class SymbolSchema(BaseModel, frozen=True):
 
         This method changes only active/processed. It deliberately does not
         change enabled, generate_signals, generate_candles, merge_candles, or
-        update_performance. Those flags are controlled by reset/manual/advisor
-        policy, not by the daily selector.
+        update_performance. Those flags are controlled by reset/manual policy, not by the daily selector.
         """
         selected = {
             (x or "").strip().upper()

@@ -215,13 +215,13 @@
         const userid = String(v?.userid || "").trim().toUpperCase();
         if (!selectedUsers.has(userid)) return;
         const decision = String(v?.decision || "").trim().toUpperCase();
-        if (decision === "WAIT" || (v?.requires_confirmation || v?.requires_override)) requiresConfirmation = true;
+        if (decision === "WAIT" || v?.requires_confirmation) requiresConfirmation = true;
         validationReasonText(v).forEach(text => warnings.push(`${userid}: ${text}`));
       });
     } else {
-      const validation = form.entry_eligibility || form.trade_validation || {};
+      const validation = form.entry_eligibility || {};
       const decision = String(validation.decision || "").trim().toUpperCase();
-      if (decision === "WAIT" || form.requires_confirmation || form.requires_override) requiresConfirmation = true;
+      if (decision === "WAIT" || form.requires_confirmation) requiresConfirmation = true;
       validationReasonText(validation).forEach(text => warnings.push(text));
     }
 

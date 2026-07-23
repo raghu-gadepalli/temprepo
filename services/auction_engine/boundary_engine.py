@@ -3,7 +3,7 @@
 The boundary engine is report-only.  It owns one authoritative dynamic boundary
 interaction per symbol and represents accepted/failed breakouts as alternate
 terminal resolutions of the same immutable episode.  It does not create setup
-candidates, write ``stock_setup_state`` or alter the existing signal pipeline.
+candidates, write database lifecycle state, or alter the signal pipeline.
 
 Important lifecycle rules
 -------------------------
