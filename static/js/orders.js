@@ -143,6 +143,22 @@
     return isDraftRow(r) && upper(r.entry_status || r.exec_status) === "CREATED";
   }
 
+  function originLabel(value) {
+    const origin = upper(value, "UNKNOWN");
+    return ({
+      SIGNAL_AUTO: "Signal Auto",
+      SIGNAL_MANUAL: "Signal Manual",
+      WATCHLIST: "Watchlist",
+      POSITION_ADD: "Position Add",
+      UNKNOWN: "Unknown"
+    })[origin] || origin.replaceAll("_", " ");
+  }
+
+  function managementLabel(value) {
+    const mode = upper(value, "MANUAL_PRICE");
+    return mode === "SIGNAL_LIFECYCLE" ? "Signal Lifecycle" : "Manual Price-Based";
+  }
+
   function normalizeRow(r) {
     const entryPrice = num(r.entry_price ?? r.signal_price ?? 0) ?? 0;
     const qty = num(r.qty ?? r.quantity ?? 0) ?? 0;
@@ -158,8 +174,13 @@
       id: r.id ?? null,
       userid: r.userid ?? "",
 
-      signal_date: r.signal_date ?? "",
+      entry_plan_time: r.entry_plan_time ?? r.signal_date ?? "",
+      signal_date: r.signal_date ?? r.entry_plan_time ?? "",
+      execution_time: r.execution_time ?? "",
       date: r.date ?? "",
+      origin: upper(r.origin, "UNKNOWN"),
+      management_mode: upper(r.management_mode, "MANUAL_PRICE"),
+      signal_reference: r.signal_reference ?? null,
 
       symbol: r.symbol ?? "–",
       equity_ref: r.equity_ref ?? "",
@@ -286,7 +307,8 @@
 
       DT.row.add([
         esc(r.userid || "—"),
-        esc(r.signal_date || r.date || "–"),
+        esc(r.entry_plan_time || r.signal_date || r.date || "–"),
+        esc(originLabel(r.origin)),
         esc(r.symbol),
         `${esc(r.instrument_type)} / ${esc(r.product || "MIS")} ${renderModeBadge(r.execution_mode)}`,
         esc(r.trade_type),
@@ -317,7 +339,10 @@
     $("#oe-head-side").text(row.trade_type || "BUY");
     $("#oe-head-price").text(fmtMoney(row.entry_price));
 
-    $("#oe-entry-time").text(row.signal_date || row.date || "—");
+    $("#oe-entry-time").text(row.entry_plan_time || row.signal_date || row.date || "—");
+    $("#oe-origin").text(originLabel(row.origin));
+    $("#oe-management-mode").text(managementLabel(row.management_mode));
+    $("#oe-signal-reference").text(row.signal_reference || "—");
     $("#oe-exit-time").text(row.exit_time || "Active");
     $("#oe-last-price").text(fmtNum(row.last_price));
     $("#oe-pnl").html(renderPnl(row.pnl_value ?? row.pnl ?? 0));
@@ -562,14 +587,14 @@
           let executedCount = 0;
 
           rows.data().each(function (row) {
-            const raw = String(row[8] || "")
+            const raw = String(row[9] || "")
               .replace(/<[^>]*>/g, "")
               .replace(/,/g, "")
               .trim();
             const n = Number(raw);
             if (Number.isFinite(n)) totalPnl += n;
 
-            const statusText = String(row[9] || "").toUpperCase();
+            const statusText = String(row[10] || "").toUpperCase();
             if (statusText.includes("DRAFT") || statusText.includes("CONFIRMED")) draftCount += 1;
             else executedCount += 1;
           });
@@ -582,7 +607,7 @@
 
           return $(`
             <tr class="table-light order-group-row" data-group="${group}" style="cursor:pointer;">
-              <td colspan="11">
+              <td colspan="12">
                 <div class="d-flex align-items-center justify-content-between">
                   <div class="fw-semibold d-flex align-items-center gap-2">
                     <i class="bi ${icon}"></i>

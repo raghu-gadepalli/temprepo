@@ -8,7 +8,7 @@
     dataUrl: "/dashboard/watchlist/data",
   };
 
-  let wlBreakoutMap = {};
+  let wlAuctionMap = {};
   let wlShortlistMap = {};
 
   function initTooltips(scope) {
@@ -39,7 +39,7 @@
   function structureBadgeLabel(structure) {
     const accepted = structure?.accepted || {};
     const state = accepted?.state || structure?.state || "UNKNOWN";
-    const side = accepted?.side || structure?.side || "NEUTRAL";
+    const side = accepted?.side || structure?.candidate?.side || structure?.raw?.side || "NEUTRAL";
     return `${state} / ${side}`;
   }
 
@@ -63,21 +63,14 @@
       const sel = ($("#wl-breakout-filter").val() || "ALL").toUpperCase();
       if (sel === "ALL") return true;
 
-      const st = wlBreakoutMap[symbol] || {};
-      const pdh = (st.pdh_pdl_status || "UNKNOWN").toUpperCase();
-      const orb = (st.orb_status || "UNKNOWN").toUpperCase();
+      const auction = wlAuctionMap[symbol] || {};
+      const action = String(auction.action || "NO_LOCAL_OPPORTUNITY").toUpperCase();
+      const side = String(auction.side || "NONE").toUpperCase();
 
-      const isBreakout =
-        pdh === "ABOVE" ||
-        pdh === "BELOW" ||
-        orb === "ABOVE" ||
-        orb === "BELOW";
-
-      if (sel === "ANY_BREAKOUT") return isBreakout;
-      if (sel === "ABOVE_PDH") return pdh === "ABOVE";
-      if (sel === "BELOW_PDL") return pdh === "BELOW";
-      if (sel === "ABOVE_ORB") return orb === "ABOVE";
-      if (sel === "BELOW_ORB") return orb === "BELOW";
+      if (sel === "LOCAL_CONFIRMED") return action === "LOCAL_CONFIRMED";
+      if (sel === "LOCAL_WATCH") return action === "LOCAL_WATCH";
+      if (sel === "BUY") return side === "BUY";
+      if (sel === "SELL") return side === "SELL";
 
       return true;
     });
@@ -99,18 +92,20 @@
     const table = $("#watchlist-table").DataTable();
     table.clear();
 
-    wlBreakoutMap = {};
+    wlAuctionMap = {};
     wlShortlistMap = {};
 
     data.forEach((item) => {
       const det = item.details || {};
       const symbol = item.symbol || "N/A";
       const structure = det?.structure || {};
-      const breakout = structure?.breakout_context || {};
+      const auction = det?.auction || {};
+      const decision = auction?.decision || {};
 
-      wlBreakoutMap[symbol] = {
-        pdh_pdl_status: item.pdh_pdl_status || breakout.pdh_pdl || "UNKNOWN",
-        orb_status: item.orb_status || breakout.orb || "UNKNOWN",
+      wlAuctionMap[symbol] = {
+        action: decision.action || "NO_LOCAL_OPPORTUNITY",
+        side: decision.side || "NONE",
+        state: auction?.state?.current || "UNKNOWN",
       };
 
       const isShortlisted = !!(item.gen_signals ?? det?.gen_signals ?? item.generate_signals ?? false);
@@ -127,21 +122,20 @@
       const payloadEnc = encodeURIComponent(JSON.stringify(payloadObj));
 
       const structureLabel = structureBadgeLabel(structure);
-      const anchors = structure?.anchors || structure?.anchor || {};
       const raw = structure?.raw || {};
       const accepted = structure?.accepted || {};
-      const bo = structure?.breakout || {};
+      const candidate = structure?.candidate || {};
+      const boundary = auction?.boundary || {};
+      const acceptedRange = accepted?.range || {};
 
       const structureTip = [
-        `Accepted: ${accepted.state || structure.state || "UNKNOWN"} / ${accepted.side || structure.side || "NEUTRAL"}`,
-        `Raw: ${raw.state || structure.raw_state || "UNKNOWN"} / ${raw.side || structure.raw_side || "NEUTRAL"}`,
-        `Anchor: ${anchors.active_anchor || "UNKNOWN"}`,
-        `Breakout: ${bo.status || "NONE"} / ${bo.side || "NEUTRAL"}`,
-        `Swing: ${breakout.swing || "UNKNOWN"}`,
-        `PDH/PDL: ${breakout.pdh_pdl || "UNKNOWN"}`,
-        `ORB: ${breakout.orb || "UNKNOWN"}`,
-        `Recent15: ${breakout.recent15 || "UNKNOWN"}`,
-        `Reason: ${structure.reason || accepted.reason || raw.reason || "N/A"}`,
+        `Accepted: ${accepted.state || "UNKNOWN"} / frozen ${accepted.frozen === true ? "YES" : "NO"}`,
+        `Accepted range: ${num(acceptedRange.low)} - ${num(acceptedRange.high)}`,
+        `Raw: ${raw.state || "UNKNOWN"} / ${raw.side || "NEUTRAL"}`,
+        `Candidate: ${candidate.status || "NONE"} / ${candidate.side || "NEUTRAL"}`,
+        `Auction: ${auction?.state?.current || "UNKNOWN"}`,
+        `Decision: ${decision.action || "NO_LOCAL_OPPORTUNITY"} / ${decision.family || "NONE"} / ${decision.side || "NONE"}`,
+        `Boundary: ${boundary.status || "NONE"} / ${boundary.boundary_side || "NONE"} / ${num(boundary.boundary_price)}`,
       ].join(" | ");
 
       const structureCell = `
@@ -150,22 +144,22 @@
         </span>
       `;
 
-      const vwapVal = det?.vwap?.value;
-      const vwapPct = det?.vwap?.px_vs_vwap_pct ?? item.vwap_pct;
+      const vwapVal = det?.indicators?.vwap?.value;
+      const vwapPct = det?.indicators?.vwap?.distance_pct ?? item.vwap_pct;
       const vwapCell = (() => {
         const v = vwapVal != null && !isNaN(vwapVal) ? Number(vwapVal).toFixed(2) : "N/A";
         const tip = `Δ vs VWAP: ${pct(vwapPct, 2)}`;
         return `<span data-bs-toggle="tooltip" title="${esc(tip)}">${v}</span>`;
       })();
 
-      const rsiVal = item.rsi ?? det?.context?.rsi?.value;
-      const rsiZone = item.rsi_zone || det?.context?.rsi?.zone || "N/A";
+      const rsiVal = item.rsi ?? det?.indicators?.rsi?.value;
+      const rsiZone = item.rsi_zone || det?.indicators?.rsi?.zone || "N/A";
       const rsiCell = (() => {
         const v = rsiVal != null && !isNaN(rsiVal) ? Number(rsiVal).toFixed(2) : "N/A";
         return `<span data-bs-toggle="tooltip" title="${esc(rsiZone)}">${v}</span>`;
       })();
 
-      const bb = det?.bollinger || {};
+      const bb = det?.indicators?.bollinger || {};
       const bbZone = bb.zone || "NA";
       const bbPos = bb.position != null && !isNaN(bb.position) ? Number(bb.position).toFixed(3) : "N/A";
       const bbW = bb.bb_width != null && !isNaN(bb.bb_width) ? Number(bb.bb_width).toFixed(3) : "N/A";
@@ -205,21 +199,24 @@
         isShortlisted ? 1 : 0,
         symbol,
         item.ltp != null && !isNaN(item.ltp) ? Number(item.ltp).toFixed(2) : "0.00",
-        pct(item.gap_pct, 2),
-        pct(item.move_pct, 2),
+        pct(
+          item.gap_pct ?? ((Number(det?.levels?.today?.open) - Number(det?.levels?.prev_day?.close)) / Number(det?.levels?.prev_day?.close) * 100),
+          2
+        ),
+        pct(item.move_pct ?? det?.market_windows?.sod?.move_pct, 2),
         UI.renderBadge(item.state || "NO_TREND"),
         UI.renderStrength(null, item.strength || "N/A"),
         vwapCell,
-        num(item.bar_rvol ?? det?.volume?.bar_rvol ?? det?.volume?.rvol ?? det?.context?.volume?.rvol, 2),
+        num(item.bar_rvol ?? det?.volume?.bar_rvol ?? det?.volume?.rvol, 2),
 
         UI.renderStrength(
-          item.adx ?? det?.context?.adx?.value ?? det?.adx?.value,
-          item.adx_band || det?.context?.adx?.band || det?.adx?.band || "N/A"
+          item.adx ?? det?.indicators?.adx?.value,
+          item.adx_band || det?.indicators?.adx?.band || "N/A"
         ),
 
         UI.renderStrength(
-          item.atr ?? det?.context?.atr?.value ?? det?.atr?.value,
-          item.atr_band || det?.context?.atr?.band || det?.atr?.band || "N/A"
+          item.atr ?? det?.indicators?.atr?.value,
+          item.atr_band || det?.indicators?.atr?.band || "N/A"
         ),
         rsiCell,
         bbCell,

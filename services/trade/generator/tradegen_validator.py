@@ -1,76 +1,38 @@
 #!/usr/bin/env python3
 """
-services/trade/generator/tradegen_validator.py
+Auction-driven trade entry validation.
 
-Shared trade validation gate for Autotrades.
+This module owns only *new trade entry eligibility* for signal-originated
+trades.  SignalGenerator owns signal lifecycle; TradeMonitor owns management
+of an already-created trade.
 
-Purpose
--------
-This helper answers only one question:
-
-    Can this user create a trade from this signal now?
-
-It is intentionally shared by:
-- backend autogen trade generation
-- manual signal trade creation / preview from UI
-
-Layering
---------
-Signal/lifecycle owns market-setup validity:
-- exhaustion
-- balanced/no-setup state
-- derivatives evidence/conflicts
-- compression/expansion readiness
-- entry posture
-
-Trade validation owns execution safety:
-- user eligibility
-- signal is still open
-- deployable signal state/action
-- duplicate exposure protection
-- active symbol-family protection
-
-Trade creation/planning owns:
-- instrument resolution
-- price/risk defaults
-- persistence
-
-Manual override
+Patch 5.3 rules
 ---------------
-Manual UI can override soft lifecycle/deployability WAIT conditions, but not hard
-safety blocks such as missing user/signal, closed signal, duplicate active trade,
-or inactive/autogen-ineligible user checks in AUTO mode.
+- Parse only ``AUCTION_SIGNAL_DOWNSTREAM_V1``.
+- Automatic entry is allowed only for ACTIVE/EXPAND + STRENGTHEN.
+- Defensive postures require an explicit manual confirmation.
+- EXIT_BIAS/FORCE_EXIT/EXIT/should_exit_signal are hard blocks in every mode.
+- Duplicate checks are strict and fail closed: DB errors propagate.
+- Confidence/quality remain optional and are never replaced with 0/LOW.
 """
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-
-from utils.datetime_utils import business_now_naive, to_ist_naive
 
 from configs.trade_config import TRADE_CONFIG
 from enums.enums import SignalStatus
 from schemas.signal import SignalSchema
 from schemas.user import UserSchema
 from schemas.user_trade import UserTradeSchema
+from utils.datetime_utils import business_now_naive, to_ist_naive
 
-logger = logging.getLogger(__name__)
 
+DOWNSTREAM_CONTRACT_VERSION = "AUCTION_SIGNAL_DOWNSTREAM_V1"
 
-ACTIVE_ENTRY_STATUSES = {
-    "CREATED",
-    "READY",
-    "SUBMITTED",
-    "FILLED",
-}
-
-TERMINAL_EXIT_STATUSES = {
-    "FILLED",
-    "CANCELLED",
-}
-
+ACTIVE_ENTRY_STATUSES = {"CREATED", "READY", "SUBMITTED", "FILLED"}
+TERMINAL_EXIT_STATUSES = {"FILLED", "CANCELLED"}
 TERMINAL_SIGNAL_STATUSES = {
     "CLOSED",
     "INVALIDATED",
@@ -80,13 +42,20 @@ TERMINAL_SIGNAL_STATUSES = {
     "BLOCKED",
 }
 
+ENTRY_STAGES = {"ACTIVE", "EXPAND"}
+DEFENSIVE_STAGES = {"PROTECT", "TRANSITION", "WEAKENING"}
+HARD_EXIT_STAGES = {"EXIT_BIAS", "FORCE_EXIT"}
+
 TRADE_DECISION_ALLOW = "ALLOW"
 TRADE_DECISION_WAIT = "WAIT"
 TRADE_DECISION_BLOCK = "BLOCK"
 
 MODE_AUTO = "AUTO"
 MODE_MANUAL_PREVIEW = "MANUAL_PREVIEW"
-MODE_MANUAL_OVERRIDE = "MANUAL_OVERRIDE"
+MODE_MANUAL_CONFIRM = "MANUAL_CONFIRM"
+# Backward-compatible import name.  Its semantics are now limited to soft
+# entry-warning confirmation; it cannot bypass a hard lifecycle exit posture.
+MODE_MANUAL_OVERRIDE = MODE_MANUAL_CONFIRM
 
 
 @dataclass
@@ -102,53 +71,59 @@ class TradeDecision:
         return {
             "ok": bool(self.ok),
             "decision": self.decision,
+            "entry_decision": {
+                TRADE_DECISION_ALLOW: "ENTRY_ELIGIBLE",
+                TRADE_DECISION_WAIT: "CONFIRMATION_REQUIRED",
+                TRADE_DECISION_BLOCK: "ENTRY_BLOCKED",
+            }[self.decision],
             "allowed": bool(self.allowed),
-            "reasons": list(self.reasons or []),
-            "warnings": list(self.warnings or []),
-            "details": dict(self.details or {}),
+            "reasons": list(self.reasons),
+            "warnings": list(self.warnings),
+            "details": dict(self.details),
         }
 
     @staticmethod
     def allow(*, warnings: Optional[List[str]] = None, details: Optional[Dict[str, Any]] = None) -> "TradeDecision":
-        return TradeDecision(
-            ok=True,
-            decision=TRADE_DECISION_ALLOW,
-            allowed=True,
-            reasons=[],
-            warnings=warnings or [],
-            details=details or {},
-        )
+        return TradeDecision(True, TRADE_DECISION_ALLOW, True, [], warnings or [], details or {})
 
     @staticmethod
     def wait(reason: str, *, warnings: Optional[List[str]] = None, details: Optional[Dict[str, Any]] = None) -> "TradeDecision":
-        return TradeDecision(
-            ok=True,
-            decision=TRADE_DECISION_WAIT,
-            allowed=False,
-            reasons=[reason],
-            warnings=warnings or [],
-            details=details or {},
-        )
+        return TradeDecision(True, TRADE_DECISION_WAIT, False, [reason], warnings or [], details or {})
 
     @staticmethod
     def block(reason: str, *, warnings: Optional[List[str]] = None, details: Optional[Dict[str, Any]] = None) -> "TradeDecision":
-        return TradeDecision(
-            ok=True,
-            decision=TRADE_DECISION_BLOCK,
-            allowed=False,
-            reasons=[reason],
-            warnings=warnings or [],
-            details=details or {},
-        )
+        return TradeDecision(True, TRADE_DECISION_BLOCK, False, [reason], warnings or [], details or {})
 
 
-def _enum_str(x: Any) -> str:
-    v = getattr(x, "value", x)
-    return str(v or "").strip().upper()
+def _enum_str(value: Any) -> str:
+    return str(getattr(value, "value", value) or "").strip().upper()
 
 
-def _as_dict(v: Any) -> Dict[str, Any]:
-    return v if isinstance(v, dict) else {}
+def _as_dict(value: Any, *, path: str) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must be an object")
+    return value
+
+
+def _required_text(obj: Dict[str, Any], key: str, *, path: str) -> str:
+    if key not in obj:
+        raise ValueError(f"{path}.{key} is required")
+    value = str(obj[key] or "").strip()
+    if not value:
+        raise ValueError(f"{path}.{key} cannot be blank")
+    return value
+
+
+def _required_bool(obj: Dict[str, Any], key: str, *, path: str) -> bool:
+    if key not in obj or not isinstance(obj[key], bool):
+        raise ValueError(f"{path}.{key} must be a boolean")
+    return obj[key]
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    return float(value)
 
 
 def _decision_policy() -> Dict[str, Any]:
@@ -163,117 +138,156 @@ def _policy_str(key: str, default: str) -> str:
     return str(_decision_policy().get(key, default) or default).strip()
 
 
-def _signal_meta(signal: SignalSchema) -> Dict[str, Any]:
-    meta = _as_dict(getattr(signal, "meta_json", None))
-    signal_meta = meta.get("signal")
-    if not isinstance(signal_meta, dict):
-        raise ValueError("signal.meta_json['signal'] is required for trade validation")
-    return signal_meta
-
-
 def _full_meta(signal: SignalSchema) -> Dict[str, Any]:
-    meta = _as_dict(getattr(signal, "meta_json", None))
-    if not meta:
-        raise ValueError("signal.meta_json is required for trade validation")
-    return meta
+    return _as_dict(getattr(signal, "meta_json", None), path="signal.meta_json")
 
 
-def _initiated_setup(signal: SignalSchema) -> Dict[str, Any]:
+def _downstream_context(signal: SignalSchema) -> Dict[str, Any]:
     meta = _full_meta(signal)
-    initiated = meta.get("initiated_setup")
-    return initiated if isinstance(initiated, dict) else {}
-
-
-def _initiated_entry_reason(signal: SignalSchema) -> Dict[str, Any]:
-    initiated = _initiated_setup(signal)
-    entry_reason = initiated.get("entry_reason")
-    return entry_reason if isinstance(entry_reason, dict) else {}
-
-
-def _initiated_setup_label(signal: SignalSchema) -> str:
-    return _enum_str(_initiated_setup(signal).get("setup_label"))
-
-
-def _originating_setup_label(signal: SignalSchema) -> str:
-    """Return the immutable setup identity and fail on metadata drift."""
-    persisted = _enum_str(getattr(signal, "setup", ""))
-    initiated = _initiated_setup_label(signal)
-    explicit = _enum_str(_full_meta(signal).get("initiated_setup_label"))
-    if not persisted:
-        raise ValueError("SIGNAL_ORIGINATING_SETUP_MISSING")
-    mismatches = [x for x in (initiated, explicit) if x and x != persisted]
-    if mismatches:
+    contract = _as_dict(meta.get("downstream_contract"), path="signal.meta_json.downstream_contract")
+    version = _required_text(contract, "version", path="signal.meta_json.downstream_contract")
+    if version != DOWNSTREAM_CONTRACT_VERSION:
         raise ValueError(
-            "SIGNAL_SETUP_IDENTITY_MISMATCH "
-            f"signal_id={getattr(signal, 'signal_id', None)} "
-            f"persisted={persisted} initiated={initiated} explicit={explicit}"
+            "Unsupported downstream contract version: "
+            f"expected={DOWNSTREAM_CONTRACT_VERSION} actual={version}"
         )
-    return persisted
+
+    signal_block = _as_dict(meta.get("signal"), path="signal.meta_json.signal")
+    lifecycle = _as_dict(meta.get("lifecycle"), path="signal.meta_json.lifecycle")
+    evidence = _as_dict(meta.get("active_signal_evidence"), path="signal.meta_json.active_signal_evidence")
+    setup_levels = _as_dict(meta.get("setup_levels"), path="signal.meta_json.setup_levels")
+
+    stage = _enum_str(getattr(signal, "stage", None))
+    if not stage:
+        stage = _enum_str(signal_block.get("stage"))
+    if not stage:
+        raise ValueError("signal stage is required")
+
+    status = _enum_str(getattr(signal, "status", None))
+    if not status:
+        raise ValueError("signal status is required")
+
+    evidence_action = _enum_str(
+        evidence.get("active_evidence_action")
+        if "active_evidence_action" in evidence
+        else evidence.get("evidence_action")
+    )
+    if not evidence_action:
+        raise ValueError("active_signal_evidence.active_evidence_action is required")
+
+    lifecycle_trade_action = _enum_str(
+        lifecycle.get("trade_action")
+        if "trade_action" in lifecycle
+        else signal_block.get("trade_action")
+    )
+    if not lifecycle_trade_action:
+        raise ValueError("lifecycle.trade_action is required")
+
+    should_exit = _required_bool(
+        evidence,
+        "should_exit_signal",
+        path="signal.meta_json.active_signal_evidence",
+    )
+
+    setup_family = _required_text(setup_levels, "setup_label", path="signal.meta_json.setup_levels").upper()
+    persisted_setup = _enum_str(getattr(signal, "setup", None))
+    if persisted_setup != setup_family:
+        raise ValueError(
+            f"signal setup identity mismatch persisted={persisted_setup} setup_levels={setup_family}"
+        )
+
+    opportunity_key = _required_text(setup_levels, "opportunity_key", path="signal.meta_json.setup_levels")
+    candidate_id = _required_text(setup_levels, "candidate_id", path="signal.meta_json.setup_levels")
+    boundary_event_key = _required_text(
+        setup_levels,
+        "boundary_event_key",
+        path="signal.meta_json.setup_levels",
+    )
+
+    signal_reason = str(signal_block.get("signal_reason") or getattr(signal, "status_reason", "") or "").strip()
+    auction_action = _enum_str(evidence.get("auction_action"))
+    auction_state = _enum_str(evidence.get("auction_state"))
+    alignment = _enum_str(evidence.get("directional_alignment"))
+
+    confidence = _optional_float(signal_block.get("confidence"))
+    quality = signal_block.get("quality")
+    if quality is not None:
+        quality = str(quality).strip() or None
+
+    return {
+        "contract_version": version,
+        "signal_stage": stage,
+        "signal_status": status,
+        "signal_action": _enum_str(signal_block.get("signal_action")),
+        "signal_state": _enum_str(signal_block.get("signal_state")),
+        "lifecycle_trade_action": lifecycle_trade_action,
+        "management_posture": evidence_action,
+        "lifecycle_reason": signal_reason,
+        "auction_action": auction_action,
+        "auction_state": auction_state,
+        "directional_alignment": alignment,
+        "should_exit_signal": should_exit,
+        "opportunity_key": opportunity_key,
+        "candidate_id": candidate_id,
+        "boundary_event_key": boundary_event_key,
+        "setup_family": setup_family,
+        "confidence": confidence,
+        "quality": quality,
+    }
 
 
-def _initiated_entry_action(signal: SignalSchema) -> str:
-    return _enum_str(_initiated_entry_reason(signal).get("action"))
+def _signal_status(signal: SignalSchema) -> str:
+    return _enum_str(getattr(signal, "status", None))
 
 
-def _signal_action(signal: SignalSchema) -> str:
-    return _enum_str(_signal_meta(signal).get("signal_action"))
+def _symbol(signal: SignalSchema) -> str:
+    return str(getattr(signal, "symbol", "") or getattr(signal, "equity_ref", "") or "").strip().upper()
 
 
-def _evidence_action(signal: SignalSchema) -> str:
-    return _enum_str(_signal_meta(signal).get("signal_action"))
+def _symbol_family(signal: SignalSchema) -> str:
+    return str(
+        getattr(signal, "equity_ref", "")
+        or getattr(signal, "underlying", "")
+        or getattr(signal, "symbol", "")
+        or ""
+    ).strip().upper()
 
 
-def _setup_state(signal: SignalSchema) -> str:
-    return _enum_str(_signal_meta(signal).get("setup_state") or _signal_meta(signal).get("signal_state"))
+def _side(signal: SignalSchema) -> str:
+    return _enum_str(getattr(signal, "side", None))
 
 
-def _evidence_reason(signal: SignalSchema) -> str:
-    return str(_signal_meta(signal).get("signal_reason") or "").strip()
+def _is_open_signal(signal: SignalSchema) -> bool:
+    return _signal_status(signal) == SignalStatus.OPEN.value
 
 
-def _signal_stage(signal: SignalSchema) -> str:
-    return _enum_str(getattr(signal, "stage", "") or _signal_meta(signal).get("stage"))
+def _is_autogen_user(user: UserSchema) -> bool:
+    return int(getattr(user, "active", 0) or 0) == 1 and int(getattr(user, "logged_in", 0) or 0) == 1
 
 
-def _signal_confidence(signal: SignalSchema) -> float:
-    try:
-        return float(_signal_meta(signal).get("confidence") or 0)
-    except Exception:
-        return 0.0
-
-
-def _signal_quality(signal: SignalSchema) -> str:
-    return _enum_str(_signal_meta(signal).get("quality"))
-
-
-def _num_or_none(value: Any) -> Optional[float]:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except Exception:
-        return None
+def _user_autotrade_enabled(user: UserSchema) -> bool:
+    return int(getattr(user, "autotrade", 0) or 0) == 1
 
 
 def _signal_entry_prices(signal: SignalSchema) -> Dict[str, Any]:
     side = _side(signal)
-    created_price = _num_or_none(getattr(signal, "created_price", None))
-    current_price = _num_or_none(
-        getattr(signal, "last_price", None)
-        or getattr(signal, "ltp", None)
-    )
+    created = _optional_float(getattr(signal, "created_price", None))
+    current_raw = getattr(signal, "last_price", None)
+    if current_raw is None:
+        current_raw = getattr(signal, "ltp", None)
+    current = _optional_float(current_raw)
 
     directional_move_pct: Optional[float] = None
-    if created_price is not None and created_price > 0 and current_price is not None:
+    if created is not None and created > 0 and current is not None:
         if side == "BUY":
-            directional_move_pct = ((current_price - created_price) / created_price) * 100.0
+            directional_move_pct = ((current - created) / created) * 100.0
         elif side == "SELL":
-            directional_move_pct = ((created_price - current_price) / created_price) * 100.0
+            directional_move_pct = ((created - current) / created) * 100.0
 
     return {
         "side": side,
-        "created_price": created_price,
-        "current_price": current_price,
+        "created_price": created,
+        "current_price": current,
         "directional_move_pct": directional_move_pct,
     }
 
@@ -287,7 +301,6 @@ def _signal_created_time(signal: SignalSchema):
 
 
 def _manual_entry_warnings(signal: SignalSchema) -> tuple[List[str], Dict[str, Any]]:
-    """Return manual-only delay/chase diagnostics without blocking AUTO."""
     if not _policy_bool("manual_entry_warning_enabled", True):
         return [], {}
 
@@ -296,15 +309,11 @@ def _manual_entry_warnings(signal: SignalSchema) -> tuple[List[str], Dict[str, A
     now = business_now_naive()
     age_minutes: Optional[float] = None
     if created_time is not None:
-        try:
-            age_minutes = max(0.0, (now - created_time).total_seconds() / 60.0)
-        except Exception:
-            age_minutes = None
+        age_minutes = max(0.0, (now - created_time).total_seconds() / 60.0)
 
     delay_threshold = float(_decision_policy().get("manual_entry_delay_warning_minutes", 6.0) or 6.0)
     move_threshold = float(_decision_policy().get("manual_entry_move_warning_pct", 0.50) or 0.50)
-    move_pct = prices.get("directional_move_pct")
-
+    move_pct = prices["directional_move_pct"]
     delayed = age_minutes is not None and age_minutes >= max(0.0, delay_threshold)
     moved = move_pct is not None and move_pct >= max(0.0, move_threshold)
 
@@ -318,7 +327,6 @@ def _manual_entry_warnings(signal: SignalSchema) -> tuple[List[str], Dict[str, A
         "delayed": delayed,
         "moved_in_signal_direction": moved,
     }
-
     if not (delayed or moved):
         return [], details
 
@@ -329,292 +337,141 @@ def _manual_entry_warnings(signal: SignalSchema) -> tuple[List[str], Dict[str, A
         move_text = f"has already moved {move_pct:.2f}% in the signal direction"
     else:
         move_text = f"is currently {abs(move_pct):.2f}% adverse to the signal"
-
-    warning = (
+    return [
         f"Manual entry warning: signal is {age_text} and {move_text}. "
         "A delayed manual entry may involve chasing or reduced reward-to-risk."
-    )
-    return [warning], details
+    ], details
 
 
-def _signal_entry_price_decision(
-    signal: SignalSchema,
-    *,
-    mode: str,
-    warnings: Optional[List[str]] = None,
-) -> Optional[TradeDecision]:
-    """Require only that an OPEN signal is not currently in loss.
-
-    The rule is inclusive so AUTO may deploy on the signal-creation pass when
-    current price equals created price. Manual preview surfaces an adverse price
-    as an explicit confirmation warning; MANUAL_OVERRIDE is the operator's
-    deliberate bypass.
-    """
+def _price_entry_decision(signal: SignalSchema, *, mode: str, warnings: List[str]) -> Optional[TradeDecision]:
     if not _policy_bool("signal_entry_not_in_loss_enabled", True):
         return None
-
-    if _enum_str(mode) == MODE_MANUAL_OVERRIDE:
+    if mode == MODE_MANUAL_CONFIRM:
         return None
 
     prices = _signal_entry_prices(signal)
     side = prices["side"]
-    created_price = prices["created_price"]
-    current_price = prices["current_price"]
-
+    created = prices["created_price"]
+    current = prices["current_price"]
     details = {
         "policy": "signal_entry_not_in_loss",
         **prices,
         "required_relation": (
-            "current_price >= created_price"
-            if side == "BUY"
-            else "current_price <= created_price"
-            if side == "SELL"
-            else "valid BUY/SELL side required"
+            "current_price >= created_price" if side == "BUY" else
+            "current_price <= created_price" if side == "SELL" else
+            "valid BUY/SELL side required"
         ),
     }
 
-    if created_price is None or created_price <= 0 or current_price is None or current_price <= 0:
+    if created is None or created <= 0 or current is None or current <= 0:
         details["not_in_loss"] = False
         return TradeDecision.wait(
-            _policy_str(
-                "signal_entry_wait_price_missing_code",
-                "SIGNAL_ENTRY_WAIT_PRICE_UNAVAILABLE",
-            ),
-            warnings=list(warnings or []),
+            _policy_str("signal_entry_wait_price_missing_code", "SIGNAL_ENTRY_WAIT_PRICE_UNAVAILABLE"),
+            warnings=warnings,
             details=details,
         )
 
-    not_in_loss = (
-        (side == "BUY" and current_price >= created_price)
-        or (side == "SELL" and current_price <= created_price)
-    )
+    not_in_loss = (side == "BUY" and current >= created) or (side == "SELL" and current <= created)
     details["not_in_loss"] = bool(not_in_loss)
-    details["at_breakeven"] = bool(current_price == created_price)
-
+    details["at_breakeven"] = bool(current == created)
     if not_in_loss:
         return None
-
     return TradeDecision.wait(
-        _policy_str(
-            "signal_entry_wait_in_loss_code",
-            "SIGNAL_ENTRY_WAIT_NOT_IN_LOSS",
-        ),
-        warnings=list(warnings or []),
+        _policy_str("signal_entry_wait_in_loss_code", "SIGNAL_ENTRY_WAIT_NOT_IN_LOSS"),
+        warnings=warnings,
         details=details,
     )
 
 
-def _lifecycle_name(signal: SignalSchema) -> str:
-    return _enum_str(getattr(signal, "lifecycle", ""))
-
-
-def _signal_status(signal: SignalSchema) -> str:
-    return _enum_str(getattr(signal, "status", ""))
-
-
-def _symbol(signal: SignalSchema) -> str:
-    return str(getattr(signal, "symbol", "") or getattr(signal, "equity_ref", "") or "").strip().upper()
-
-
-def _side(signal: SignalSchema) -> str:
-    return _enum_str(getattr(signal, "side", ""))
-
-
-def _symbol_family(signal: SignalSchema) -> str:
-    return str(
-        getattr(signal, "equity_ref", "")
-        or getattr(signal, "underlying", "")
-        or getattr(signal, "symbol", "")
-        or ""
-    ).strip().upper()
-
-
-def _is_open_signal(signal: SignalSchema) -> bool:
-    return _signal_status(signal) == SignalStatus.OPEN.value
-
-
-def _is_autogen_user(user: UserSchema) -> bool:
-    return (
-        int(getattr(user, "active", 0) or 0) == 1
-        and int(getattr(user, "logged_in", 0) or 0) == 1
-    )
-
-
-def _user_autotrade_enabled(user: UserSchema) -> bool:
-    return int(getattr(user, "autotrade", 0) or 0) == 1
-
-
-def _fetch_active_trades_for_signal(userid: str, signal_id: str) -> List[Any]:
-    if not userid or not signal_id:
-        return []
-
-    method_names = [
-        "fetch_active_trades_for_signal",
-        "fetch_open_trades_for_signal",
-        "list_active_trades_for_signal",
-        "list_open_trades_for_signal",
-    ]
-
-    for name in method_names:
-        fn = getattr(UserTradeSchema, name, None)
-        if not callable(fn):
-            continue
-        try:
-            rows = fn(userid=userid, signal_id=signal_id) or []
-            return list(rows)
-        except TypeError:
-            try:
-                rows = fn(userid, signal_id) or []
-                return list(rows)
-            except Exception:
-                logger.exception("TradeDecisionHelper: %s failed | userid=%s signal_id=%s", name, userid, signal_id)
-                return []
-        except Exception:
-            logger.exception("TradeDecisionHelper: %s failed | userid=%s signal_id=%s", name, userid, signal_id)
-            return []
-
-    return []
-
-
 def _active_trade_exists(userid: str, signal_id: str) -> bool:
-    rows = _fetch_active_trades_for_signal(userid, signal_id)
-    if not rows:
-        return False
-
+    rows = UserTradeSchema.fetch_active_trades_for_signal(userid=userid, signal_id=signal_id)
     for row in rows:
-        entry_status = _enum_str(getattr(row, "entry_status", ""))
-        exit_status = _enum_str(getattr(row, "exit_status", ""))
+        entry_status = _enum_str(getattr(row, "entry_status", None))
+        exit_status = _enum_str(getattr(row, "exit_status", None))
         if entry_status in ACTIVE_ENTRY_STATUSES and exit_status not in TERMINAL_EXIT_STATUSES:
             return True
-
     return bool(rows)
 
 
-def _fetch_active_trades_for_symbol_family(userid: str, equity_ref: str) -> List[Any]:
-    userid = str(userid or "").strip()
-    equity_ref = str(equity_ref or "").strip().upper()
-    if not userid or not equity_ref:
-        return []
-
-    method_names = [
-        "fetch_active_trades_for_user_equity_ref",
-        "fetch_open_trades_for_user_equity_ref",
-        "list_active_trades_for_user_equity_ref",
-        "list_open_trades_for_user_equity_ref",
-    ]
-
-    for name in method_names:
-        fn = getattr(UserTradeSchema, name, None)
-        if not callable(fn):
-            continue
-        try:
-            rows = fn(userid=userid, equity_ref=equity_ref) or []
-            return list(rows)
-        except TypeError:
-            try:
-                rows = fn(userid, equity_ref) or []
-                return list(rows)
-            except Exception:
-                logger.exception("TradeDecisionHelper: %s failed | userid=%s equity_ref=%s", name, userid, equity_ref)
-                return []
-        except Exception:
-            logger.exception("TradeDecisionHelper: %s failed | userid=%s equity_ref=%s", name, userid, equity_ref)
-            return []
-
-    try:
-        rows = UserTradeSchema.fetch_open_positions(userid=userid, symbol=equity_ref) or []
-        return list(rows)
-    except Exception:
-        logger.exception("TradeDecisionHelper: fetch_open_positions fallback failed | userid=%s equity_ref=%s", userid, equity_ref)
-        return []
-
-
 def _active_symbol_family_trade_exists(userid: str, equity_ref: str) -> bool:
-    rows = _fetch_active_trades_for_symbol_family(userid, equity_ref)
-    if not rows:
-        return False
-
+    rows = UserTradeSchema.fetch_active_trades_for_user_equity_ref(userid=userid, equity_ref=equity_ref)
     for row in rows:
-        entry_status = _enum_str(getattr(row, "entry_status", ""))
-        exit_status = _enum_str(getattr(row, "exit_status", ""))
+        entry_status = _enum_str(getattr(row, "entry_status", None))
+        exit_status = _enum_str(getattr(row, "exit_status", None))
         if entry_status in ACTIVE_ENTRY_STATUSES and exit_status not in TERMINAL_EXIT_STATUSES:
             return True
-
     return bool(rows)
 
 
 class TradeDecisionHelper:
-    """Common AUTO/MANUAL trade decision helper."""
+    """Common AUTO/manual signal-entry decision helper."""
 
     @staticmethod
-    def evaluate(
-        *,
-        user: UserSchema,
-        signal: SignalSchema,
-        mode: str = MODE_AUTO,
-    ) -> TradeDecision:
+    def evaluate(*, user: UserSchema, signal: SignalSchema, mode: str = MODE_AUTO) -> TradeDecision:
         mode = _enum_str(mode or MODE_AUTO)
-        userid = str(getattr(user, "userid", "") or "").strip()
-        signal_id = str(getattr(signal, "signal_id", "") or getattr(signal, "signal_id", "") or "").strip()
+        if mode not in {MODE_AUTO, MODE_MANUAL_PREVIEW, MODE_MANUAL_CONFIRM}:
+            raise ValueError(f"Unsupported trade validation mode: {mode}")
 
-        warnings: List[str] = []
+        userid = str(getattr(user, "userid", "") or "").strip()
+        signal_id = str(getattr(signal, "signal_id", "") or "").strip()
+        context = _downstream_context(signal)
         details: Dict[str, Any] = {
             "userid": userid,
             "signal_id": signal_id,
             "symbol": _symbol(signal),
             "equity_ref": _symbol_family(signal),
-            "lifecycle": _lifecycle_name(signal),
             "side": _side(signal),
-            "stage": _signal_stage(signal),
-            "status": _signal_status(signal),
-            "setup_action": _evidence_action(signal),
-            "setup_state": _setup_state(signal),
-            "initiated_setup_label": _initiated_setup_label(signal),
-            "originating_setup_label": _originating_setup_label(signal),
-            "initiated_entry_action": _initiated_entry_action(signal),
-            "reason": _evidence_reason(signal),
-            "signal_action": _signal_action(signal),
-            "confidence": _signal_confidence(signal),
-            "quality": _signal_quality(signal),
             "mode": mode,
+            **context,
         }
+        warnings: List[str] = []
 
         if not userid:
             return TradeDecision.block("missing_userid", details=details)
-
         if not signal_id:
             return TradeDecision.block("missing_signal_id", details=details)
-
         if mode == MODE_AUTO and not _is_autogen_user(user):
             return TradeDecision.block("user_not_autogen_eligible", details=details)
-
-        # ``users.autotrade`` is the authoritative opt-in for automatic
-        # deployment. It is not a tunable strategy policy and cannot be
-        # bypassed by role, broker login or execution mode.
         if mode == MODE_AUTO and not _user_autotrade_enabled(user):
             return TradeDecision.block("autotrade_not_enabled", details=details)
-
         if not _is_open_signal(signal):
             return TradeDecision.block("signal_not_open", details=details)
-
-        if _signal_status(signal) in TERMINAL_SIGNAL_STATUSES:
+        if context["signal_status"] in TERMINAL_SIGNAL_STATUSES:
             return TradeDecision.block("signal_terminal", details=details)
 
-        # Any historical trade row means this user/signal was already deployed.
-        # Terminal exits do not make it eligible again; re-entry is intentionally
-        # unsupported until a separate explicit policy/model is introduced.
+        # A lifecycle exit posture is never overrideable for new entry.
+        hard_exit = (
+            context["signal_stage"] in HARD_EXIT_STAGES
+            or context["management_posture"] == "EXIT"
+            or context["should_exit_signal"]
+            or context["lifecycle_trade_action"] in {"EXIT_POSITION", "FORCE_EXIT"}
+        )
+        if hard_exit:
+            return TradeDecision.block("signal_exit_posture", details=details)
+
+        # One deployment per user/signal, including historically closed packages.
         if UserTradeSchema.has_any_trade_for_signal(userid=userid, signal_id=signal_id):
             return TradeDecision.block("signal_already_deployed", details=details)
 
-        # Lifecycle action used to close/replace an old opposite signal. It is
-        # never a clean fresh deployment action for autogen. Manual override may
-        # still create only after an explicit operator confirmation.
-        if _signal_action(signal) == "INVALIDATE_OPPOSITE":
-            reason = "signal_action_invalidating_opposite_wait_for_confirmation"
-            if mode == MODE_MANUAL_OVERRIDE:
+        defensive = (
+            context["signal_stage"] in DEFENSIVE_STAGES
+            or context["management_posture"] == "CAUTION"
+            or context["lifecycle_trade_action"] == "TIGHTEN_STOP"
+        )
+        entry_ready = (
+            context["signal_stage"] in ENTRY_STAGES
+            and context["management_posture"] == "STRENGTHEN"
+            and context["lifecycle_trade_action"] not in {"EXIT_POSITION", "FORCE_EXIT"}
+        )
+
+        if defensive:
+            reason = "signal_defensive_posture_requires_manual_confirmation"
+            if mode == MODE_MANUAL_CONFIRM:
                 warnings.append(reason)
             else:
-                return TradeDecision.wait(reason, warnings=warnings, details=details)
+                return TradeDecision.wait(reason, details=details)
+        elif not entry_ready:
+            return TradeDecision.block("signal_not_entry_eligible", details=details)
 
         if mode == MODE_MANUAL_PREVIEW:
             manual_warnings, manual_details = _manual_entry_warnings(signal)
@@ -622,22 +479,13 @@ class TradeDecisionHelper:
             if manual_details:
                 details["manual_entry_diagnostics"] = manual_details
 
-        price_decision = _signal_entry_price_decision(
-            signal,
-            mode=mode,
-            warnings=warnings,
-        )
+        price_decision = _price_entry_decision(signal, mode=mode, warnings=warnings)
         if price_decision is not None:
-            price_decision.details = {**details, **dict(price_decision.details or {})}
+            price_decision.details = {**details, **price_decision.details}
             return price_decision
 
-        if _policy_bool("block_duplicate_signal_trade", True):
-            if _active_trade_exists(userid, signal_id):
-                return TradeDecision.block(
-                    "active_trade_exists_for_signal",
-                    warnings=warnings,
-                    details=details,
-                )
+        if _policy_bool("block_duplicate_signal_trade", True) and _active_trade_exists(userid, signal_id):
+            return TradeDecision.block("active_trade_exists_for_signal", warnings=warnings, details=details)
 
         if _policy_bool("block_duplicate_symbol_trade", True):
             equity_ref = _symbol_family(signal)
@@ -648,33 +496,22 @@ class TradeDecisionHelper:
                 "policy": "one_active_trade_family_per_user_symbol",
             }
             if family_has_active:
-                return TradeDecision.block(
-                    "active_trade_exists_for_symbol_family",
-                    warnings=warnings,
-                    details=details,
-                )
+                return TradeDecision.block("active_trade_exists_for_symbol_family", warnings=warnings, details=details)
 
         return TradeDecision.allow(warnings=warnings, details=details)
 
     @staticmethod
-    def evaluate_by_ids(
-        *,
-        userid: str,
-        signal_id: str,
-        mode: str = MODE_AUTO,
-    ) -> TradeDecision:
+    def evaluate_by_ids(*, userid: str, signal_id: str, mode: str = MODE_AUTO) -> TradeDecision:
         user = UserSchema.fetch_user(userid)
         if not user:
             return TradeDecision.block(
                 "user_not_found",
                 details={"userid": userid, "signal_id": signal_id, "mode": _enum_str(mode)},
             )
-
-        signal = SignalSchema.fetch_by_signal_id(signal_id)
+        signal = SignalSchema.fetch_by_signal_id_strict(signal_id)
         if not signal:
             return TradeDecision.block(
                 "signal_not_found",
                 details={"userid": userid, "signal_id": signal_id, "mode": _enum_str(mode)},
             )
-
         return TradeDecisionHelper.evaluate(user=user, signal=signal, mode=mode)

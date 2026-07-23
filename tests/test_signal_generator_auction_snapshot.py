@@ -17,11 +17,7 @@ from schemas.snapshot import (
     SnapshotSchema,
 )
 from services.signals.signal_generator import SignalAssembler
-from services.signals.signal_helper import SignalHelper
-from services.trade.monitor.trademon_helper import (
-    _active_signal_evidence,
-    _get_signal_meta as trade_monitor_signal_meta,
-)
+from services.trade.monitor.signal_contract import AuctionTradeSignalContext
 
 
 TS = datetime(2026, 7, 20, 11, 48, tzinfo=timezone.utc)
@@ -361,14 +357,11 @@ class AuctionSignalGeneratorTests(unittest.TestCase):
         self.assertEqual(OPP, meta["setup_levels"]["opportunity_key"])
         self.assertEqual(meta["setup_levels"], meta["signal"]["setup_levels"])
         self.assertEqual(meta["setup_levels"], meta["initiated_setup"]["setup_levels"])
-        self.assertEqual(meta["signal"], trade_monitor_signal_meta(events[0][1]))
-        self.assertEqual(
-            meta["active_signal_evidence"],
-            _active_signal_evidence(events[0][1]),
-        )
-        ui_rows = SignalHelper._build_signal_rows([meta["lifecycle"]])
-        self.assertEqual("ENTER", ui_rows[0]["entry_view"])
-        self.assertEqual("READY", ui_rows[0]["state"])
+        context = AuctionTradeSignalContext.from_signal(events[0][1])
+        self.assertEqual("AUCTION_SIGNAL_DOWNSTREAM_V1", context.contract_version)
+        self.assertEqual("ACTIVE", context.stage)
+        self.assertEqual("STRENGTHEN", context.management_posture)
+        self.assertEqual(OPP, context.opportunity_key)
         self.assertIsNone(snapshot.ltp)
 
     def test_second_confirmed_updates_when_selected_candidate_is_not_in_current_list(self):

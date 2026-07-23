@@ -382,6 +382,30 @@ def _trade_management_dict(tr):
     except Exception:
         return {}
 
+
+def _trade_origin(tr) -> str:
+    source = _safe_str(getattr(tr, "source", ""), "").strip().upper()
+    signal_id = _safe_str(getattr(tr, "signal_id", ""), "").strip()
+    if source in ("AUTOGEN", "TRADE_GENERATOR"):
+        return "SIGNAL_AUTO"
+    if source == "MANUAL_SIGNAL":
+        return "SIGNAL_MANUAL"
+    if source == "POSITION_ADD":
+        return "POSITION_ADD"
+    if source in ("WATCHLIST", "MANUAL") or signal_id.startswith("MANUAL:"):
+        return "WATCHLIST"
+    return source or "UNKNOWN"
+
+
+def _trade_management_mode(tr) -> str:
+    return "SIGNAL_LIFECYCLE" if _trade_origin(tr) in ("SIGNAL_AUTO", "SIGNAL_MANUAL") else "MANUAL_PRICE"
+
+
+def _trade_signal_reference(tr):
+    signal_id = _safe_str(getattr(tr, "signal_id", ""), "").strip()
+    return None if not signal_id or signal_id.startswith("MANUAL:") else signal_id
+
+
 def _managed_stop_price(tr):
     tm = _trade_management_dict(tr)
     return _safe_float(tm.get("current_stop_price"), 0.0)
@@ -455,11 +479,15 @@ def _to_orders_row(tr):
 
     return {
         "id": tr.id,
-        "signal_id": getattr(tr, "signal_id", "") or "",
         "userid": getattr(tr, "userid", "") or "",
+        "signal_id": _trade_signal_reference(tr),
+        "signal_reference": _trade_signal_reference(tr),
+        "origin": _trade_origin(tr),
+        "management_mode": _trade_management_mode(tr),
 
-        "signal_id": getattr(tr, "signal_id", None),
-        "signal_date": _fmt_ist(_trade_entry_display_time(tr)),
+        "entry_plan_time": _fmt_ist(_trade_entry_display_time(tr)),
+        "signal_date": _fmt_ist(_trade_entry_display_time(tr)),  # compatibility alias
+        "execution_time": _fmt_ist(getattr(tr, "entry_exec_time", None)),
         "date": _fmt_ist(getattr(tr, "last_time", None)),
 
         "symbol": getattr(tr, "symbol", "") or "",
@@ -468,7 +496,7 @@ def _to_orders_row(tr):
         "trade_type": getattr(tr, "trade_type", "") or "",
         "product": getattr(tr, "product", "") or "",
 
-        "signal_price": _safe_float(getattr(tr, "signal_price", None), display_entry_price),
+        "signal_price": _safe_float(getattr(tr, "signal_price", None), display_entry_price),  # compatibility alias
 
         "entry_price": display_entry_price,
         "planned_entry_price": planned_entry_price,
@@ -554,15 +582,20 @@ def _to_position_trade_row(tr):
 
     return {
         "id": tr.id,
-        "signal_id": getattr(tr, "signal_id", "") or "",
+        "signal_id": _trade_signal_reference(tr),
+        "signal_reference": _trade_signal_reference(tr),
         "userid": getattr(tr, "userid", "") or "",
+        "origin": _trade_origin(tr),
+        "management_mode": _trade_management_mode(tr),
 
         "symbol": getattr(tr, "symbol", "") or "",
         "equity_ref": getattr(tr, "equity_ref", "") or "",
         "instrument_type": getattr(tr, "instrument_type", "") or "",
         "trade_type": getattr(tr, "trade_type", "") or "",
 
-        "entry_time": _fmt_ist(_trade_entry_display_time(tr)),
+        "entry_plan_time": _fmt_ist(_trade_entry_display_time(tr)),
+        "entry_time": _fmt_ist(_trade_entry_display_time(tr)),  # compatibility alias
+        "execution_time": _fmt_ist(getattr(tr, "entry_exec_time", None)),
         "entry_exec_time": _fmt_ist(getattr(tr, "entry_exec_time", None)),
         "entry_price": _trade_entry_display_price(tr),
         "planned_entry_price": fnum(getattr(tr, "entry_price", None)),
@@ -766,7 +799,9 @@ def _normalize_trade_source(source):
 def _trade_preview_summary(userid: str, result: dict) -> dict:
     result = result or {}
     form = result.get("trade_form") if isinstance(result.get("trade_form"), dict) else {}
-    validation = form.get("trade_validation") if isinstance(form.get("trade_validation"), dict) else {}
+    validation = form.get("entry_eligibility") if isinstance(form.get("entry_eligibility"), dict) else {}
+    if not validation:
+        validation = form.get("trade_validation") if isinstance(form.get("trade_validation"), dict) else {}
     details = result.get("details") if isinstance(result.get("details"), dict) else {}
     if not validation and details.get("decision"):
         validation = details
@@ -779,7 +814,9 @@ def _trade_preview_summary(userid: str, result: dict) -> dict:
         "ok": bool(result.get("ok")),
         "decision": decision,
         "allowed": bool(validation.get("allowed")) if validation else decision == "ALLOW",
-        "requires_override": bool(form.get("requires_override") or decision == "WAIT"),
+        "entry_decision": _safe_str(validation.get("entry_decision"), ""),
+        "requires_confirmation": bool(form.get("requires_confirmation") or form.get("requires_override") or decision == "WAIT"),
+        "requires_override": bool(form.get("requires_confirmation") or form.get("requires_override") or decision == "WAIT"),
         "reasons": reasons,
         "warnings": warnings,
         "error": result.get("error"),
@@ -954,7 +991,12 @@ def trading_create_trade():
             signal_id = str(payload.get("signal_id") or "").strip()
             instrument_choice = str(payload.get("instrument_choice") or "MULTI").strip().upper()
             requested_product = str(payload.get("product") or "MIS").strip().upper()
-            override_validation = bool(payload.get("override_validation") or payload.get("override") or False)
+            confirm_entry_warning = bool(
+                payload.get("confirm_entry_warning")
+                or payload.get("override_validation")
+                or payload.get("override")
+                or False
+            )
             selected_trade_symbol = str(payload.get("trade_symbol") or "").strip().upper()
             selected_quantity = _safe_int(payload.get("quantity") or payload.get("qty") or 0, 0)
             selected_lots = _safe_int(payload.get("lots") or 0, 0)
@@ -968,7 +1010,7 @@ def trading_create_trade():
                     signal_id=signal_id,
                     instrument_choice=instrument_choice,
                     source="MANUAL_SIGNAL",
-                    override_validation=override_validation,
+                    confirm_entry_warning=confirm_entry_warning,
                     requested_product=requested_product,
                     selected_trade_symbol=selected_trade_symbol or None,
                     selected_quantity=selected_quantity or None,
@@ -1036,7 +1078,7 @@ def trading_create_trade():
                 res = TradeGenHelper.create_manual_trade(
                     userid=userid,
                     payload=base_payload,
-                    source="POSITION_ADD" if source == "position" else "MANUAL",
+                    source="POSITION_ADD" if source == "position" else "WATCHLIST",
                 ) or {}
 
                 ok = bool(res.get("ok"))

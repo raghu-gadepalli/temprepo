@@ -53,7 +53,8 @@
       <thead>
         <tr>
           <th>User</th>
-          <th>Time</th>
+          <th>Entry Plan</th>
+          <th>Origin</th>
           <th>Symbol</th>
           <th>Type</th>
           <th>Side</th>
@@ -68,7 +69,7 @@
       <tbody></tbody>
       <tfoot>
         <tr>
-          <th colspan="8">Total</th>
+          <th colspan="9">Total</th>
           <th id="orders-total-lastpnl">0.00</th>
           <th colspan="2"></th>
         </tr>
@@ -113,7 +114,7 @@
           <table class="table table-bordered text-center mb-2" style="font-size:12px;">
             <thead class="table-secondary">
               <tr>
-                <th>Entry Time</th>
+                <th>Entry Plan Time</th>
                 <th>Exit Time</th>
                 <th>Last Price</th>
                 <th>P&amp;L</th>
@@ -127,6 +128,23 @@
                 <td id="oe-last-price"></td>
                 <td id="oe-pnl"></td>
                 <td id="oe-status"></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <table class="table table-bordered text-center mb-2" style="font-size:12px;">
+            <thead class="table-secondary">
+              <tr>
+                <th>Origin</th>
+                <th>Management</th>
+                <th>Signal Reference</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td id="oe-origin"></td>
+                <td id="oe-management-mode"></td>
+                <td id="oe-signal-reference"></td>
               </tr>
             </tbody>
           </table>
@@ -222,5 +240,5 @@
   };
 </script>
 <script src="{{ url_for('static', filename='js/trade_edit.js') }}" defer></script>
-<script src="{{ url_for('static', filename='js/orders.js', v='20260714-account-scope-1') }}" defer></script>
+<script src="{{ url_for('static', filename='js/orders.js', v='20260723-p53') }}" defer></script>
 {% endblock %}

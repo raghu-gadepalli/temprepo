@@ -72,7 +72,7 @@ from services.trade.generator.tradegen_validator import (
     TradeDecisionHelper,
     MODE_AUTO,
     MODE_MANUAL_PREVIEW,
-    MODE_MANUAL_OVERRIDE,
+    MODE_MANUAL_CONFIRM,
 )
 
 logger = logging.getLogger(__name__)
@@ -398,27 +398,41 @@ def _signal_meta_dict(signal: SignalSchema) -> Dict[str, Any]:
 
 
 def _signal_setup_levels(signal: SignalSchema) -> Dict[str, Any]:
-    """Extract entry-time setup_levels persisted by the signal layer.
+    """Return the one canonical Auction setup-level handoff.
 
-    The signal layer passes only price-action / structure reference levels, not
-    risk/reward or target metadata.  Trade generation converts the reference
-    level into the instrument stop; the monitor owns buffers, targets, trailing
-    and profit capture from there.
+    Patch 5.2 established ``signal.meta_json.setup_levels`` as immutable.  Trade
+    generation must not search duplicate metadata blocks or criteria JSON when
+    that canonical contract is missing or malformed.
     """
     meta = _signal_meta_dict(signal)
-    candidates = [
-        meta.get("setup_levels"),
-        (_as_dict_maybe_json(meta.get("initiated_setup"))).get("setup_levels"),
-        (_as_dict_maybe_json(meta.get("signal"))).get("setup_levels"),
-        (_as_dict_maybe_json(meta.get("entry_criteria_json"))).get("setup_levels"),
-        _as_dict_maybe_json(getattr(signal, "criteria_json", None)).get("setup_levels"),
-    ]
-    for value in candidates:
-        obj = _as_dict_maybe_json(value)
-        ref = _safe_num(obj.get("initial_stop_reference_price") or obj.get("reference_price") or obj.get("level_price"), None)
-        if obj and ref is not None and ref > 0:
-            return obj
-    return {}
+    if "setup_levels" not in meta or not isinstance(meta["setup_levels"], dict):
+        raise ValueError("signal.meta_json.setup_levels is required")
+    levels = dict(meta["setup_levels"])
+    required = (
+        "entry_price",
+        "initial_stop_reference_price",
+        "reference_price",
+        "reference_source",
+        "opportunity_key",
+        "candidate_id",
+        "boundary_event_key",
+        "setup_label",
+        "side",
+    )
+    missing = [key for key in required if key not in levels or levels[key] in (None, "")]
+    if missing:
+        raise ValueError(f"signal.meta_json.setup_levels missing required fields: {missing}")
+    for key in ("entry_price", "initial_stop_reference_price", "reference_price"):
+        value = _safe_num(levels[key], None)
+        if value is None or value <= 0:
+            raise ValueError(f"signal.meta_json.setup_levels.{key} must be positive")
+    setup_label = str(getattr(signal, "setup", "") or "").strip().upper()
+    if str(levels["setup_label"]).strip().upper() != setup_label:
+        raise ValueError("signal.meta_json.setup_levels setup identity mismatch")
+    signal_side = _side(getattr(signal, "side", ""))
+    if str(levels["side"]).strip().upper() != signal_side:
+        raise ValueError("signal.meta_json.setup_levels side identity mismatch")
+    return levels
 
 
 def _setup_levels_initial_levels_for_leg(
@@ -1663,6 +1677,15 @@ class TradeGenHelper:
             "userid": getattr(user, "userid", ""),
             "signal_id": signal_id,
             "source": source,
+            "entry_origin": (
+                "SIGNAL" if str(source or "").strip().upper() in ("AUTOGEN", "TRADE_GENERATOR", "MANUAL_SIGNAL")
+                else "POSITION_ADD" if str(source or "").strip().upper() == "POSITION_ADD"
+                else "WATCHLIST"
+            ),
+            "management_mode": (
+                "SIGNAL_LIFECYCLE" if str(source or "").strip().upper() in ("AUTOGEN", "TRADE_GENERATOR", "MANUAL_SIGNAL")
+                else "MANUAL_PRICE"
+            ),
             "symbol": eq_trade_symbol,
             "equity_ref": eq_ref,
             "side": side,
@@ -1774,7 +1797,18 @@ class TradeGenHelper:
             if entry_exec is None and inst in ("FUT", "CE", "PE"):
                 entry_exec = _resolve_deriv_entry_price(signal, instrument_type=inst, symbol=sym0)
             if entry_exec is None or d(entry_exec) <= 0:
-                entry_exec = risk_ref_eq
+                if inst == "EQ":
+                    entry_exec = risk_ref_eq
+                else:
+                    logger.warning(
+                        "TradeGenHelper: derivative leg skipped because price is unavailable | "
+                        "user=%s signal=%s inst=%s symbol=%s",
+                        getattr(user, "userid", "?"),
+                        getattr(signal, "signal_id", None),
+                        inst,
+                        sym0,
+                    )
+                    return
 
             legs.append(
                 TradeLegPlan(
@@ -2112,10 +2146,27 @@ class TradeGenHelper:
         form["fields"]["side_editable"] = False
         form["fields"]["product_editable"] = True
         form["product"] = _normalized_product_for_inst(form.get("selected_instrument") or "EQ")
-        form["trade_validation"] = decision_dict
+        form["entry_eligibility"] = decision_dict
+        form["trade_validation"] = decision_dict  # compatibility alias
+        decision_details = decision_dict.get("details") if isinstance(decision_dict.get("details"), dict) else {}
+        form["entry_context"] = {
+            "origin": "SIGNAL",
+            "setup": decision_details.get("setup_family") or getattr(signal, "setup", None),
+            "signal_stage": decision_details.get("signal_stage") or getattr(signal, "stage", None),
+            "signal_status": decision_details.get("signal_status") or getattr(signal, "status", None),
+            "management_posture": decision_details.get("management_posture"),
+            "directional_alignment": decision_details.get("directional_alignment"),
+            "auction_state": decision_details.get("auction_state"),
+            "auction_action": decision_details.get("auction_action"),
+            "current_trade_instruction": decision_details.get("lifecycle_trade_action"),
+            "lifecycle_reason": decision_details.get("lifecycle_reason"),
+            "should_exit_signal": decision_details.get("should_exit_signal"),
+        }
         if decision.decision == "WAIT":
-            form["requires_override"] = True
-            form["validation_warning"] = ", ".join(decision.reasons or [])
+            form["requires_confirmation"] = True
+            form["requires_override"] = True  # compatibility alias
+            form["entry_warning"] = ", ".join(decision.reasons or [])
+            form["validation_warning"] = form["entry_warning"]
 
         form["defaults"]["intraday_only"] = True
 
@@ -2423,35 +2474,39 @@ class TradeGenHelper:
         trade_time = getattr(snapshot, "snapshot_time", None)
         trade_time = _to_ist_naive(trade_time) or business_now_naive()
 
-        risk_ref_price = _safe_num(p.get("risk_ref_price"), None)
-        if risk_ref_price is None or risk_ref_price <= 0:
-            try:
-                risk_ref_price = _snapshot_close(snapshot)
-            except Exception:
-                risk_ref_price = _safe_num(p.get("entry_price"), Decimal("0")) or Decimal("0")
-
+        # Watchlist/position manual trade risk is anchored to the completed
+        # snapshot close. Browser-submitted prices are display hints only and are
+        # never authoritative for persistence.
+        try:
+            risk_ref_price = _snapshot_close(snapshot)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": "INVALID_RISK_REF_PRICE",
+                "details": {"symbol": equity_ref, "reason": str(exc)},
+            }
         if risk_ref_price <= 0:
             return {"ok": False, "error": "INVALID_RISK_REF_PRICE"}
 
-        entry_price = _safe_num(p.get("entry_price"), None)
-        if entry_price is None or entry_price <= 0:
-            if instrument_type == "EQ":
-                entry_price = risk_ref_price
-            elif instrument_type == "FUT":
-                entry_price = _resolve_future_price_from_snapshot(snap_dict)
-            elif instrument_type in ("CE", "PE"):
-                rows = _option_rows_from_snapshot(snap_dict, is_call=(instrument_type == "CE"))
-                sym0 = trade_symbol.strip().upper()
-                for r in rows:
-                    if str(r.get("symbol") or "").strip().upper() == sym0:
-                        entry_price = _safe_num(r.get("ltp"), _safe_num(r.get("last_price"), None))
-                        if entry_price is not None and entry_price > 0:
-                            break
+        entry_price: Optional[Decimal] = None
+        if instrument_type == "EQ":
+            entry_price = risk_ref_price
+        elif instrument_type == "FUT":
+            entry_price = _resolve_future_price_from_snapshot(snap_dict)
+        elif instrument_type in ("CE", "PE"):
+            rows = _option_rows_from_snapshot(snap_dict, is_call=(instrument_type == "CE"))
+            sym0 = trade_symbol.strip().upper()
+            for row in rows:
+                if str(row.get("symbol") or "").strip().upper() != sym0:
+                    continue
+                entry_price = _safe_num(row.get("ltp"), _safe_num(row.get("last_price"), None))
+                if entry_price is not None and entry_price > 0:
+                    break
 
         if entry_price is None or entry_price <= 0:
             return {
                 "ok": False,
-                "error": "INVALID_ENTRY_PRICE",
+                "error": "DERIVATIVE_PRICE_UNAVAILABLE" if instrument_type != "EQ" else "INVALID_ENTRY_PRICE",
                 "details": {"instrument_type": instrument_type, "trade_symbol": trade_symbol},
             }
 
@@ -2606,6 +2661,7 @@ class TradeGenHelper:
         signal_id: str,
         instrument_choice: str = "MULTI",
         source: str = "AUTOGEN",
+        confirm_entry_warning: bool = False,
         override_validation: bool = False,
         requested_product: Any = None,
         selected_trade_symbol: Optional[str] = None,
@@ -2617,9 +2673,9 @@ class TradeGenHelper:
 
         # Use the same validation path for AUTO and manual signal-based trade
         # creation. AUTO must be strictly allowed. Manual creation may proceed
-        # through soft lifecycle/deployability WAIT states only when the caller
-        # explicitly passes override_validation=True. Hard safety blocks remain
-        # hard blocks in every mode.
+        # through a defensive-but-nonterminal posture only after an explicit
+        # ``confirm_entry_warning``. ``override_validation`` is accepted only as
+        # a temporary compatibility alias and cannot bypass hard exit posture.
         user = UserSchema.fetch_user(userid)
         signal = TradeGenHelper._resolve_signal(signal_id)
 
@@ -2639,8 +2695,8 @@ class TradeGenHelper:
         src = str(source or "").strip().upper()
         if src in ("AUTOGEN", "TRADE_GENERATOR"):
             validation_mode = MODE_AUTO
-        elif override_validation:
-            validation_mode = MODE_MANUAL_OVERRIDE
+        elif confirm_entry_warning or override_validation:
+            validation_mode = MODE_MANUAL_CONFIRM
         else:
             validation_mode = MODE_MANUAL_PREVIEW
 
@@ -2651,7 +2707,7 @@ class TradeGenHelper:
         )
 
         if not decision.allowed:
-            err = "MANUAL_OVERRIDE_REQUIRED" if decision.decision == "WAIT" else "TRADE_VALIDATION_BLOCKED"
+            err = "MANUAL_CONFIRMATION_REQUIRED" if decision.decision == "WAIT" else "TRADE_VALIDATION_BLOCKED"
             return {
                 "ok": False,
                 "error": err,

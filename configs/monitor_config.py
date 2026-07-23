@@ -4,18 +4,6 @@ from typing import Dict, List
 from pydantic import BaseModel, Field
 
 
-class ProtectiveStopConfig(BaseModel):
-    enabled: bool = True
-    default_pct: float = 2.0
-    by_instrument: Dict[str, float] = Field(default_factory=lambda: {
-        "EQ": 2.0,
-        "FUT": 2.0,
-        "CE": 20.0,
-        "PE": 20.0,
-    })
-    apply_when_missing_or_zero: bool = True
-
-
 class ProfitProtectionConfig(BaseModel):
     """First profit-protection step after a trade proves itself.
 
@@ -53,7 +41,7 @@ class GroupManagementConfig(BaseModel):
     step_r: float = 0.5
 
     # A trade remains unproven until the reference has produced this MFE.
-    # MAE tightening additionally requires weakening evidence by default.
+    # MAE tightening additionally requires a defensive Auction signal posture by default.
     unproven_mfe_max_r: float = 0.5
     mae_requires_weakening: bool = True
     mae_steps: List[MaeRatchetStepConfig] = Field(default_factory=lambda: [
@@ -74,7 +62,7 @@ class TradeManagementConfig(BaseModel):
     prices. ATR comes from the underlying equity snapshot; FUT uses it directly,
     ATM option premiums use ``option_atr_factor`` as an approximation.
     """
-    mode: str = "EVIDENCE_ADAPTIVE_V1"
+    mode: str = "AUCTION_ADAPTIVE_V2"
 
     initial_target_r_multiple: float = 2.0
     initial_stop_r_multiple: float = 3.0
@@ -98,8 +86,6 @@ class TradeManagementConfig(BaseModel):
     protect_buffer_r: float = 0.5
     option_atr_factor: float = 0.5
 
-    expand_confidence_min: float = 70.0
-    expand_quality_min: float = 55.0
     expand_progress_min: float = 0.75
 
     # The first protection move is intentionally aggressive: once MFE reaches
@@ -112,52 +98,12 @@ class TradeManagementConfig(BaseModel):
     adverse_tighten_stop_r_multiple: float = 2.0
     expand_ready_profit_r: float = 1.0
 
-    protect_confidence_drop: float = 10.0
-    protect_quality_max: float = 45.0
 
     group_management: GroupManagementConfig = Field(default_factory=GroupManagementConfig)
 
     exit_on_current_target: bool = True
     exit_on_current_stop: bool = True
     skip_exit_on_entry_tick: bool = True
-
-class SignalExitConfig(BaseModel):
-    enabled: bool = True
-    actions: List[str] = Field(default_factory=lambda: [
-        "DOWNGRADE",
-        "INVALIDATE",
-        "INVALIDATE_OPPOSITE",
-        "CLOSE",
-        "REVERSE",
-    ])
-    states: List[str] = Field(default_factory=lambda: [
-        "WEAKENING",
-        "REVERSED",
-        "CLOSED",
-        "INVALIDATED",
-    ])
-    by_instrument: Dict[str, Dict[str, str]] = Field(default_factory=lambda: {
-        "EQ": {
-            "on_weakening": "TIGHTEN_STOP",
-            "on_reversal": "EXIT_FULL",
-            "on_invalidated": "EXIT_FULL",
-        },
-        "FUT": {
-            "on_weakening": "TIGHTEN_STOP",
-            "on_reversal": "EXIT_FULL",
-            "on_invalidated": "EXIT_FULL",
-        },
-        "CE": {
-            "on_weakening": "EXIT_FULL",
-            "on_reversal": "EXIT_FULL",
-            "on_invalidated": "EXIT_FULL",
-        },
-        "PE": {
-            "on_weakening": "EXIT_FULL",
-            "on_reversal": "EXIT_FULL",
-            "on_invalidated": "EXIT_FULL",
-        },
-    })
 
 
 class MonitorConfig(BaseModel):
@@ -175,11 +121,8 @@ class MonitorConfig(BaseModel):
     # Live quote control. Replay uses EXECUTION_CONFIG.use_snapshot as the single switch.
     use_live_quotes: bool = True
 
-    protective_sl: ProtectiveStopConfig = Field(default_factory=ProtectiveStopConfig)
-    signal_exit: SignalExitConfig = Field(default_factory=SignalExitConfig)
     trade_management: TradeManagementConfig = Field(default_factory=TradeManagementConfig)
 
-    setup_policy: Dict[str, float] = Field(default_factory=dict)
 
 
 MONITOR_CONFIG = MonitorConfig()

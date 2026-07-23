@@ -91,6 +91,23 @@ function posGetPnlValue(item) {
   return Number.isFinite(x) ? x : 0;
 }
 
+function posOriginLabel(value) {
+  const origin = posNormStatus(value || "UNKNOWN");
+  return ({
+    SIGNAL_AUTO: "Signal Auto",
+    SIGNAL_MANUAL: "Signal Manual",
+    WATCHLIST: "Watchlist",
+    POSITION_ADD: "Position Add",
+    UNKNOWN: "Unknown"
+  })[origin] || origin.replaceAll("_", " ");
+}
+
+function posManagementLabel(value) {
+  return posNormStatus(value) === "SIGNAL_LIFECYCLE"
+    ? "Signal Lifecycle"
+    : "Manual Price-Based";
+}
+
 function posStatusBadgeFromItem(item) {
   const status = posNormStatus(item.status);
 
@@ -150,7 +167,7 @@ function posBuildAuditPayload(item) {
   const oppId = posText(item?.signal_id || item?.signal_id, "");
   const symbol = posText(item?.symbol, "");
   const userid = posText(item?.userid, "");
-  const startTime = posText(item?.entry_time || item?.entry_exec_time || item?.last_time, "");
+  const startTime = posText(item?.entry_plan_time || item?.entry_time || item?.entry_exec_time || item?.last_time, "");
   const endTime = posText(item?.exit_time, "");
 
   return {
@@ -229,7 +246,8 @@ function populatePositions(data) {
 
     table.row.add([
       posText(item.userid),
-      posText(item.entry_time),
+      posText(item.entry_plan_time || item.entry_time),
+      posOriginLabel(item.origin),
       posText(item.symbol),
       `${posText(item.instrument_type || item.type)} / ${posText(item.product || "MIS")} ${posModeBadge(item.execution_mode)}`,
       posText(item.side || item.trade_type),
@@ -269,7 +287,10 @@ $(document).on("click", ".pos-info", function () {
   $("#pi-type").text(`${posText(item.instrument_type || item.type)} / ${posText(item.product || "MIS")}`);
   $("#pi-side").text(posText(item.side || item.trade_type));
 
-  $("#pi-exec-time").text(posText(item.entry_time));
+  $("#pi-exec-time").text(posText(item.entry_plan_time || item.entry_time));
+  $("#pi-origin").text(posOriginLabel(item.origin));
+  $("#pi-management-mode").text(posManagementLabel(item.management_mode));
+  $("#pi-signal-reference").text(posText(item.signal_reference, "—"));
   $("#pi-last-time").text(posText(item.last_time));
   $("#pi-last-price").text(posNum(item.last_price));
   $("#pi-pnl").html(posPnlSpan(posGetPnlValue(item)));
@@ -352,7 +373,7 @@ $(document).ready(() => {
 
         let totalPnl = 0;
         rows.data().each(function (row) {
-          const raw = String(row[8] || "")
+          const raw = String(row[9] || "")
             .replace(/<[^>]*>/g, "")
             .replace(/,/g, "")
             .trim();
@@ -365,7 +386,7 @@ $(document).ready(() => {
 
         return $(`
           <tr class="table-light pos-group-row" data-group="${group}" style="cursor:pointer;">
-            <td colspan="11">
+            <td colspan="12">
               <div class="d-flex align-items-center justify-content-between">
                 <div class="fw-semibold d-flex align-items-center gap-2">
                   <i class="bi ${icon}"></i>

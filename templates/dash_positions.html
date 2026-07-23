@@ -54,7 +54,8 @@
         <thead>
           <tr>
             <th>User</th>
-            <th>Entry Time</th>
+            <th>Entry Plan</th>
+            <th>Origin</th>
             <th>Symbol</th>
             <th>Type</th>
             <th>Side</th>
@@ -102,8 +103,23 @@
               <div class="card-body">
 
                 <div class="d-flex justify-content-between mb-1">
-                  <span class="text-muted">Entry Time</span>
+                  <span class="text-muted">Entry Plan Time</span>
                   <span id="pi-exec-time">—</span>
+                </div>
+
+                <div class="d-flex justify-content-between mb-1">
+                  <span class="text-muted">Origin</span>
+                  <span id="pi-origin">—</span>
+                </div>
+
+                <div class="d-flex justify-content-between mb-1">
+                  <span class="text-muted">Management</span>
+                  <span id="pi-management-mode">—</span>
+                </div>
+
+                <div class="d-flex justify-content-between mb-1">
+                  <span class="text-muted">Signal Reference</span>
+                  <span id="pi-signal-reference">—</span>
                 </div>
 
                 <div class="d-flex justify-content-between mb-1">
@@ -219,7 +235,7 @@
   };
 </script>
 <script src="{{ url_for('static', filename='js/audit_timeline.js') }}" defer></script>
-<script src="{{ url_for('static', filename='js/trade_create.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/trade_create.js', v='20260723-p53') }}" defer></script>
 <script src="{{ url_for('static', filename='js/trade_exit.js') }}" defer></script>
-<script src="{{ url_for('static', filename='js/positions.js', v='20260714-account-scope-1') }}" defer></script>
+<script src="{{ url_for('static', filename='js/positions.js', v='20260723-p53') }}" defer></script>
 {% endblock %}

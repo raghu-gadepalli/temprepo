@@ -104,13 +104,9 @@
     signal_already_deployed: "This signal has already been deployed for this user.",
     active_trade_exists_for_signal: "An active trade already exists for this signal.",
     active_trade_exists_for_symbol_family: "An active trade already exists for this stock family.",
-    signal_action_invalidating_opposite_wait_for_confirmation: "Signal is resolving an opposite setup and requires explicit confirmation.",
-    stage_not_deployable: "Signal is not currently in a deployable stage.",
-    initiated_setup_deployment_window_expired: "The original signal deployment window has expired.",
-    EXHAUSTION_ENTRY_WAIT_NEXT_CANDLE: "Exhaustion entry is waiting for the next completed candle.",
-    EXHAUSTION_ENTRY_WAIT_FAVORABLE_MOVE: "Exhaustion entry is waiting for favourable follow-through.",
-    EXHAUSTION_ENTRY_WINDOW_EXPIRED: "Exhaustion entry window has expired.",
-    EXHAUSTION_ENTRY_SKIPPED_CHASED_MOVE: "The exhaustion move is already too extended to chase.",
+    signal_exit_posture: "Signal is in an exit posture. New trade entry is blocked.",
+    signal_defensive_posture_requires_manual_confirmation: "Signal is defensive. Manual entry requires explicit confirmation.",
+    signal_not_entry_eligible: "Signal is not currently eligible for a new entry.",
     SIGNAL_ENTRY_WAIT_NOT_IN_LOSS: "Current price is adverse to the signal. Automatic entry will wait; manual entry requires explicit confirmation.",
     SIGNAL_ENTRY_WAIT_PRICE_UNAVAILABLE: "Current or signal creation price is unavailable. Automatic entry will wait; manual entry requires explicit confirmation."
   };
@@ -152,7 +148,7 @@
       }
       return "This signal has already been deployed for the selected user.";
     }
-    if (error === "MANUAL_OVERRIDE_REQUIRED") {
+    if (error === "MANUAL_CONFIRMATION_REQUIRED" || error === "MANUAL_OVERRIDE_REQUIRED") {
       const text = validationReasonText(details);
       return text.length ? text.join(" ") : "Explicit confirmation is required for this trade.";
     }
@@ -173,6 +169,7 @@
     if (error === "INSTRUMENT_NOT_APPLICABLE_TO_SIGNAL_SIDE") return "The selected instrument is not applicable to this signal direction.";
     if (error === "QUANTITY_NOT_MULTIPLE_OF_LOT_SIZE") return "Quantity must be a multiple of the instrument lot size.";
     if (error === "SIGNAL_TERMINAL_STATUS") return "Signal is already terminal and cannot create a trade.";
+    if (error === "DERIVATIVE_PRICE_UNAVAILABLE") return "A server-side derivative price is unavailable for the selected contract.";
 
     return humanizeReason(inner.reason || inner.error || data.reason || data.error || "Create trade failed.");
   }
@@ -211,20 +208,20 @@
     const selectedUsers = new Set(getSelectedUserIds());
     const perUser = Array.isArray(form.user_validation) ? form.user_validation : [];
     const warnings = [];
-    let requiresOverride = false;
+    let requiresConfirmation = false;
 
     if (perUser.length) {
       perUser.forEach(v => {
         const userid = String(v?.userid || "").trim().toUpperCase();
         if (!selectedUsers.has(userid)) return;
         const decision = String(v?.decision || "").trim().toUpperCase();
-        if (decision === "WAIT" || v?.requires_override) requiresOverride = true;
+        if (decision === "WAIT" || (v?.requires_confirmation || v?.requires_override)) requiresConfirmation = true;
         validationReasonText(v).forEach(text => warnings.push(`${userid}: ${text}`));
       });
     } else {
-      const validation = form.trade_validation || {};
+      const validation = form.entry_eligibility || form.trade_validation || {};
       const decision = String(validation.decision || "").trim().toUpperCase();
-      if (decision === "WAIT" || form.requires_override) requiresOverride = true;
+      if (decision === "WAIT" || form.requires_confirmation || form.requires_override) requiresConfirmation = true;
       validationReasonText(validation).forEach(text => warnings.push(text));
     }
 
@@ -240,9 +237,9 @@
     }
 
     return {
-      hasWarning: warnings.length > 0 || requiresOverride,
-      requiresOverride,
-      warnings: warnings.length ? warnings : (requiresOverride ? ["Explicit manual confirmation is required."] : []),
+      hasWarning: warnings.length > 0 || requiresConfirmation,
+      requiresConfirmation,
+      warnings: warnings.length ? warnings : (requiresConfirmation ? ["Explicit manual entry confirmation is required."] : []),
     };
   }
 
@@ -515,6 +512,34 @@
     $("#" + modalLabelId()).text(titleText);
   }
 
+  function refreshEntryContext() {
+    const form = getForm();
+    const ctx = form.entry_context || {};
+    const origin = String(form.entry_origin || ctx.origin || "WATCHLIST").trim().toUpperCase();
+    const managementMode = String(form.management_mode || (origin === "SIGNAL" ? "SIGNAL_LIFECYCLE" : "MANUAL_PRICE")).trim().toUpperCase();
+    const rows = [];
+
+    rows.push(["Origin", origin === "SIGNAL" ? "Signal" : (origin === "POSITION_ADD" ? "Position Add" : "Watchlist")]);
+    rows.push(["Management", managementMode === "SIGNAL_LIFECYCLE" ? "Signal lifecycle" : "Manual price-based"]);
+    if (origin === "SIGNAL") {
+      rows.push(["Setup", ctx.setup || "—"]);
+      rows.push(["Signal Stage", ctx.signal_stage || "—"]);
+      rows.push(["Management Posture", ctx.management_posture || "—"]);
+      rows.push(["Directional Alignment", ctx.directional_alignment || "—"]);
+      rows.push(["Auction State", ctx.auction_state || "—"]);
+      rows.push(["Current Trade Instruction", ctx.current_trade_instruction || "—"]);
+    }
+
+    const html = rows.map(([key, value]) => `
+      <div class="col-md-4 col-6">
+        <div class="text-muted small">${wtmEsc(key)}</div>
+        <div class="fw-semibold">${wtmEsc(value)}</div>
+      </div>
+    `).join("");
+    $("#wtm-entry-context-grid").html(html);
+    $("#wtm-entry-context-card").toggleClass("d-none", rows.length === 0);
+  }
+
   function refreshModeFields() {
     const form = getForm();
     const C = cfg();
@@ -571,18 +596,6 @@
     $("#wtm-entry-price").val(wtmMoney(opt?.entry_price || block?.entry_price || 0));
   }
 
-  function refreshBasicAdvanced() {
-    const mode = $('input[name="wtm-mode"]:checked').val() || "BASIC";
-    const isBasic = String(mode).toUpperCase() === "BASIC";
-
-    if (isBasic) {
-      $("#wtm-basic-summary").removeClass("d-none");
-      $("#wtm-advanced-fields").addClass("d-none");
-    } else {
-      $("#wtm-basic-summary").addClass("d-none");
-      $("#wtm-advanced-fields").removeClass("d-none");
-    }
-  }
 
   function refreshModal() {
     populateInstrumentOptions(getForm());
@@ -592,7 +605,7 @@
     refreshModeFields();
     refreshReadonlyFields();
     refreshQtyAndRequired();
-    refreshBasicAdvanced();
+    refreshEntryContext();
     refreshTradeWarnings();
     updatePrimaryButton();
   }
@@ -600,7 +613,6 @@
   function resetModalState() {
     $("#wtm-lots").val("1");
     $("#wtm-save-for-later").prop("checked", false);
-    $("#wtm-mode-basic").prop("checked", true);
     $("#wtm-product").val(String(cfg().defaultProduct || "MIS"));
     $("#wtm-status").text("Ready.");
     $("#wtm-status-footer").text("");
@@ -646,11 +658,11 @@
       const disabled = !!u.disabled || blocked;
       const reason = validationReasonText(validation)[0] || humanizeReason(validation.error || "");
       const badge = decision === "WAIT"
-        ? '<span class="badge bg-warning text-dark ms-1">Override</span>'
+        ? '<span class="badge bg-warning text-dark ms-1">Confirmation Required</span>'
         : decision === "ALLOW"
-          ? '<span class="badge bg-success ms-1">Allowed</span>'
+          ? '<span class="badge bg-success ms-1">Entry Eligible</span>'
           : blocked
-            ? '<span class="badge bg-danger ms-1">Blocked</span>'
+            ? '<span class="badge bg-danger ms-1">Entry Blocked</span>'
             : "";
 
       $list.append(`
@@ -903,7 +915,7 @@
 
     const warningInfo = getTradeWarningInfo();
     if (!warningConfirmedIfNeeded()) {
-      setStatus("Please confirm the trade warning before creating the trade.", "text-warning");
+      setStatus("Please confirm the current defensive entry posture before creating the trade.", "text-warning");
       return;
     }
 
@@ -929,7 +941,7 @@
         entry_price: $("#wtm-entry-price").val() || opt?.entry_price || "",
         risk_ref_price: window._wtmRiskRefPrice || item?.ltp || item?.last_price || item?.avg_price || "",
         message: saveForLater ? "SAVE_FOR_LATER" : "MANUAL_TRADE",
-        override_validation: isSignalLikeSource(source0) && !!warningInfo.requiresOverride,
+        confirm_entry_warning: isSignalLikeSource(source0) && !!warningInfo.requiresConfirmation,
         userids
       };
 
@@ -1046,7 +1058,6 @@
     $(document).on("change", 'input[name="wtm-inst"]', refreshModal);
     $(document).on("change", "#wtm-trading-symbol", refreshModal);
     $(document).on("change", 'input[name="wtm-side"]', refreshModal);
-    $(document).on("change", 'input[name="wtm-mode"]', refreshBasicAdvanced);
     $(document).on("input change", "#wtm-lots", refreshQtyAndRequired);
     $(document).on("change", "#wtm-product", function () {
       enforceSideRules();

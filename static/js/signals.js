@@ -89,10 +89,9 @@
       getPath(row, "meta.active_signal_evidence.primary_candidate.setup_label", ""),
       getPath(row, "meta.active_signal_evidence.top_same_side_candidate.setup_label", "")
     ];
-    const valid = new Set(["EXHAUSTION_REVERSAL", "FAILED_BREAKOUT", "ACCEPTED_BREAKOUT"]);
     for (const value of candidates) {
       const label = String(value || "").trim().toUpperCase();
-      if (valid.has(label)) return label;
+      if (label) return label;
     }
     return signalSetupLabel(row);
   }
@@ -126,8 +125,21 @@
     const terminalStatuses = new Set([
       "INVALIDATED", "EXPIRED", "REPLACED", "CLOSED", "CANCELLED", "BLOCKED"
     ]);
+    const posture = upper(row?.management_posture || row?.active_evidence_action);
+    const tradeAction = upper(row?.lifecycle_trade_action);
     if (terminalStatuses.has(status)) return `Signal is ${status.toLowerCase()}.`;
-    if (stage === "FORCE_EXIT") return "Signal is exiting and cannot create a new trade.";
+    if (["EXIT_BIAS", "FORCE_EXIT"].includes(stage)) return "Signal is in an exit posture and cannot create a new trade.";
+    if (posture === "EXIT" || row?.should_exit_signal === true) return "Signal management posture requires exit; new entry is blocked.";
+    if (["EXIT_POSITION", "FORCE_EXIT"].includes(tradeAction)) return "Current trade instruction blocks new entry.";
+    return "";
+  }
+
+  function signalTradeWarning(row) {
+    const stage = upper(row?.stage);
+    const posture = upper(row?.management_posture || row?.active_evidence_action);
+    if (["PROTECT", "TRANSITION", "WEAKENING"].includes(stage) || posture === "CAUTION") {
+      return "Manual confirmation required for the current defensive signal posture.";
+    }
     return "";
   }
 
@@ -272,7 +284,10 @@
     const auditEnc = encodeURIComponent(JSON.stringify(buildAuditPayload(row)));
     const tradeDisabledReason = signalTradeDisabledReason(row);
     const tradeDisabled = Boolean(tradeDisabledReason);
-    const tradeClass = tradeDisabled ? "text-muted" : "text-success js-trade-create";
+    const tradeWarning = signalTradeWarning(row);
+    const tradeClass = tradeDisabled
+      ? "text-muted"
+      : (tradeWarning ? "text-warning js-trade-create" : "text-success js-trade-create");
     const tradeIcon = tradeDisabled ? "bi-slash-circle" : "bi-plus-circle";
     const tradeDisabledAttrs = tradeDisabled ? 'disabled aria-disabled="true"' : "";
 
@@ -299,7 +314,7 @@
           data-source="signals"
           data-record="${payloadEnc}"
           data-bs-toggle="tooltip"
-          title="${escHtml(tradeDisabledReason || "Create Trade")}"
+          title="${escHtml(tradeDisabledReason || tradeWarning || "Create Trade")}"
           ${tradeDisabledAttrs}>
           <i class="bi ${tradeIcon}"></i>
         </button>
@@ -420,39 +435,16 @@
   }
 
   function buildSetupStory(row) {
-    const setupRaw = signalSetupLabel(row);
-    const currentSetupRaw = currentSetupLabel(row);
-    const setupDisplay = displaySetup(setupRaw);
+    const setup = displaySetup(signalSetupLabel(row));
     const side = upper(row?.side);
-    const status = upper(row?.status);
-    const stage = upper(row?.stage);
-    const reason = safeStr(row?.reason, "No explicit reason available.");
-
-    const snap = row?.snapshot || {};
-    const hmaState = safeStr(getPath(snap, "indicators.hma.state", row?.side || "—"));
-    const hmaStrength = safeStr(getPath(snap, "indicators.hma.strength", "—"));
-    const vwapDelta = getPath(snap, "indicators.vwap.distance_pct", row?.vwap_gap_pct);
-    const rsiVal = getPath(snap, "indicators.rsi.value", row?.rsi);
-    const rsiZone = safeStr(getPath(snap, "indicators.rsi.zone", "—"));
-    const bbZone = safeStr(getPath(snap, "indicators.bollinger.zone", row?.bb_zone || "—"));
-
-    const lines = [];
-    if (setupRaw.includes("REVERSAL")) {
-      lines.push(`Contra ${side} signal.`);
-      lines.push(`Stage ${stage}, status ${status}.`);
-      lines.push(`Driven primarily by RSI / Bollinger extremes.`);
-      lines.push(`Current read: RSI ${num(rsiVal, 2)} (${rsiZone}), BB ${bbZone}.`);
-      if (vwapDelta != null) lines.push(`VWAP stretch ${Number(vwapDelta).toFixed(2)}%.`);
-      lines.push(`Reason: ${reason}`);
-    } else {
-      lines.push(`${setupDisplay} ${side} signal.`);
-      lines.push(`Stage ${stage}, status ${status}.`);
-      lines.push(`Driven primarily by setup evidence and price alignment.`);
-      lines.push(`Current read: ${hmaState} (${hmaStrength}).`);
-      if (vwapDelta != null) lines.push(`VWAP delta ${Number(vwapDelta).toFixed(2)}%.`);
-      lines.push(`Reason: ${reason}`);
-    }
-
+    const lines = [
+      `${setup} ${side} signal.`,
+      `Signal lifecycle: ${safeStr(row?.stage)} / ${safeStr(row?.status)}.`,
+      `Auction: ${safeStr(row?.auction_action)} / ${safeStr(row?.auction_state)}.`,
+      `Management posture: ${safeStr(row?.management_posture || row?.active_evidence_action)}.`,
+      `Directional alignment: ${safeStr(row?.directional_alignment)}.`,
+      `Lifecycle reason: ${safeStr(row?.lifecycle_reason || row?.reason)}.`
+    ];
     return lines.join("\n");
   }
 
@@ -462,104 +454,65 @@
   }
 
   function renderSignalRows(row) {
-    const support = row?.active_evidence_support_score;
-    const opposition = row?.active_evidence_opposition_score;
-    const evidenceScores = (support != null || opposition != null)
-      ? `${num(support, 2)} / ${num(opposition, 2)}`
-      : "—";
-
+    const confidence = row?.confidence == null ? "Not emitted" : num(row.confidence, 2);
+    const quality = row?.quality == null || row?.quality === "" ? "Not emitted" : safeStr(row.quality);
     const rows = [
-      ["Originating Setup", safeStr(displaySetup(signalSetupLabel(row)))],
-      ["Current Setup", safeStr(displaySetup(currentSetupLabel(row)))],
-      ["Evidence Action", escHtml(safeStr(row?.active_evidence_action))],
-      ["Support / Opposition", escHtml(evidenceScores)],
-      ["Evidence Reason", escHtml(safeStr(row?.active_evidence_reason))],
-      ["Stage", stageBadge(row.stage)],
-      ["Status", statusBadge(row.status)],
-      ["Reason", escHtml(safeStr(row.reason))]
+      ["Setup", safeStr(displaySetup(signalSetupLabel(row)))],
+      ["Signal Stage", stageBadge(row.stage)],
+      ["Signal Status", statusBadge(row.status)],
+      ["Management Posture", escHtml(safeStr(row?.management_posture || row?.active_evidence_action))],
+      ["Current Trade Instruction", escHtml(safeStr(row?.lifecycle_trade_action))],
+      ["Directional Alignment", escHtml(safeStr(row?.directional_alignment))],
+      ["Lifecycle Reason", escHtml(safeStr(row?.lifecycle_reason || row?.active_evidence_reason || row?.reason))],
+      ["Confidence", escHtml(confidence)],
+      ["Quality", escHtml(quality)]
     ];
 
     return rows.map(([k, v]) => `
-      <tr>
-        <th>${escHtml(k)}</th>
-        <td>${v}</td>
-      </tr>
+      <tr><th>${escHtml(k)}</th><td>${v}</td></tr>
     `).join("");
   }
 
   function renderContextRows(row) {
     const snap = row?.snapshot || {};
+    const boundary = getPath(snap, "auction.boundary", {}) || {};
+    const decision = getPath(snap, "auction.decision", {}) || {};
     const rows = [
+      ["Auction Action", safeStr(row?.auction_action || decision.action)],
+      ["Auction State", safeStr(row?.auction_state || getPath(snap, "auction.state", "—"))],
+      ["Opportunity", safeStr(row?.opportunity_key)],
+      ["Candidate", safeStr(row?.candidate_id)],
+      ["Boundary", safeStr(row?.boundary_event_key || boundary.event_key)],
+      ["Setup Reference", `${num(row?.setup_reference_price, 2)} / ${safeStr(row?.setup_reference_source)}`],
+      ["Accepted Structure", `${safeStr(getPath(snap, "structure.accepted.state", "UNKNOWN"))} / ${safeStr(getPath(snap, "structure.accepted.side", "NEUTRAL"))}`],
+      ["Raw Structure", `${safeStr(getPath(snap, "structure.raw.state", "UNKNOWN"))} / ${safeStr(getPath(snap, "structure.raw.side", "NEUTRAL"))}`],
+      ["Candidate State", `${safeStr(getPath(snap, "structure.candidate.active", false))} / ${safeStr(getPath(snap, "structure.candidate.side", "NEUTRAL"))}`],
       ["VWAP", num(getPath(snap, "indicators.vwap.value", row?.vwap), 2)],
-      ["VWAP Δ %", num(getPath(snap, "indicators.vwap.distance_pct", row?.vwap_gap_pct), 2)],
       ["RSI", `${num(getPath(snap, "indicators.rsi.value", row?.rsi), 2)} / ${safeStr(getPath(snap, "indicators.rsi.zone", "—"))}`],
-      ["BB Zone", safeStr(getPath(snap, "indicators.bollinger.zone", row?.bb_zone || "—"))],
-      ["HMA", `${safeStr(getPath(snap, "indicators.hma.state", "—"))} / ${safeStr(getPath(snap, "indicators.hma.strength", "—"))}`],
-
-      ["Price Structure", `${safeStr(getPath(snap, "structure.accepted.state", getPath(snap, "structure.state", "UNKNOWN")))} / ${safeStr(getPath(snap, "structure.accepted.side", getPath(snap, "structure.side", "NEUTRAL")))}`],
-      ["Raw Structure", `${safeStr(getPath(snap, "structure.raw.state", getPath(snap, "structure.raw_state", "UNKNOWN")))} / ${safeStr(getPath(snap, "structure.raw.side", getPath(snap, "structure.raw_side", "NEUTRAL")))}`],
-      ["Breakout", `${safeStr(getPath(snap, "structure.breakout.status", "NONE"))} / ${safeStr(getPath(snap, "structure.breakout.side", "NEUTRAL"))}`],
-      ["Anchor", safeStr(getPath(snap, "structure.anchors.active_anchor", getPath(snap, "structure.anchor.active_anchor", "UNKNOWN")))],
-      ["Swing", safeStr(getPath(snap, "structure.breakout_context.swing", "UNKNOWN"))],
-      ["PDH/PDL", safeStr(getPath(snap, "structure.breakout_context.pdh_pdl", "UNKNOWN"))],
-      ["ORB", safeStr(getPath(snap, "structure.breakout_context.orb", "UNKNOWN"))],
-      ["Recent 15m", safeStr(getPath(snap, "structure.breakout_context.recent15", "UNKNOWN"))],
-      ["Structure Reason", safeStr(getPath(snap, "structure.reason", "—"))],
+      ["BB Zone", safeStr(getPath(snap, "indicators.bollinger.zone", row?.bb_zone || "—"))]
     ];
-
-    return rows.map(([k, v]) => `
-    <tr>
-      <th>${escHtml(k)}</th>
-      <td>${escHtml(v)}</td>
-    </tr>
-  `).join("");
+    return rows.map(([k, v]) => `<tr><th>${escHtml(k)}</th><td>${escHtml(v)}</td></tr>`).join("");
   }
 
   function renderMarketContextRows(row) {
     const snap = row?.snapshot || {};
-    const mc = row?.market_context || getPath(snap, "market_context", {}) || {};
-
-    if (!mc || Object.keys(mc).length === 0) {
-      return `<tr><td colspan="4" class="text-center text-muted">—</td></tr>`;
-    }
-
-    const cell = (label, value) => `
-      <th>${escHtml(label)}</th>
-      <td>${escHtml(safeStr(value))}</td>
-    `;
-    
-    const rows = [
-      [
-        ["Direction", mc.direction],
-        ["Entry Posture", mc.entry_posture],
-      ],
-      [
-        ["Quality", mc.quality],
-        ["Flip Risk", mc.flip_risk],
-      ],
-      [
-        ["Trend Phase", mc.trend_phase],
-        ["Structure Phase", mc.structure_phase],
-      ],
-      [
-        ["Market Age", mc.market_context_age],
-        ["Deriv. Transition", mc.derivatives_transition],
-      ],
-      [
-        ["Short Bias", mc.short_term_derivatives_bias],
-        ["Session Bias", mc.session_derivatives_bias],
-      ],
-      [
-        ["Alignment", mc.derivatives_alignment],
-        ["Strength Progression", mc.hma_strength_progression],
-      ],
-    ];
-
-    return rows.map(group => `
-    <tr>
-      ${group.map(([k, v]) => cell(k, v)).join("")}
-    </tr>
-  `).join("");
+    const windows = getPath(snap, "market_windows", {}) || {};
+    const priceAction = getPath(snap, "price_action", {}) || {};
+    const windowNames = ["15m", "30m", "60m", "sod"];
+    const cells = [];
+    windowNames.forEach(name => {
+      const w = windows?.[name] || windows?.[name.toUpperCase()] || {};
+      if (!w || Object.keys(w).length === 0) return;
+      cells.push([`${name} Status`, w.status]);
+      cells.push([`${name} Move %`, w.move_pct]);
+    });
+    cells.push(["Price Slope", priceAction.slope]);
+    cells.push(["Price Momentum", priceAction.momentum]);
+    const useful = cells.filter(([, value]) => value !== null && value !== undefined && value !== "");
+    if (!useful.length) return `<tr><td colspan="4" class="text-center text-muted">—</td></tr>`;
+    const rows = [];
+    for (let i = 0; i < useful.length; i += 2) rows.push(useful.slice(i, i + 2));
+    return rows.map(group => `<tr>${group.map(([k, v]) => `<th>${escHtml(k)}</th><td>${escHtml(safeStr(v))}</td>`).join("")}${group.length === 1 ? "<th></th><td></td>" : ""}</tr>`).join("");
   }
 
   function renderStatusRows(row) {

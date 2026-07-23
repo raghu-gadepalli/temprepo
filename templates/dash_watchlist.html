@@ -8,14 +8,13 @@
   <div class="dt-row d-flex align-items-center gap-2 flex-wrap">
 
     <div style="min-width:220px;">
-      <label for="wl-breakout-filter" class="visually-hidden">Breakout filter</label>
-      <select id="wl-breakout-filter" class="form-select form-select-sm" aria-label="Breakout filter">
+      <label for="wl-breakout-filter" class="visually-hidden">Auction filter</label>
+      <select id="wl-breakout-filter" class="form-select form-select-sm" aria-label="Auction filter">
         <option value="ALL" selected>All stocks</option>
-        <option value="ANY_BREAKOUT">Any breakout</option>
-        <option value="ABOVE_PDH">Above PDH</option>
-        <option value="BELOW_PDL">Below PDL</option>
-        <option value="ABOVE_ORB">Above ORB High</option>
-        <option value="BELOW_ORB">Below ORB Low</option>
+        <option value="LOCAL_CONFIRMED">Local confirmed</option>
+        <option value="LOCAL_WATCH">Local watch</option>
+        <option value="BUY">BUY decision</option>
+        <option value="SELL">SELL decision</option>
       </select>
     </div>
 
@@ -67,7 +66,6 @@
   <tbody></tbody>
 </table>
 
-{% include "partials/_signals_modal.html" %}
 {% include "partials/_snapshot_modal.html" %}
 {% include "partials/_snapderv_modal.html" %}
 {% include "partials/_trade_create_modal.html" %}
@@ -92,8 +90,7 @@
   };
 </script>
 
-<script src="{{ url_for('static', filename='js/signalsmodal.js') }}" defer></script>
-<script src="{{ url_for('static', filename='js/snapshot.js') }}" defer></script>
-<script src="{{ url_for('static', filename='js/trade_create.js') }}" defer></script>
-<script src="{{ url_for('static', filename='js/watchlist.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/snapshot.js', v='20260723-p53') }}" defer></script>
+<script src="{{ url_for('static', filename='js/trade_create.js', v='20260723-p53') }}" defer></script>
+<script src="{{ url_for('static', filename='js/watchlist.js', v='20260723-p53') }}" defer></script>
 {% endblock %}

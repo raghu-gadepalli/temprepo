@@ -380,6 +380,16 @@ class SignalSchema(BaseModel):
         setup_label = _require_setup_label(self.setup, source="SignalSchema.to_ui_row")
         current_setup = _current_setup_label(meta, setup_label)
         active_evidence = _active_evidence_ui(meta)
+        signal_block = meta.get("signal") if isinstance(meta.get("signal"), dict) else {}
+        lifecycle_block = meta.get("lifecycle") if isinstance(meta.get("lifecycle"), dict) else {}
+        setup_levels = meta.get("setup_levels") if isinstance(meta.get("setup_levels"), dict) else {}
+        downstream_contract = meta.get("downstream_contract") if isinstance(meta.get("downstream_contract"), dict) else {}
+
+        management_posture = str(
+            active_evidence.get("active_evidence_action")
+            or active_evidence.get("evidence_action")
+            or ""
+        ).strip().upper() or None
 
         return {
             "signal_id": self.signal_id,
@@ -389,12 +399,27 @@ class SignalSchema(BaseModel):
             "setup": setup_label,
             "current_setup": current_setup,
             "setup_transitioned": current_setup != setup_label,
-            "active_evidence_action": str(
-                active_evidence.get("active_evidence_action")
-                or active_evidence.get("evidence_action")
+            "active_evidence_action": management_posture,  # compatibility alias
+            "management_posture": management_posture,
+            "active_evidence_reason": str(active_evidence.get("reason_code") or "").strip().upper() or None,
+            "lifecycle_reason": str(signal_block.get("signal_reason") or self.status_reason or "").strip() or None,
+            "lifecycle_trade_action": str(
+                lifecycle_block.get("trade_action")
+                or signal_block.get("trade_action")
                 or ""
             ).strip().upper() or None,
-            "active_evidence_reason": str(active_evidence.get("reason_code") or "").strip().upper() or None,
+            "should_exit_signal": bool(active_evidence.get("should_exit_signal")) if "should_exit_signal" in active_evidence else False,
+            "auction_action": str(active_evidence.get("auction_action") or "").strip().upper() or None,
+            "auction_state": str(active_evidence.get("auction_state") or "").strip().upper() or None,
+            "directional_alignment": str(active_evidence.get("directional_alignment") or "").strip().upper() or None,
+            "downstream_contract_version": str(downstream_contract.get("version") or "").strip() or None,
+            "opportunity_key": setup_levels.get("opportunity_key"),
+            "candidate_id": setup_levels.get("candidate_id"),
+            "boundary_event_key": setup_levels.get("boundary_event_key"),
+            "setup_reference_price": _num(setup_levels.get("reference_price"), 2),
+            "setup_reference_source": setup_levels.get("reference_source"),
+            "confidence": _num(signal_block.get("confidence"), 2),
+            "quality": signal_block.get("quality"),
             "active_evidence_support_score": _num(active_evidence.get("support_score"), 2),
             "active_evidence_opposition_score": _num(active_evidence.get("opposition_score"), 2),
             "side": _enum_to_str(self.side).upper(),

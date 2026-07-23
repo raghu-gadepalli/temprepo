@@ -18,8 +18,7 @@ Design:
 - No eval
 - Explicit ordered monitor checks
 - trade_management JSON is the only active target/SL source
-- Legacy target/SL columns are retained only for DB compatibility
-- Optional source signal context via user_trade.signal_id
+- Exact source signal context for every signal-managed trade
 """
 
 from __future__ import annotations
@@ -32,7 +31,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from config import AppConfig
-from configs.trade_config import TRADE_CONFIG
 from configs.monitor_config import MONITOR_CONFIG
 from configs.execution_config import EXECUTION_CONFIG
 from enums.enums import TradeType, EntryStatus, ExitStatus, TradePosture
@@ -43,9 +41,9 @@ from schemas.user import UserSchema
 from schemas.user_trade import UserTradeSchema
 
 from services.zerodha.kiteconnect_service import KiteConnectService
-from services.signals.signal_helper import SignalHelper
 from services.audit.auditlog import write_auditlog
 from services.trade.monitor.trademon_helper import TradeMonHelper, extract_underlying_atr
+from services.trade.monitor.signal_contract import AuctionTradeSignalContext
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -58,10 +56,12 @@ IST = ZoneInfo("Asia/Kolkata")
 def d(x: Any) -> Decimal:
     if isinstance(x, Decimal):
         return x
+    if x is None:
+        raise ValueError("decimal value is required")
     try:
         return Decimal(str(x))
-    except Exception:
-        return Decimal("0")
+    except Exception as exc:
+        raise ValueError(f"invalid decimal value: {x!r}") from exc
 
 
 def _now_ist() -> datetime:
@@ -72,24 +72,18 @@ def _to_ist_naive(ts: Optional[datetime]) -> Optional[datetime]:
     if ts is None:
         return None
     if isinstance(ts, str):
-        s = ts.strip()
-        if not s:
-            return None
+        raw = ts.strip()
+        if not raw:
+            raise ValueError("datetime text cannot be blank")
         try:
-            ts = datetime.fromisoformat(s.replace("Z", "+00:00"))
-        except Exception:
-            try:
-                ts = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
-            except Exception:
-                return None
+            ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception as exc:
+            raise ValueError(f"invalid ISO datetime: {raw!r}") from exc
     if not isinstance(ts, datetime):
-        return None
-    try:
-        if ts.tzinfo is not None:
-            ts = ts.astimezone(IST)
-        return ts.replace(tzinfo=None)
-    except Exception:
-        return ts.replace(tzinfo=None) if isinstance(ts, datetime) else None
+        raise TypeError(f"datetime required, got {type(ts).__name__}")
+    if ts.tzinfo is not None:
+        ts = ts.astimezone(IST)
+    return ts.replace(tzinfo=None)
 
 
 def _enum_str(x: Any) -> str:
@@ -98,18 +92,18 @@ def _enum_str(x: Any) -> str:
 
 
 def _trade_side_str(v: Any) -> str:
-    if isinstance(v, TradeType):
-        return v.value
-    s = _enum_str(v)
-    return "BUY" if s == "BUY" else "SELL"
+    side = v.value if isinstance(v, TradeType) else _enum_str(v)
+    if side not in {"BUY", "SELL"}:
+        raise ValueError(f"trade side must be BUY or SELL, got {v!r}")
+    return side
 
 
 def _entry_status(ut: Any) -> str:
-    return _enum_str(getattr(ut, "entry_status", EntryStatus.CREATED.value))
+    return _enum_str(getattr(ut, "entry_status"))
 
 
 def _exit_status(ut: Any) -> str:
-    return _enum_str(getattr(ut, "exit_status", ExitStatus.NONE.value))
+    return _enum_str(getattr(ut, "exit_status"))
 
 
 def _to_optional_price(x: Any) -> Optional[Decimal]:
@@ -119,48 +113,34 @@ def _to_optional_price(x: Any) -> Optional[Decimal]:
     return v if v > 0 else None
 
 
-def _as_dict(v: Any) -> Dict[str, Any]:
-    return v if isinstance(v, dict) else {}
+def _mapping(value: Any, path: str) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        raise TypeError(f"{path} must be a dict")
+    return value
 
 
-def _get_path(dct: Any, path: List[str], default: Any = None) -> Any:
-    cur = dct
-    for key in path:
-        if not isinstance(cur, dict):
-            return default
-        cur = cur.get(key)
-    return default if cur is None else cur
+def _required(mapping: Dict[str, Any], key: str, path: str) -> Any:
+    if key not in mapping:
+        raise ValueError(f"{path}.{key} is required")
+    return mapping[key]
 
 
-def _first_number(*values: Any) -> Optional[Decimal]:
-    for value in values:
-        if value is None:
-            continue
-        val = _to_optional_price(value)
-        if val is not None and val > 0:
-            return val
-    return None
+def _optional(mapping: Dict[str, Any], key: str, default: Any = None) -> Any:
+    return mapping[key] if key in mapping else default
 
 
 def _normalize_snapshot_dict(snap: Any) -> Dict[str, Any]:
-    if snap is None:
-        return {}
-    try:
-        if hasattr(snap, "to_db_dict"):
-            return snap.to_db_dict()
-    except Exception:
-        pass
-    try:
-        if hasattr(snap, "model_dump"):
-            return snap.model_dump(mode="python")
-    except Exception:
-        pass
-    try:
-        if isinstance(snap, dict):
-            return snap
-    except Exception:
-        pass
-    return getattr(snap, "__dict__", {}) or {}
+    if isinstance(snap, SnapshotSchema):
+        payload = snap.model_dump(mode="python")
+    elif isinstance(snap, dict):
+        payload = dict(snap)
+    else:
+        raise TypeError(
+            f"snapshot must be SnapshotSchema or dict, got {type(snap).__name__}"
+        )
+    if not isinstance(payload, dict):
+        raise TypeError("snapshot serialization must produce a dict")
+    return payload
 
 
 def _infer_exchange_for_trade(ut: Any) -> str:
@@ -171,37 +151,33 @@ def _infer_exchange_for_trade(ut: Any) -> str:
 
 
 def _quote_key(ut: Any) -> str:
-    exch = None
-
-    try:
-        esnap = getattr(ut, "entry_snapshot", None) or {}
-        if isinstance(esnap, dict):
-            exch = esnap.get("exchange") or esnap.get("exch")
-    except Exception:
-        exch = None
-
-    exch = (exch or _infer_exchange_for_trade(ut) or "NSE").upper()
-    sym = str(getattr(ut, "symbol", "") or "").strip()
-
-    return f"{exch}:{sym}"
+    exchange = _infer_exchange_for_trade(ut)
+    symbol = str(getattr(ut, "symbol", "") or "").strip()
+    if not symbol:
+        raise ValueError("trade.symbol is required for quote lookup")
+    entry_snapshot = getattr(ut, "entry_snapshot", None)
+    if entry_snapshot is not None:
+        snapshot_map = _mapping(entry_snapshot, "trade.entry_snapshot")
+        if "exchange" in snapshot_map:
+            declared = str(snapshot_map["exchange"]).upper().strip()
+            if declared and declared != exchange:
+                raise ValueError(
+                    f"trade.entry_snapshot.exchange mismatch: {declared!r} != {exchange!r}"
+                )
+    return f"{exchange}:{symbol}"
 
 
 def _audit_trade_monitor(ctx: "TradeMonitorContext", updates: Dict[str, Any]) -> None:
-    """Write a compact, best-effort monitor audit after the trade update.
-
-    Audit must never sit on the critical trade-update path.  Large copies of
-    trade_management/active evidence are deliberately omitted because the
-    authoritative state already lives on user_trades.
-    """
+    """Write a compact best-effort audit after authoritative trade persistence."""
     try:
-        exit_status = _enum_str(updates.get("exit_status"))
-        exit_reason = str(updates.get("exit_reason") or "").strip()
+        exit_status = _enum_str(updates["exit_status"]) if "exit_status" in updates else ""
+        exit_reason = str(updates["exit_reason"]).strip() if "exit_reason" in updates and updates["exit_reason"] is not None else ""
+        exit_rule = str(updates["exit_rule"]).strip() if "exit_rule" in updates and updates["exit_rule"] is not None else ""
         action = "EXIT_READY" if exit_status == ExitStatus.READY.value else "MONITOR"
         reason_code = exit_reason or "monitor_update"
-        res = ctx.monitor_resolution
 
-        updated_management = _as_dict(updates.get("trade_management"))
-        management = updated_management or _as_dict(ctx.trade_management)
+        updated_management = updates["trade_management"] if "trade_management" in updates else None
+        management = _as_dict(updated_management) if updated_management is not None else _as_dict(ctx.trade_management)
         management_keys = (
             "version",
             "mode",
@@ -209,28 +185,47 @@ def _audit_trade_monitor(ctx: "TradeMonitorContext", updates: Dict[str, Any]) ->
             "target_expansion_allowed",
             "trail_mode",
             "exit_pressure",
-            "active_evidence_action",
-            "active_evidence_reason_code",
+            "management_posture",
+            "management_reason_code",
+            "signal_stage",
+            "signal_status",
+            "lifecycle_trade_action",
+            "directional_alignment",
+            "auction_action",
+            "auction_state",
+            "should_exit_signal",
             "current_target_price",
             "current_stop_price",
             "target_r_multiple",
             "stop_r_multiple",
             "current_profit_r",
             "mfe_profit_r",
-            "risk_reduced",
+            "profit_protection_applied",
             "expansion_count",
             "last_target_hit_price",
             "max_favorable_price",
-            "last_signal_stage",
-            "last_signal_confidence",
-            "last_signal_quality",
             "last_update_reason",
         )
-        compact_management = {
-            key: management.get(key)
-            for key in management_keys
-            if key in management
-        }
+        compact_management = {key: management[key] for key in management_keys if key in management}
+        contract = ctx.signal_contract
+        contract_payload = None
+        if contract is not None:
+            contract_payload = {
+                "contract_version": contract.contract_version,
+                "signal_id": contract.signal_id,
+                "stage": contract.stage,
+                "status": contract.status,
+                "management_posture": contract.management_posture,
+                "management_reason_code": contract.management_reason_code,
+                "lifecycle_trade_action": contract.lifecycle_trade_action,
+                "should_exit_signal": contract.should_exit_signal,
+                "auction_action": contract.auction_action,
+                "auction_state": contract.auction_state,
+                "directional_alignment": contract.directional_alignment,
+                "opportunity_key": contract.opportunity_key,
+                "candidate_id": contract.candidate_id,
+                "boundary_event_key": contract.boundary_event_key,
+            }
 
         write_auditlog(
             entity_type="TRADE",
@@ -242,7 +237,7 @@ def _audit_trade_monitor(ctx: "TradeMonitorContext", updates: Dict[str, Any]) ->
             new_state=exit_status or _exit_status(ctx.trade),
             action=action,
             reason_code=reason_code,
-            reason_text=updates.get("exit_rule") or reason_code,
+            reason_text=exit_rule or reason_code,
             confidence=None,
             ts=ctx.last_time,
             payload_json={
@@ -255,21 +250,11 @@ def _audit_trade_monitor(ctx: "TradeMonitorContext", updates: Dict[str, Any]) ->
                 "pnl_per_unit": ctx.pnl_per_unit,
                 "pnl_value": ctx.pnl_value,
                 "management": compact_management,
-                "monitor_resolution": {
-                    "preferred_lifecycle": res.preferred_lifecycle,
-                    "preferred_signal_id": res.preferred_signal_id,
-                    "preferred_side": res.preferred_side,
-                    "action": res.action,
-                    "same_side_strength": res.same_side_strength,
-                    "opposite_side_strength": res.opposite_side_strength,
-                    "same_side_actionable": res.same_side_actionable,
-                    "opposite_side_actionable": res.opposite_side_actionable,
-                    "opposite_side_lifecycle": res.opposite_side_lifecycle,
-                },
+                "signal_contract": contract_payload,
                 "update_fields": sorted(str(key) for key in updates.keys()),
                 "exit_status": exit_status or None,
                 "exit_reason": exit_reason or None,
-                "exit_rule": updates.get("exit_rule"),
+                "exit_rule": exit_rule or None,
             },
         )
     except Exception:
@@ -279,10 +264,6 @@ def _audit_trade_monitor(ctx: "TradeMonitorContext", updates: Dict[str, Any]) ->
 # =============================================================================
 # monitor policy helpers
 # =============================================================================
-
-def _trade_extras() -> Dict[str, Any]:
-    return MONITOR_CONFIG.model_dump(mode="python")
-
 
 def _monitor_use_snapshot() -> bool:
     """Return True when replay/snapshot pricing is active.
@@ -300,16 +281,19 @@ def _monitor_use_live_quotes() -> bool:
 
 
 def _instrument_type(ut: Any) -> str:
-    inst = _enum_str(getattr(ut, "instrument_type", "EQ") or "EQ")
-    if inst in ("EQUITY", "CASH"):
-        return "EQ"
-    if inst in ("FUTURE", "FUTURES"):
-        return "FUT"
-    if inst in ("CALL", "CE"):
-        return "CE"
-    if inst in ("PUT", "PE"):
-        return "PE"
-    return inst or "EQ"
+    inst = _enum_str(getattr(ut, "instrument_type", None))
+    aliases = {
+        "EQUITY": "EQ",
+        "CASH": "EQ",
+        "FUTURE": "FUT",
+        "FUTURES": "FUT",
+        "CALL": "CE",
+        "PUT": "PE",
+    }
+    inst = aliases[inst] if inst in aliases else inst
+    if inst not in {"EQ", "FUT", "CE", "PE"}:
+        raise ValueError(f"unsupported trade instrument_type: {inst!r}")
+    return inst
 
 
 def _is_manual_trade(ut: Any) -> bool:
@@ -378,82 +362,21 @@ def _select_group_reference_ids(trades: List[Any]) -> Dict[Tuple[str, str], int]
     return selected
 
 
-def _signal_exit_cfg() -> Any:
-    cfg = getattr(MONITOR_CONFIG, "signal_exit", None)
-    if cfg is None:
-        raise AttributeError("MONITOR_CONFIG.signal_exit is required")
-    return cfg
-
-
-def _signal_exit_enabled() -> bool:
-    cfg = _signal_exit_cfg()
-    if not hasattr(cfg, "enabled"):
-        raise AttributeError("MONITOR_CONFIG.signal_exit.enabled is required")
-    return bool(cfg.enabled)
-
-
 def _decimal_or_none(value: Any) -> Optional[Decimal]:
     val = _to_optional_price(value)
     return val if val is not None and val > 0 else None
 
 
-def _extract_atr_from_snapshot_dict(snapshot_dict: Dict[str, Any]) -> Optional[Decimal]:
-    snap = snapshot_dict or {}
-    candidates = [
-        (((snap.get("indicators") or {}).get("atr") or {}).get("value")),
-    ]
-    for value in candidates:
-        val = _decimal_or_none(value)
-        if val is not None and val > 0:
-            return val
-    return None
-
-
-def _json_number(value: Any) -> Optional[float]:
-    if value is None:
-        return None
-    try:
-        return float(d(value))
-    except Exception:
-        return None
-
-
 def _tm_as_dict(value: Any) -> Dict[str, Any]:
-    if value is None:
-        return {}
     if isinstance(value, dict):
         return dict(value)
     if hasattr(value, "model_dump"):
-        try:
-            obj = value.model_dump(mode="python", exclude_none=True)
-            return dict(obj) if isinstance(obj, dict) else {}
-        except Exception:
-            return {}
-    return {}
-
-
-def _adaptive_target_price(*, side: str, basis_price: Decimal, atr: Decimal, multiplier: Decimal) -> Optional[Decimal]:
-    basis = d(basis_price)
-    dist = d(atr) * d(multiplier)
-    if basis <= 0 or dist <= 0:
-        return None
-    return basis + dist if side == "BUY" else basis - dist
-
-
-def _build_default_trade_management(
-    *,
-    side: str,
-    basis_price: Decimal,
-    snapshot_dict: Dict[str, Any],
-    fallback_protective_sl: Optional[Decimal],
-    instrument_type: str = "EQ",
-) -> Dict[str, Any]:
-    return TradeMonHelper.initialize_trade_management(
-        side=side,
-        instrument_type=instrument_type,
-        entry_price=basis_price,
-        underlying_atr=extract_underlying_atr(snapshot_dict),
-        asof_time=_now_ist(),
+        obj = value.model_dump(mode="python", exclude_none=False)
+        if not isinstance(obj, dict):
+            raise TypeError("trade_management.model_dump() must return a dict")
+        return dict(obj)
+    raise TypeError(
+        f"trade_management must be dict/model, got {type(value).__name__}"
     )
 
 
@@ -463,7 +386,6 @@ def _normalize_trade_management_for_monitor(
     side: str,
     basis_price: Decimal,
     snapshot_dict: Dict[str, Any],
-    fallback_protective_sl: Optional[Decimal],
     instrument_type: str = "EQ",
 ) -> Dict[str, Any]:
     return TradeMonHelper.normalize_trade_management(
@@ -477,124 +399,65 @@ def _normalize_trade_management_for_monitor(
 
 
 class PriceProvider:
-    """
-    Batch LTP fetcher using KiteConnect.quote().
-    """
+    """Strict batch LTP fetcher using KiteConnect.quote()."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._svc: Optional[KiteConnectService] = None
-        self._init_err: Optional[str] = None
 
-    def _ensure(self) -> Optional[KiteConnectService]:
-        if self._svc:
+    def _ensure(self) -> KiteConnectService:
+        if self._svc is not None:
             return self._svc
-
-        if self._init_err:
-            return None
-
-        data_userid = AppConfig.DATA_USER
-
-
+        data_userid = str(AppConfig.DATA_USER or "").strip()
         if not data_userid:
-            self._init_err = "DATA_USER missing"
-            logger.warning("PriceProvider: DATA_USER missing")
-            return None
-
-        user = UserSchema.fetch_user(str(data_userid))
-        if not user:
-            self._init_err = f"DATA_USER not found: {data_userid}"
-            logger.warning("PriceProvider: DATA_USER not found: %s", data_userid)
-            return None
-
-        api_key = getattr(user, "apikey", None)
-        access_token = getattr(user, "access_token", None)
-
+            raise ValueError("AppConfig.DATA_USER is required for live quotes")
+        user = UserSchema.fetch_user(data_userid)
+        if user is None:
+            raise LookupError(f"DATA_USER not found: {data_userid}")
+        api_key = str(getattr(user, "apikey", "") or "").strip()
+        access_token = str(getattr(user, "access_token", "") or "").strip()
         if not api_key or not access_token:
-            self._init_err = "DATA_USER missing apikey/access_token"
-            logger.warning("PriceProvider: DATA_USER missing apikey/access_token")
-            return None
+            raise ValueError("DATA_USER apikey and access_token are required")
+        self._svc = KiteConnectService(api_key=api_key, access_token=access_token)
+        return self._svc
 
-        try:
-            self._svc = KiteConnectService(
-                api_key=api_key,
-                access_token=access_token,
-            )
-            return self._svc
-        except Exception as exc:
-            self._init_err = str(exc)[:200]
-            logger.warning("PriceProvider init failed: %s", self._init_err)
-            return None
-
-    def fetch_ltps(self, quote_keys: List[str]) -> Dict[str, Tuple[Optional[Decimal], datetime]]:
-        out: Dict[str, Tuple[Optional[Decimal], datetime]] = {}
-        ts_now = _now_ist()
-
+    def fetch_ltps(self, quote_keys: List[str]) -> Dict[str, Tuple[Decimal, datetime]]:
+        if not quote_keys:
+            return {}
         if not _monitor_use_live_quotes():
-            for key in quote_keys:
-                out[key] = (None, ts_now)
-            return out
-
-        svc = self._ensure()
-        if not svc or not quote_keys:
-            for key in quote_keys:
-                out[key] = (None, ts_now)
-            return out
-
-        try:
-            data = svc.fetch_quote(quote_keys) or {}
-            if not isinstance(data, dict):
-                logger.warning("PriceProvider: non-dict quote response=%s", type(data).__name__)
-                for key in quote_keys:
-                    out[key] = (None, ts_now)
-                return out
-
-            for key in quote_keys:
-                rec = data.get(key)
-
-                if not isinstance(rec, dict):
-                    logger.warning(
-                        "PriceProvider: quote key missing | key=%s response_keys=%s",
-                        key,
-                        list(data.keys()),
-                    )
-                    out[key] = (None, ts_now)
-                    continue
-
-                raw_ltp = rec.get("last_price")
-                ltp = _to_optional_price(raw_ltp)
-
-                rec_ts = rec.get("timestamp") or rec.get("last_trade_time") or ts_now
-                if not isinstance(rec_ts, datetime):
-                    rec_ts = ts_now
-
-                out[key] = (ltp, rec_ts)
-
-            return out
-
-        except Exception as exc:
-            logger.warning("PriceProvider.fetch_ltps failed: %s", str(exc)[:200])
-            for key in quote_keys:
-                out[key] = (None, ts_now)
-            return out
+            raise RuntimeError(
+                "live quotes are disabled while snapshot replay mode is false"
+            )
+        data = self._ensure().fetch_quote(quote_keys)
+        if not isinstance(data, dict):
+            raise TypeError(
+                f"quote response must be a dict, got {type(data).__name__}"
+            )
+        out: Dict[str, Tuple[Decimal, datetime]] = {}
+        for key in quote_keys:
+            if key not in data:
+                raise LookupError(f"quote response missing key: {key}")
+            rec = _mapping(data[key], f"quote[{key!r}]")
+            ltp = _to_optional_price(_required(rec, "last_price", f"quote[{key!r}]"))
+            if ltp is None:
+                raise ValueError(f"quote[{key!r}].last_price must be positive")
+            timestamp = (
+                rec["timestamp"]
+                if "timestamp" in rec
+                else rec["last_trade_time"]
+                if "last_trade_time" in rec
+                else None
+            )
+            if not isinstance(timestamp, datetime):
+                raise ValueError(
+                    f"quote[{key!r}] requires datetime timestamp or last_trade_time"
+                )
+            out[key] = (ltp, timestamp)
+        return out
 
 
 # =============================================================================
 # decision state
 # =============================================================================
-
-@dataclass
-class MonitorResolution:
-    preferred_lifecycle: str = ""
-    preferred_signal_id: str = ""
-    preferred_side: str = ""
-    action: str = "WATCH"
-    same_side_strength: float = 0.0
-    opposite_side_strength: float = 0.0
-    same_side_actionable: bool = False
-    opposite_side_actionable: bool = False
-    opposite_side_lifecycle: str = ""
-    summary: str = ""
-
 
 @dataclass
 class TradeMonitorContext:
@@ -621,9 +484,8 @@ class TradeMonitorContext:
     intraday_exit_time: datetime
 
     source_signal: Optional[SignalSchema]
-    signal_meta: Dict[str, Any]
-    snapshot: Optional[SnapshotSchema]
-    monitor_resolution: MonitorResolution
+    snapshot: SnapshotSchema
+    signal_contract: Optional[AuctionTradeSignalContext]
 
     group_role: str = "STANDALONE"
     group_reference_trade_id: Optional[int] = None
@@ -640,7 +502,6 @@ class TradeMonitor:
         self._cutoff_hms = self._load_intraday_cutoff_hms()
         self._pp = PriceProvider()
         self._pass_ltp_map: Dict[str, Tuple[Optional[Decimal], datetime]] = {}
-        self._pass_asof_time: Optional[datetime] = None
         self._pass_group_reference_ids: Dict[Tuple[str, str], int] = {}
 
         self._dt_keys = {
@@ -665,36 +526,11 @@ class TradeMonitor:
     # config
     # -----------------------------------------------------------------
     def _load_intraday_cutoff_hms(self) -> Tuple[int, int, int]:
-        default = (15, 20, 0)
-
-        try:
-            raw = str(MONITOR_CONFIG.intraday_cutoff_time or "").strip()
-
-            if not raw:
-                return default
-
-            t = dtime.fromisoformat(raw)
-            return (t.hour, t.minute, t.second)
-
-        except Exception:
-            return default
-
-    def _monitor_policy(self) -> Dict[str, Any]:
-        try:
-            return MONITOR_CONFIG.setup_policy or {}
-        except Exception:
-            return {}
-
-    def _policy_num(self, key: str, default: Decimal) -> Decimal:
-        policy = self._monitor_policy()
-        return d(policy.get(key, default))
-
-    def _policy_int(self, key: str, default: int) -> int:
-        policy = self._monitor_policy()
-        try:
-            return int(policy.get(key, default))
-        except Exception:
-            return default
+        raw = str(MONITOR_CONFIG.intraday_cutoff_time).strip()
+        if not raw:
+            raise ValueError("MONITOR_CONFIG.intraday_cutoff_time is required")
+        cutoff = dtime.fromisoformat(raw)
+        return (cutoff.hour, cutoff.minute, cutoff.second)
 
     # -----------------------------------------------------------------
     # public
@@ -728,15 +564,15 @@ class TradeMonitor:
             if row_key is None:
                 continue
             row_time = _to_ist_naive(getattr(row, "entry_time", None)) or datetime.min
-            previous = group_first_time.get(row_key)
+            previous = group_first_time[row_key] if row_key in group_first_time else None
             if previous is None or row_time < previous:
                 group_first_time[row_key] = row_time
 
         def _group_sort_key(ut: Any) -> Tuple[Any, str, int, int]:
             key = _group_key(ut)
-            ref_id = self._pass_group_reference_ids.get(key) if key is not None else None
+            ref_id = self._pass_group_reference_ids[key] if key is not None and key in self._pass_group_reference_ids else None
             role_rank = 0 if ref_id and int(getattr(ut, "id", 0) or 0) == ref_id else 1
-            entry_sort_time = group_first_time.get(key) if key is not None else None
+            entry_sort_time = group_first_time[key] if key is not None and key in group_first_time else None
             entry_sort_time = entry_sort_time or _to_ist_naive(getattr(ut, "entry_time", None)) or datetime.min
             group_label = f"{key[0]}:{key[1]}" if key is not None else f"STANDALONE:{getattr(ut, 'id', 0)}"
             return (entry_sort_time, group_label, role_rank, int(getattr(ut, "id", 0) or 0))
@@ -745,7 +581,6 @@ class TradeMonitor:
         quote_keys = [_quote_key(ut) for ut in trades]
         ltp_map = {} if _monitor_use_snapshot() else self._pp.fetch_ltps(quote_keys)
         self._pass_ltp_map = dict(ltp_map)
-        self._pass_asof_time = _to_ist_naive(snapshot_time)
 
         updated_count = 0
 
@@ -755,7 +590,7 @@ class TradeMonitor:
                 # have already marked this sibling leg READY for exit.  Re-read
                 # the row before evaluating stale in-memory state so we do not
                 # overwrite RELATED_PRIMARY_EXIT with an independent decision.
-                current_ut = UserTradeSchema.fetch_user_trade_by_id(getattr(ut, "id", None))
+                current_ut = UserTradeSchema.fetch_user_trade_by_id_strict(int(getattr(ut, "id")))
                 if current_ut is not None:
                     ut = current_ut
                 if _exit_status(ut) in (ExitStatus.READY.value, ExitStatus.SUBMITTED.value, ExitStatus.FILLED.value):
@@ -767,37 +602,23 @@ class TradeMonitor:
                     )
                     continue
 
-                default_ltp_time = _to_ist_naive(snapshot_time) or _now_ist()
-                ltp, ltp_time = ltp_map.get(quote_key, (None, default_ltp_time))
-                snapshot = None
-
-                if _monitor_use_snapshot() or ltp is None:
-                    snapshot = self._fetch_snapshot_fallback(ut, asof_time=snapshot_time)
-                    if snapshot:
-                        snap_px = self._price_from_snapshot_for_trade(ut, snapshot)
-                        if snap_px is not None and snap_px > 0:
-                            ltp = snap_px
-                            snap_ts = getattr(snapshot, "snapshot_time", None)
-                            if isinstance(snap_ts, datetime):
-                                ltp_time = snap_ts
-
-                # Even when live quote succeeds, keep the latest equity snapshot
-                # available for resolver/materiality decisions. The quote remains
-                # the source of price in live mode.
-                if snapshot is None:
-                    snapshot = self._fetch_snapshot_fallback(ut, asof_time=snapshot_time)
-
-                if ltp is None:
-                    logger.info(
-                        "TradeMonitor: skip no price | trade_id=%s symbol=%s quote_key=%s",
-                        getattr(ut, "id", None),
-                        getattr(ut, "symbol", None),
-                        quote_key,
-                    )
-                    continue
+                snapshot = self._fetch_snapshot(ut, asof_time=snapshot_time)
+                if _monitor_use_snapshot():
+                    ltp = self._price_from_snapshot_for_trade(ut, snapshot)
+                    ltp_time = snapshot.snapshot_time
+                    if not isinstance(ltp_time, datetime):
+                        raise ValueError("snapshot.snapshot_time must be datetime")
+                else:
+                    if quote_key not in ltp_map:
+                        raise LookupError(f"live LTP map missing quote key: {quote_key}")
+                    ltp, ltp_time = ltp_map[quote_key]
+                    if ltp <= 0:
+                        raise ValueError(f"live LTP must be positive for {quote_key}")
+                    if not isinstance(ltp_time, datetime):
+                        raise ValueError(f"live LTP time must be datetime for {quote_key}")
 
                 group_key = _group_key(ut)
-                reference_trade_id = self._pass_group_reference_ids.get(group_key) if group_key is not None else None
+                reference_trade_id = self._pass_group_reference_ids[group_key] if group_key is not None and group_key in self._pass_group_reference_ids else None
                 trade_id = int(getattr(ut, "id", 0) or 0)
                 group_role = (
                     "REFERENCE" if reference_trade_id and trade_id == reference_trade_id
@@ -806,17 +627,18 @@ class TradeMonitor:
                 )
                 reference_trade = (
                     ut if group_role == "REFERENCE"
-                    else UserTradeSchema.fetch_user_trade_by_id(reference_trade_id) if reference_trade_id
+                    else UserTradeSchema.fetch_user_trade_by_id_strict(int(reference_trade_id)) if reference_trade_id
                     else None
                 )
 
-                source_signal = self._fetch_source_signal(ut)
+                source_signal, signal_contract = self._fetch_source_signal_context(ut)
                 ctx = self._build_context(
                     ut=ut,
                     last_price=ltp,
                     last_time=ltp_time,
                     snapshot=snapshot,
                     source_signal=source_signal,
+                    signal_contract=signal_contract,
                     group_role=group_role,
                     group_reference_trade=reference_trade,
                 )
@@ -825,14 +647,11 @@ class TradeMonitor:
 
                 if updates:
                     payload = self._normalize_updates(updates)
-                    persisted = UserTradeSchema.update_user_trade_by_id(ut.id, payload)
+                    persisted = UserTradeSchema.update_user_trade_by_id_strict(int(ut.id), payload)
                     if persisted is None:
-                        logger.error(
-                            "TradeMonitor: update failed trade_id=%s symbol=%s; audit skipped",
-                            getattr(ut, "id", None),
-                            getattr(ut, "symbol", None),
+                        raise RuntimeError(
+                            f"trade update returned no row for trade_id={getattr(ut, 'id', None)}"
                         )
-                        continue
 
                     updated_count += 1
                     updated_count += self._mark_sibling_legs_on_primary_exit(ctx, payload)
@@ -848,17 +667,18 @@ class TradeMonitor:
                         getattr(ut, "symbol", None),
                         ctx.side,
                         ctx.last_price,
-                        updates.get("last_pnl_value"),
-                        updates.get("exit_status"),
-                        updates.get("exit_reason"),
+                        _optional(updates, "last_pnl_value"),
+                        _optional(updates, "exit_status"),
+                        _optional(updates, "exit_reason"),
                     )
 
             except Exception:
                 logger.exception(
-                    "TradeMonitor: error trade_id=%s symbol=%s",
+                    "TradeMonitor: fatal trade evaluation error trade_id=%s symbol=%s",
                     getattr(ut, "id", "?"),
                     getattr(ut, "symbol", "?"),
                 )
+                raise
 
         logger.info("TradeMonitor: pass updated %d positions", updated_count)
         return updated_count
@@ -885,51 +705,49 @@ class TradeMonitor:
                 continue
 
             try:
-                price: Optional[Decimal] = None
-                price_time = ctx.last_time
-                snapshot = None
-                if not _monitor_use_snapshot():
-                    price, live_time = self._pass_ltp_map.get(_quote_key(sib), (None, ctx.last_time))
-                    if isinstance(live_time, datetime):
-                        price_time = live_time
-
-                if _monitor_use_snapshot() or price is None:
-                    snapshot = self._fetch_snapshot_fallback(sib, asof_time=ctx.last_time)
-                    if snapshot is not None:
-                        price = self._price_from_snapshot_for_trade(sib, snapshot)
-                        snap_time = getattr(snapshot, "snapshot_time", None)
-                        if isinstance(snap_time, datetime):
-                            price_time = snap_time
-                if snapshot is None:
-                    snapshot = self._fetch_snapshot_fallback(sib, asof_time=ctx.last_time)
-                if price is None or d(price) <= 0:
-                    logger.error(
-                        "TradeMonitor: group exit follower price unavailable | primary_trade_id=%s sibling_trade_id=%s symbol=%s",
-                        getattr(ctx.trade, "id", None),
-                        getattr(sib, "id", None),
-                        getattr(sib, "symbol", None),
-                    )
-                    continue
+                snapshot = self._fetch_snapshot(sib, asof_time=ctx.last_time)
+                if _monitor_use_snapshot():
+                    price = self._price_from_snapshot_for_trade(sib, snapshot)
+                    price_time = snapshot.snapshot_time
+                    if not isinstance(price_time, datetime):
+                        raise ValueError("follower snapshot_time must be datetime")
+                else:
+                    sibling_quote_key = _quote_key(sib)
+                    if sibling_quote_key not in self._pass_ltp_map:
+                        raise LookupError(
+                            f"live LTP map missing follower key: {sibling_quote_key}"
+                        )
+                    price, price_time = self._pass_ltp_map[sibling_quote_key]
+                    if price is None or price <= 0:
+                        raise ValueError(
+                            f"follower LTP must be positive: {sibling_quote_key}"
+                        )
+                    if not isinstance(price_time, datetime):
+                        raise ValueError(
+                            f"follower LTP time must be datetime: {sibling_quote_key}"
+                        )
 
                 follower_ctx = self._build_context(
                     ut=sib,
                     last_price=d(price),
                     last_time=price_time,
                     snapshot=snapshot,
-                    source_signal=ctx.source_signal or self._fetch_source_signal(sib),
+                    source_signal=ctx.source_signal,
+                    signal_contract=ctx.signal_contract,
                     group_role="FOLLOWER",
                     group_reference_trade=ctx.trade,
                 )
                 follower_updates = self._evaluate_group_follower(follower_ctx)
                 payload = self._normalize_updates(follower_updates)
                 if payload:
-                    UserTradeSchema.update_user_trade_by_id(getattr(sib, "id", None), payload)
+                    UserTradeSchema.update_user_trade_by_id_strict(int(getattr(sib, "id")), payload)
             except Exception:
                 logger.exception(
                     "TradeMonitor: failed to refresh group follower before exit | primary_trade_id=%s sibling_trade_id=%s",
                     getattr(ctx.trade, "id", None),
                     getattr(sib, "id", None),
                 )
+                raise
 
 
 
@@ -941,7 +759,7 @@ class TradeMonitor:
         CE/PE/FUT/EQ sibling must be flattened too.  Option-only exits do not
         force primary-leg closure.
         """
-        if _enum_str(updates.get("exit_status")) != ExitStatus.READY.value:
+        if "exit_status" not in updates or _enum_str(updates["exit_status"]) != ExitStatus.READY.value:
             return 0
 
         inst = _enum_str(getattr(ctx.trade, "instrument_type", None))
@@ -955,8 +773,8 @@ class TradeMonitor:
         if not userid or not signal_id:
             return 0
 
-        reason = str(updates.get("exit_reason") or "PRIMARY_LEG_EXIT").strip()
-        rule = str(updates.get("exit_rule") or "primary_leg_exit").strip()
+        reason = str(_required(updates, "exit_reason", "monitor updates")).strip()
+        rule = str(_required(updates, "exit_rule", "monitor updates")).strip()
         sibling_reason = "RELATED_PRIMARY_EXIT"
         sibling_rule = f"close_sibling_legs_on_primary_exit:{reason}:{rule}"
 
@@ -978,7 +796,7 @@ class TradeMonitor:
                 getattr(ctx.trade, "id", None),
                 signal_id,
             )
-            return 0
+            raise
 
         for sib in marked:
             try:
@@ -1006,10 +824,10 @@ class TradeMonitor:
                         "sibling_symbol": getattr(sib, "symbol", None),
                         "sibling_instrument_type": getattr(sib, "instrument_type", None),
                         "sibling_observed_exit_price": getattr(sib, "exit_price", None),
-                        "group_reference_mfe_r": (ctx.trade_management or {}).get("group_mfe_r"),
-                        "group_reference_mae_r": (ctx.trade_management or {}).get("group_mae_r"),
-                        "group_stop_profit_r": (ctx.trade_management or {}).get("group_stop_profit_r"),
-                        "group_target_r": (ctx.trade_management or {}).get("group_target_r"),
+                        "group_reference_mfe_r": _required(ctx.trade_management, "group_mfe_r", "trade_management"),
+                        "group_reference_mae_r": _required(ctx.trade_management, "group_mae_r", "trade_management"),
+                        "group_stop_profit_r": _required(ctx.trade_management, "group_stop_profit_r", "trade_management"),
+                        "group_target_r": _required(ctx.trade_management, "group_target_r", "trade_management"),
                     },
                 )
             except Exception:
@@ -1028,105 +846,98 @@ class TradeMonitor:
     # -----------------------------------------------------------------
     # data fetch
     # -----------------------------------------------------------------
-    def _fetch_snapshot_fallback(self, ut: Any, asof_time: Optional[datetime] = None) -> Optional[SnapshotSchema]:
-        try:
-            equity_ref = str(getattr(ut, "equity_ref", "") or getattr(ut, "symbol", "") or "").strip()
-            if not equity_ref:
-                return None
-            if asof_time is not None:
-                return SnapshotSchema.fetch_latest_for_symbol_asof(equity_ref, asof_time)
-            return SnapshotSchema.fetch_latest_for_symbol(equity_ref)
-        except Exception:
-            logger.exception(
-                "TradeMonitor: snapshot fallback failed trade_id=%s symbol=%s",
-                getattr(ut, "id", None),
-                getattr(ut, "symbol", None),
+    def _fetch_snapshot(self, ut: Any, asof_time: Optional[datetime] = None) -> SnapshotSchema:
+        equity_ref = str(getattr(ut, "equity_ref", "") or "").strip().upper()
+        if not equity_ref:
+            raise ValueError("trade.equity_ref is required for snapshot lookup")
+        snapshot = (
+            SnapshotSchema.fetch_latest_for_symbol_asof(equity_ref, asof_time)
+            if asof_time is not None
+            else SnapshotSchema.fetch_latest_for_symbol(equity_ref)
+        )
+        if snapshot is None:
+            raise LookupError(
+                f"No snapshot available for trade_id={getattr(ut, 'id', None)} "
+                f"equity_ref={equity_ref} asof={asof_time}"
             )
-            return None
+        return snapshot
 
-
-    def _price_from_snapshot_for_trade(self, ut: Any, snapshot: SnapshotSchema) -> Optional[Decimal]:
+    def _price_from_snapshot_for_trade(self, ut: Any, snapshot: SnapshotSchema) -> Decimal:
         inst = _instrument_type(ut)
         symbol = str(getattr(ut, "symbol", "") or "").strip().upper()
+        if not symbol:
+            raise ValueError("trade.symbol is required for snapshot pricing")
 
         if inst == "EQ":
-            return _to_optional_price(getattr(snapshot, "close", None))
+            value = _to_optional_price(snapshot.close)
+            if value is None:
+                raise ValueError("snapshot.close must be positive for EQ pricing")
+            return value
 
-        deriv = getattr(snapshot, "derivatives", None) or {}
-        if not isinstance(deriv, dict):
-            return _to_optional_price(getattr(ut, "last_price", None) or getattr(ut, "entry_price", None))
-
+        derivatives = snapshot.derivatives
         if inst == "FUT":
-            fut = deriv.get("future") or {}
-            if isinstance(fut, dict):
-                px = fut.get("ltp") or fut.get("last_price")
-                val = _to_optional_price(px)
-                if val is not None and val > 0:
-                    return val
+            future = derivatives.future
+            if not isinstance(future, dict):
+                raise TypeError("snapshot.derivatives.future must be an object")
+            if "instrument" not in future or "last_price" not in future:
+                raise ValueError("future.instrument and future.last_price are required")
+            if str(future["instrument"]).strip().upper() != symbol:
+                raise ValueError(
+                    f"future instrument mismatch: {future['instrument']!r} != {symbol!r}"
+                )
+            value = _to_optional_price(future["last_price"])
+            if value is None:
+                raise ValueError("future.last_price must be positive")
+            return value
 
         if inst in ("CE", "PE"):
-            containers = [
-                deriv.get("option_ladder"),
-                deriv.get("options_lite"),
-                deriv.get("options"),
+            ladder = derivatives.option_ladder
+            if not isinstance(ladder, dict):
+                raise TypeError("snapshot.derivatives.option_ladder must be an object")
+            side_key = "calls" if inst == "CE" else "puts"
+            if side_key not in ladder or not isinstance(ladder[side_key], list):
+                raise ValueError(f"option_ladder.{side_key} is required")
+            matches = [
+                row
+                for row in ladder[side_key]
+                if isinstance(row, dict)
+                and "symbol" in row
+                and str(row["symbol"]).strip().upper() == symbol
             ]
+            if len(matches) != 1:
+                raise ValueError(
+                    f"Expected exactly one {inst} ladder row for {symbol}; found {len(matches)}"
+                )
+            row = matches[0]
+            if "ltp" not in row:
+                raise ValueError(f"option_ladder.{side_key} row ltp is required")
+            value = _to_optional_price(row["ltp"])
+            if value is None:
+                raise ValueError("option ladder ltp must be positive")
+            return value
 
-            def scan(value: Any) -> Optional[Decimal]:
-                if isinstance(value, dict):
-                    # direct symbol keyed map or nested lists
-                    if symbol in value and isinstance(value.get(symbol), dict):
-                        px = value[symbol].get("ltp") or value[symbol].get("last_price")
-                        val = _to_optional_price(px)
-                        if val is not None and val > 0:
-                            return val
+        raise ValueError(f"Unsupported instrument_type for snapshot pricing: {inst}")
 
-                    for key in ("top_calls", "top_puts", "calls", "puts", "rows", "ladder"):
-                        found = scan(value.get(key))
-                        if found is not None:
-                            return found
-
-                    for row in value.values():
-                        found = scan(row)
-                        if found is not None:
-                            return found
-
-                if isinstance(value, list):
-                    for row in value:
-                        if isinstance(row, dict):
-                            row_symbol = str(row.get("symbol") or row.get("tradingsymbol") or "").strip().upper()
-                            if row_symbol == symbol:
-                                px = row.get("ltp") or row.get("last_price")
-                                val = _to_optional_price(px)
-                                if val is not None and val > 0:
-                                    return val
-                return None
-
-            for container in containers:
-                found = scan(container)
-                if found is not None:
-                    return found
-
-        return _to_optional_price(getattr(ut, "last_price", None) or getattr(ut, "entry_price", None))
-
-
-    def _fetch_source_signal(self, ut: Any) -> Optional[SignalSchema]:
-        signal_id = str(getattr(ut, "signal_id", "") or "").strip()
-
-        if not signal_id:
-            return None
-
+    def _fetch_source_signal_context(
+        self,
+        ut: Any,
+    ) -> Tuple[Optional[SignalSchema], Optional[AuctionTradeSignalContext]]:
         if _is_manual_trade(ut):
-            return None
+            return None, None
 
-        try:
-            return SignalSchema.fetch_by_signal_id(signal_id)
-        except Exception:
-            logger.exception(
-                "TradeMonitor: source signal lookup failed | trade_id=%s signal_id=%s",
-                getattr(ut, "id", None),
-                signal_id,
+        signal_id = str(getattr(ut, "signal_id", "") or "").strip()
+        if not signal_id:
+            raise ValueError("signal-managed trade requires trade.signal_id")
+        signal = SignalSchema.fetch_by_signal_id_strict(signal_id)
+        if signal is None:
+            raise LookupError(f"source signal not found: {signal_id}")
+        contract = AuctionTradeSignalContext.from_signal(signal)
+        if contract.signal_id != signal_id:
+            raise ValueError(
+                f"trade/source signal mismatch: {signal_id!r} != {contract.signal_id!r}"
             )
-            return None
+        return signal, contract
+
 
     # -----------------------------------------------------------------
     # context
@@ -1137,219 +948,114 @@ class TradeMonitor:
         ut: Any,
         last_price: Decimal,
         last_time: datetime,
-        snapshot: Optional[SnapshotSchema],
+        snapshot: SnapshotSchema,
         source_signal: Optional[SignalSchema],
+        signal_contract: Optional[AuctionTradeSignalContext],
         group_role: str = "STANDALONE",
         group_reference_trade: Optional[Any] = None,
     ) -> TradeMonitorContext:
-        side = _trade_side_str(getattr(ut, "trade_type", "BUY"))
+        if not isinstance(snapshot, SnapshotSchema):
+            raise TypeError("TradeMonitor context requires SnapshotSchema")
+        if not isinstance(last_time, datetime):
+            raise TypeError("TradeMonitor context requires datetime last_time")
+
+        side = _trade_side_str(getattr(ut, "trade_type", None))
         instrument_type = _instrument_type(ut)
-        entry_price = d(getattr(ut, "entry_price", 0) or 0)
-        quantity = d(getattr(ut, "quantity", 0) or 0)
+        planned_entry = d(getattr(ut, "entry_price", None))
+        executed_entry = d(getattr(ut, "executed_entry_price", None))
+        quantity = d(getattr(ut, "quantity", None))
+        if planned_entry <= 0 or executed_entry <= 0 or quantity <= 0:
+            raise ValueError(
+                "filled trade requires positive planned entry, executed entry, and quantity"
+            )
+        if _entry_status(ut) != EntryStatus.FILLED.value:
+            raise ValueError("TradeMonitor context only accepts FILLED trades")
 
-        exec_mode = _enum_str(getattr(ut, "execution_mode", "VIRTUAL"))
-        exec_entry = getattr(ut, "executed_entry_price", None)
-
-        # P&L basis must match the actual filled/virtual execution price
-        # whenever it is available. Virtual executor also stamps
-        # executed_entry_price, so do not restrict this to REAL trades.
-        # Fall back to planned entry_price only when execution price is absent.
-        if exec_entry is not None and d(exec_entry) > 0:
-            basis_price = d(exec_entry)
-        else:
-            basis_price = entry_price
-
-        pnl_per_unit = (d(last_price) - basis_price) if side == "BUY" else (basis_price - d(last_price))
+        basis_price = executed_entry
+        lp = d(last_price)
+        if lp <= 0:
+            raise ValueError("last_price must be positive")
+        pnl_per_unit = lp - basis_price if side == "BUY" else basis_price - lp
         pnl_value = pnl_per_unit * quantity
 
-        snap_dict_for_tm = _normalize_snapshot_dict(snapshot) if snapshot is not None else _normalize_snapshot_dict(getattr(ut, "last_snapshot", None))
+        raw_management = getattr(ut, "trade_management", None)
+        if raw_management is None:
+            raise ValueError("filled trade requires trade_management")
         trade_management = _normalize_trade_management_for_monitor(
-            raw=getattr(ut, "trade_management", None),
+            raw=raw_management,
             side=side,
             basis_price=basis_price,
-            snapshot_dict=snap_dict_for_tm,
-            fallback_protective_sl=None,
+            snapshot_dict=_normalize_snapshot_dict(snapshot),
             instrument_type=instrument_type,
         )
-
-        lp = d(last_price)
-        managed_stop_price = _decimal_or_none((trade_management or {}).get("current_stop_price"))
-        managed_target_price = _decimal_or_none((trade_management or {}).get("current_target_price"))
-
-        max_price = d(getattr(ut, "max_price", None) or basis_price)
-        min_price = d(getattr(ut, "min_price", None) or basis_price)
-        intraday_only = bool(getattr(ut, "intraday_only", False))
-
-        try:
-            cutoff = dtime(*self._cutoff_hms)
-            lt = last_time if isinstance(last_time, datetime) else _now_ist()
-            intraday_exit_time = lt.replace(
-                hour=cutoff.hour,
-                minute=cutoff.minute,
-                second=cutoff.second,
-                microsecond=0,
-            )
-        except Exception:
-            intraday_exit_time = last_time if isinstance(last_time, datetime) else _now_ist()
-
-        signal_meta = {}
-        if source_signal:
-            meta = _as_dict(getattr(source_signal, "meta_json", None))
-            signal_meta = _as_dict(meta.get("signal"))
-
-        monitor_resolution = self._build_monitor_resolution(
-            ut=ut,
-            trade_side=side,
-            snapshot=snapshot,
-            source_signal=source_signal,
+        managed_stop_price = _decimal_or_none(
+            _required(trade_management, "current_stop_price", "trade_management")
         )
+        managed_target_price = _decimal_or_none(
+            _required(trade_management, "current_target_price", "trade_management")
+        )
+        if managed_stop_price is None or managed_target_price is None:
+            raise ValueError("trade_management stop and target must be positive")
+
+        max_price = d(getattr(ut, "max_price", None))
+        min_price = d(getattr(ut, "min_price", None))
+        if max_price <= 0 or min_price <= 0:
+            raise ValueError("filled trade requires positive max_price and min_price")
+        intraday_only = bool(getattr(ut, "intraday_only", False))
+        cutoff = dtime(*self._cutoff_hms)
+        intraday_exit_time = last_time.replace(
+            hour=cutoff.hour, minute=cutoff.minute, second=cutoff.second, microsecond=0
+        )
+
+        manual = _is_manual_trade(ut)
+        if manual:
+            if source_signal is not None or signal_contract is not None:
+                raise ValueError("manual trade cannot carry source signal context")
+        elif source_signal is None or signal_contract is None:
+            raise ValueError("signal-managed trade requires exact signal context")
+
+        normalized_role = str(group_role).upper().strip()
+        if normalized_role not in {"STANDALONE", "REFERENCE", "FOLLOWER"}:
+            raise ValueError(f"unsupported group role: {normalized_role!r}")
+        reference_id: Optional[int] = None
+        reference_instrument: Optional[str] = None
+        reference_symbol: Optional[str] = None
+        if group_reference_trade is not None:
+            reference_id = int(getattr(group_reference_trade, "id"))
+            if reference_id <= 0:
+                raise ValueError("group reference trade id must be positive")
+            reference_instrument = _instrument_type(group_reference_trade)
+            reference_symbol = str(getattr(group_reference_trade, "symbol", "") or "").strip()
+            if not reference_symbol:
+                raise ValueError("group reference symbol is required")
+        elif normalized_role in {"REFERENCE", "FOLLOWER"}:
+            raise ValueError(f"{normalized_role} group role requires reference trade")
 
         return TradeMonitorContext(
-            trade=ut,
-            side=side,
-            instrument_type=instrument_type,
-            last_price=lp,
-            last_time=last_time if isinstance(last_time, datetime) else _now_ist(),
-            entry_price=entry_price,
-            quantity=quantity,
-            basis_price=basis_price,
-            pnl_per_unit=pnl_per_unit,
-            pnl_value=pnl_value,
-
-            trade_management=trade_management,
-
+            trade=ut, side=side, instrument_type=instrument_type,
+            last_price=lp, last_time=last_time, entry_price=planned_entry,
+            quantity=quantity, basis_price=basis_price, pnl_per_unit=pnl_per_unit,
+            pnl_value=pnl_value, trade_management=trade_management,
             managed_stop_price=managed_stop_price,
-            managed_target_price=managed_target_price,
-
-            max_price=max_price,
-            min_price=min_price,
-
-            intraday_only=intraday_only,
-            intraday_exit_time=intraday_exit_time,
-
-            source_signal=source_signal,
-            signal_meta=signal_meta,
+            managed_target_price=managed_target_price, max_price=max_price,
+            min_price=min_price, intraday_only=intraday_only,
+            intraday_exit_time=intraday_exit_time, source_signal=source_signal,
             snapshot=snapshot,
-            monitor_resolution=monitor_resolution,
-
-            group_role=str(group_role or "STANDALONE").upper().strip(),
-            group_reference_trade_id=(int(getattr(group_reference_trade, "id", 0) or 0) or None),
-            group_reference_instrument=(_instrument_type(group_reference_trade) if group_reference_trade is not None else None),
-            group_reference_symbol=(str(getattr(group_reference_trade, "symbol", "") or "").strip() or None),
+            signal_contract=signal_contract, group_role=normalized_role,
+            group_reference_trade_id=reference_id,
+            group_reference_instrument=reference_instrument,
+            group_reference_symbol=reference_symbol,
         )
 
-    def _fetch_peer_signals(self, ut: Any) -> List[SignalSchema]:
-        equity_ref = str(getattr(ut, "equity_ref", "") or getattr(ut, "symbol", "") or "").strip()
-        if not equity_ref:
-            return []
-        try:
-            return SignalSchema.list_for_ui(equity_ref=equity_ref, statuses=["OPEN"], limit=20) or []
-        except Exception:
-            logger.exception(
-                "TradeMonitor: peer signal fetch failed | trade_id=%s equity_ref=%s",
-                getattr(ut, "id", None),
-                equity_ref,
-            )
-            return []
-
-    def _build_monitor_resolution(
-        self,
-        *,
-        ut: Any,
-        trade_side: str,
-        snapshot: Optional[SnapshotSchema],
-        source_signal: Optional[SignalSchema],
-    ) -> MonitorResolution:
-        snap_dict = _normalize_snapshot_dict(snapshot)
-        peers = self._fetch_peer_signals(ut)
-        if source_signal is not None and not any(
-            str(getattr(p, "signal_id", "") or "") == str(getattr(source_signal, "signal_id", "") or "")
-            for p in peers
-        ):
-            peers.append(source_signal)
-
-        if not peers:
-            return MonitorResolution(summary="No active peer signals found for monitor resolver.")
-
-        try:
-            rows = [SignalHelper.signal_to_resolver_input(p) for p in peers]
-            symbol = str(getattr(ut, "equity_ref", "") or getattr(ut, "symbol", "") or "").strip().upper()
-            ltp = _get_path(snap_dict, ["close"], None)
-            resolved = SignalHelper.build_signal_context(
-                symbol=symbol,
-                ltp=float(ltp or 0.0),
-                snapshot_time=getattr(snapshot, "snapshot_time", None),
-                snapshot=snap_dict,
-                signals=rows,
-            ).get("signal_resolution", {}) or {}
-
-            candidates = resolved.get("candidates") or []
-            same_strength = 0.0
-            opposite_strength = 0.0
-            same_actionable = False
-            opposite_actionable = False
-            opposite_lifecycle = ""
-
-            for cand in candidates:
-                side = _enum_str(cand.get("side"))
-                strength = float(cand.get("confidence") or 0.0)
-                entry_view = _enum_str(cand.get("entry_view"))
-                action = _enum_str(cand.get("signal_action"))
-                state = _enum_str(cand.get("signal_state"))
-                actionable = (
-                    entry_view == "ENTER"
-                    or (state in ("ACCEPTED", "READY") and action in ("CREATE", "PROMOTE", "REPLACE_CREATE"))
-                )
-
-                if side == trade_side:
-                    if strength > same_strength:
-                        same_strength = strength
-                        same_actionable = actionable
-                elif side in ("BUY", "SELL"):
-                    if strength > opposite_strength:
-                        opposite_strength = strength
-                        opposite_actionable = actionable
-                        opposite_lifecycle = _enum_str(cand.get("lifecycle"))
-
-            return MonitorResolution(
-                preferred_lifecycle=_enum_str(resolved.get("preferred_lifecycle")),
-                preferred_signal_id=str(resolved.get("preferred_signal_id") or ""),
-                preferred_side=_enum_str(resolved.get("side")),
-                action=_enum_str(resolved.get("action") or "WATCH"),
-                same_side_strength=same_strength,
-                opposite_side_strength=opposite_strength,
-                same_side_actionable=same_actionable,
-                opposite_side_actionable=opposite_actionable,
-                opposite_side_lifecycle=opposite_lifecycle,
-                summary=str(resolved.get("summary") or ""),
-            )
-
-        except Exception:
-            logger.exception(
-                "TradeMonitor: monitor resolver failed | trade_id=%s symbol=%s",
-                getattr(ut, "id", None),
-                getattr(ut, "symbol", None),
-            )
-            return MonitorResolution(summary="Monitor resolver failed.")
-
-    def _snapshot_atr(self, ctx: TradeMonitorContext) -> Optional[Decimal]:
-        snap = _normalize_snapshot_dict(ctx.snapshot)
-        return _first_number(
-            _get_path(snap, ["indicators", "atr", "value"]),
-        )
-
-    def _trade_age_minutes(self, ctx: TradeMonitorContext) -> Optional[Decimal]:
-        entry_time = getattr(ctx.trade, "entry_exec_time", None) or getattr(ctx.trade, "entry_time", None)
-        if not isinstance(entry_time, datetime) or not isinstance(ctx.last_time, datetime):
-            return None
-        try:
-            start = _to_ist_naive(entry_time)
-            end = _to_ist_naive(ctx.last_time)
-            if not start or not end:
-                return None
-            return d((end - start).total_seconds() / 60.0)
-        except Exception:
-            return None
+    def _trade_age_minutes(self, ctx: TradeMonitorContext) -> Decimal:
+        entry_time = getattr(ctx.trade, "entry_exec_time", None)
+        if not isinstance(entry_time, datetime):
+            raise ValueError("filled trade requires datetime entry_exec_time")
+        start = _to_ist_naive(entry_time)
+        end = _to_ist_naive(ctx.last_time)
+        if start is None or end is None:
+            raise ValueError("unable to normalize trade age timestamps")
+        return d((end - start).total_seconds() / 60.0)
 
     def _is_same_or_earlier_entry_tick(self, ctx: TradeMonitorContext) -> bool:
         """Prevent immediate same-tick exit after a trade is created/filled.
@@ -1359,50 +1065,7 @@ class TradeMonitor:
         dynamic target, soft stop, or protective SL until the next snapshot/tick.
         This avoids draft/executed rows being created and closed at P&L=0.
         """
-        age = self._trade_age_minutes(ctx)
-        if age is None:
-            return False
-        return age <= Decimal("0")
-
-    def _material_price_move(self, ctx: TradeMonitorContext) -> Tuple[bool, Decimal, Decimal]:
-        move = abs(ctx.last_price - ctx.basis_price)
-        pct_threshold = ctx.basis_price * (self._policy_num("min_price_move_pct", Decimal("0.15")) / Decimal("100"))
-        abs_threshold = self._policy_num("min_abs_price_move", Decimal("0"))
-        threshold = max(pct_threshold, abs_threshold)
-
-        atr = self._snapshot_atr(ctx)
-        if atr is not None and atr > 0:
-            threshold = max(threshold, atr * self._policy_num("min_atr_move", Decimal("0.10")))
-
-        if ctx.instrument_type in ("CE", "PE"):
-            threshold = max(threshold, self._policy_num("option_min_premium_move", Decimal("0.20")))
-
-        return (move >= threshold, move, threshold)
-
-    def _opposite_side_confirmed(self, ctx: TradeMonitorContext) -> bool:
-        res = ctx.monitor_resolution
-        threshold = float(self._policy_num("opposite_strength_exit", Decimal("65")))
-        gap_threshold = float(self._policy_num("opposite_strength_gap", Decimal("8")))
-
-        if res.preferred_side != ("SELL" if ctx.side == "BUY" else "BUY"):
-            return False
-        if res.action not in ("ENTER", "MANAGE", "HOLD"):
-            return False
-        if res.opposite_side_strength < threshold:
-            return False
-        if (res.opposite_side_strength - res.same_side_strength) < gap_threshold:
-            return False
-
-        return True
-
-    def _materiality_ok_for_weakening_exit(self, ctx: TradeMonitorContext) -> bool:
-        age = self._trade_age_minutes(ctx)
-        min_age = d(self._policy_int("min_trade_age_minutes", 3))
-        if age is not None and age < min_age:
-            return False
-
-        material, _, _ = self._material_price_move(ctx)
-        return material
+        return self._trade_age_minutes(ctx) <= Decimal("0")
 
     # -----------------------------------------------------------------
     # deterministic evaluator
@@ -1438,8 +1101,7 @@ class TradeMonitor:
                     rule="intraday_auto_exit_fail_safe",
                 )
             )
-            if ctx.snapshot is not None:
-                updates["last_snapshot"] = _normalize_snapshot_dict(ctx.snapshot)
+            updates["last_snapshot"] = _normalize_snapshot_dict(ctx.snapshot)
             logger.warning(
                 "TradeMonitor: fail-safe intraday cutoff | trade_id=%s symbol=%s role=%s last_time=%s cutoff=%s",
                 getattr(ctx.trade, "id", None),
@@ -1464,54 +1126,76 @@ class TradeMonitor:
         if exit_update:
             updates.update(exit_update)
 
-        if ctx.snapshot is not None:
-            updates["last_snapshot"] = _normalize_snapshot_dict(ctx.snapshot)
+        updates["last_snapshot"] = _normalize_snapshot_dict(ctx.snapshot)
 
         return updates
 
     def _evaluate_group_follower(self, ctx: TradeMonitorContext) -> Dict[str, Any]:
-        """Update a sibling leg without letting it independently exit the group."""
+        """Update a sibling from the exact reference-leg management state."""
         updates: Dict[str, Any] = {}
         self._update_live_metrics(ctx, updates)
         self._update_extremes(ctx, updates)
 
         reference_id = ctx.group_reference_trade_id
-        reference_trade = UserTradeSchema.fetch_user_trade_by_id(reference_id) if reference_id else None
-        reference_tm = _tm_as_dict(getattr(reference_trade, "trade_management", None)) if reference_trade is not None else {}
-        if not reference_tm:
-            logger.error(
-                "TradeMonitor: group follower missing reference management | trade_id=%s reference_trade_id=%s",
-                getattr(ctx.trade, "id", None),
-                reference_id,
+        if reference_id is None:
+            raise ValueError("group follower requires reference trade id")
+        reference_trade = UserTradeSchema.fetch_user_trade_by_id_strict(
+            int(reference_id)
+        )
+        reference_tm = _tm_as_dict(
+            getattr(reference_trade, "trade_management", None)
+        )
+        if not bool(getattr(_group_management_cfg(), "map_levels_to_siblings")):
+            raise ValueError(
+                "group follower projection cannot be disabled for an active follower"
             )
-        elif bool(getattr(_group_management_cfg(), "map_levels_to_siblings")):
-            projected = TradeMonHelper.project_group_reference_to_follower(
-                reference_trade_management=reference_tm,
-                follower_trade_management=ctx.trade_management,
-                side=ctx.side,
-                instrument_type=ctx.instrument_type,
-                entry_price=ctx.basis_price,
-                underlying_atr=d((ctx.trade_management or {}).get("atr_at_entry") or 0),
-                reference_trade_id=reference_id,
-                reference_instrument=ctx.group_reference_instrument or _instrument_type(reference_trade),
-                reference_symbol=ctx.group_reference_symbol or str(getattr(reference_trade, "symbol", "") or ""),
-                asof_time=ctx.last_time,
-            )
+        if ctx.group_reference_instrument is None or ctx.group_reference_symbol is None:
+            raise ValueError("group follower requires reference instrument and symbol")
 
-            atr_unit = d(projected.get("instrument_atr") or 0)
-            if atr_unit > 0:
-                current_profit_r = (ctx.last_price - ctx.basis_price) / atr_unit if ctx.side == "BUY" else (ctx.basis_price - ctx.last_price) / atr_unit
-                favorable = max(ctx.max_price, ctx.last_price) if ctx.side == "BUY" else min(ctx.min_price, ctx.last_price)
-                follower_mfe_r = (favorable - ctx.basis_price) / atr_unit if ctx.side == "BUY" else (ctx.basis_price - favorable) / atr_unit
-                projected["current_profit_r"] = float(current_profit_r)
-                projected["mfe_profit_r"] = float(max(Decimal("0"), follower_mfe_r))
-                projected["max_favorable_price"] = float(favorable)
-            updates["trade_management"] = projected
-            ctx.trade_management.clear()
-            ctx.trade_management.update(projected)
+        projected = TradeMonHelper.project_group_reference_to_follower(
+            reference_trade_management=reference_tm,
+            follower_trade_management=ctx.trade_management,
+            side=ctx.side,
+            instrument_type=ctx.instrument_type,
+            entry_price=ctx.basis_price,
+            underlying_atr=d(
+                _required(ctx.trade_management, "atr_at_entry", "trade_management")
+            ),
+            reference_trade_id=reference_id,
+            reference_instrument=ctx.group_reference_instrument,
+            reference_symbol=ctx.group_reference_symbol,
+            asof_time=ctx.last_time,
+        )
 
-        if ctx.snapshot is not None:
-            updates["last_snapshot"] = _normalize_snapshot_dict(ctx.snapshot)
+        atr_unit = d(
+            _required(projected, "instrument_atr", "projected trade_management")
+        )
+        if atr_unit <= 0:
+            raise ValueError("projected instrument ATR must be positive")
+        current_profit_r = (
+            (ctx.last_price - ctx.basis_price) / atr_unit
+            if ctx.side == "BUY"
+            else (ctx.basis_price - ctx.last_price) / atr_unit
+        )
+        favorable = (
+            max(ctx.max_price, ctx.last_price)
+            if ctx.side == "BUY"
+            else min(ctx.min_price, ctx.last_price)
+        )
+        follower_mfe_r = (
+            (favorable - ctx.basis_price) / atr_unit
+            if ctx.side == "BUY"
+            else (ctx.basis_price - favorable) / atr_unit
+        )
+        projected["current_profit_r"] = float(current_profit_r)
+        projected["mfe_profit_r"] = float(max(Decimal("0"), follower_mfe_r))
+        projected["max_favorable_price"] = float(favorable)
+        updates["trade_management"] = projected
+        ctx.trade_management.clear()
+        ctx.trade_management.update(projected)
+        if ctx.snapshot is None:
+            raise ValueError("group follower requires current snapshot")
+        updates["last_snapshot"] = _normalize_snapshot_dict(ctx.snapshot)
         return updates
 
 
@@ -1542,7 +1226,7 @@ class TradeMonitor:
         adverse_price = min(ctx.min_price, ctx.last_price) if ctx.side == "BUY" else max(ctx.max_price, ctx.last_price)
         decision = TradeMonHelper.evaluate(
             trade=ctx.trade,
-            signal=ctx.source_signal,
+            signal_context=ctx.signal_contract,
             side=ctx.side,
             instrument_type=ctx.instrument_type,
             entry_price=ctx.basis_price,
@@ -1574,7 +1258,7 @@ class TradeMonitor:
             return
         if not self._dynamic_target_hit(ctx):
             return
-        if (ctx.trade_management or {}).get("posture") != TradePosture.EXPAND.value:
+        if _required(ctx.trade_management, "posture", "trade_management") != TradePosture.EXPAND.value:
             return
 
         decision = TradeMonHelper.expand_after_target_hit(
@@ -1595,35 +1279,9 @@ class TradeMonitor:
                 ctx.instrument_type,
                 ctx.side,
                 decision.reason,
-                (ctx.trade_management or {}).get("current_target_price"),
-                (ctx.trade_management or {}).get("current_stop_price"),
+                _required(ctx.trade_management, "current_target_price", "trade_management"),
+                _required(ctx.trade_management, "current_stop_price", "trade_management"),
             )
-
-
-    def _ensure_protective_sl_persisted(self, ctx: TradeMonitorContext, updates: Dict[str, Any]) -> None:
-        """Deprecated compatibility hook.
-
-        Clean adaptive management persists the managed stop only inside
-        trade_management.current_stop_price.
-        """
-        return
-
-
-    def _stamp_target_times(self, ctx: TradeMonitorContext, updates: Dict[str, Any]) -> None:
-        """Deprecated compatibility hook. Target milestone times are not used.
-
-        Adaptive target state lives in trade_management and auditlog.
-        """
-        return
-
-
-    def _maybe_move_sl_after_t1(self, ctx: TradeMonitorContext, updates: Dict[str, Any]) -> None:
-        """Deprecated compatibility hook.
-
-        Legacy fixed-target/trailing-stop logic has been removed from active
-        monitor decisions. Use trademon_helper/trade_management instead.
-        """
-        return
 
 
     def _evaluate_exit_intent(self, ctx: TradeMonitorContext) -> Dict[str, Any]:
@@ -1673,14 +1331,14 @@ class TradeMonitor:
             )
             return {}
 
-        if bool((ctx.trade_management or {}).get("mae_risk_exit_required")):
+        if bool(_required(ctx.trade_management, "mae_risk_exit_required", "trade_management")):
             return self._exit_payload(
                 ctx,
                 reason="WEAKENING_RISK_EXIT",
                 rule="exit_at_observed_price_when_new_mae_stop_is_already_breached",
             )
 
-        if (ctx.trade_management or {}).get("posture") == TradePosture.EXIT.value:
+        if _required(ctx.trade_management, "posture", "trade_management") == TradePosture.EXIT.value:
             return self._exit_payload(
                 ctx,
                 reason="ADAPTIVE_POSTURE_EXIT",
@@ -1701,13 +1359,6 @@ class TradeMonitor:
         if signal_exit:
             return signal_exit
 
-        if False and self._soft_stop_hit(ctx):
-            return self._exit_payload(
-                ctx,
-                reason="SOFT_PROFIT_STOP",
-                rule="exit_on_adaptive_soft_profit_stop",
-            )
-
         # Protective SL is only a disaster/emergency guard. The preferred exit
         # path is target/signal/soft-profit protection above.
         if _tm_cfg_bool("exit_on_current_stop") and self._protective_sl_hit(ctx):
@@ -1720,127 +1371,29 @@ class TradeMonitor:
         return {}
 
     def _signal_exit_payload(self, ctx: TradeMonitorContext) -> Dict[str, Any]:
-        if not _signal_exit_enabled():
+        contract = ctx.signal_contract
+        if contract is None:
             return {}
-
-        lc = ctx.signal_meta or {}
-        opp = ctx.source_signal
-
-        if not lc and opp is None:
+        if not contract.requires_exit:
             return {}
-
-        inst = ctx.instrument_type
-        status = _enum_str(getattr(opp, "status", "") if opp is not None else "")
-        stage = _enum_str(getattr(opp, "stage", "") if opp is not None else "")
-
-        action = _enum_str(lc.get("signal_action") or "")
-        state = _enum_str(lc.get("signal_state") or lc.get("state") or "")
-        reason = str(lc.get("signal_reason") or lc.get("reason") or "").strip()
-
-        hard_statuses = {"CLOSED", "REPLACED", "INVALIDATED", "EXPIRED", "CANCELLED"}
-        hard_actions = {"INVALIDATE", "CLOSE", "EXIT", "EXPIRE"}
-        hard_stages = {"REVERSED", "INVALIDATED", "CLOSED", "EXPIRED"}
-
-        # INVALIDATE_OPPOSITE means this signal invalidated another opposite
-        # signal. It should not exit trades that belong to this same signal.
-        # Opposite/old trades should exit because their own signal becomes
-        # REPLACED/CLOSED/INVALIDATED, not because the new signal carries this
-        # transition action.
-        if action == "INVALIDATE_OPPOSITE":
-            return {}
-
-        if status in hard_statuses or action in hard_actions or stage in hard_stages:
-            return self._exit_payload(
-                ctx,
-                reason="SIGNAL_INVALIDATED",
-                rule="exit_on_signal_invalidation",
-                extra_reason=reason,
-            )
-
-        weakening_actions = {"DOWNGRADE"}
-        weakening_stages = {"WEAKENING"}
-        is_weakening = action in weakening_actions or stage in weakening_stages
-
-        if not is_weakening:
-            return {}
-
-        # Setup-aware monitor policy:
-        # Lifecycle weakening by itself is a stress signal, not an automatic exit.
-        # Exit only when the opposite side is clearly stronger AND the move is
-        # material enough to matter. This prevents a FUT/option from being closed
-        # just because the current signal lost some local strength.
-        opposite_confirmed = self._opposite_side_confirmed(ctx)
-        material_ok = self._materiality_ok_for_weakening_exit(ctx)
-        material, move, threshold = self._material_price_move(ctx)
-        res = ctx.monitor_resolution
-
-        if not (opposite_confirmed and material_ok):
-            logger.info(
-                "TradeMonitor: hold on signal weakening | trade_id=%s symbol=%s inst=%s side=%s "
-                "stage=%s action=%s same_strength=%.2f opposite_strength=%.2f preferred=%s/%s "
-                "material=%s move=%s threshold=%s reason=%s",
-                getattr(ctx.trade, "id", None),
-                getattr(ctx.trade, "symbol", None),
-                inst,
-                ctx.side,
-                stage,
-                action,
-                res.same_side_strength,
-                res.opposite_side_strength,
-                res.preferred_lifecycle,
-                res.preferred_side,
-                bool(material),
-                move,
-                threshold,
-                reason,
-            )
-            return {}
-
-        if inst in ("CE", "PE"):
-            return self._exit_payload(
-                ctx,
-                reason="SIGNAL_WEAKENED_OPTION",
-                rule="exit_option_on_confirmed_opposite_signal_strength",
-                extra_reason=reason,
-            )
-
-        if inst == "FUT":
-            return self._exit_payload(
-                ctx,
-                reason="SIGNAL_WEAKENED_FUTURE",
-                rule="exit_future_on_confirmed_opposite_signal_strength",
-                extra_reason=reason,
-            )
-
-        # Equity remains most tolerant; confirmed opposite strength is still
-        # needed before lifecycle weakening exits it.
         return self._exit_payload(
             ctx,
-            reason="SIGNAL_WEAKENED_EQUITY",
-            rule="exit_equity_on_confirmed_opposite_signal_strength",
-            extra_reason=reason,
+            reason="SIGNAL_LIFECYCLE_EXIT",
+            rule="exit_on_auction_signal_downstream_contract",
+            extra_reason=contract.management_reason_code,
         )
 
     def _dynamic_target_hit(self, ctx: TradeMonitorContext) -> bool:
-        target = _decimal_or_none((ctx.trade_management or {}).get("current_target_price"))
+        target = _decimal_or_none(_required(ctx.trade_management, "current_target_price", "trade_management"))
         if target is None or target <= 0:
             return False
         return ctx.last_price >= target if ctx.side == "BUY" else ctx.last_price <= target
 
-    def _soft_stop_hit(self, ctx: TradeMonitorContext) -> bool:
-        # Legacy fixed soft-stop concept removed in clean Phase-1.
-        return False
-
     def _protective_sl_hit(self, ctx: TradeMonitorContext) -> bool:
-        stop = _decimal_or_none((ctx.trade_management or {}).get("current_stop_price"))
+        stop = _decimal_or_none(_required(ctx.trade_management, "current_stop_price", "trade_management"))
         if stop is None or stop <= 0:
             return False
         return ctx.last_price <= stop if ctx.side == "BUY" else ctx.last_price >= stop
-
-    def _stop_loss_hit(self, ctx: TradeMonitorContext) -> bool:
-        # Backward-compatible wrapper for any older internal callers.
-        return self._protective_sl_hit(ctx)
-
 
     def _exit_payload(
         self,
@@ -1864,8 +1417,11 @@ class TradeMonitor:
             "last_pnl_value": ctx.pnl_value,
         }
 
-        # Adaptive target exits are identified through exit_reason plus
-        # trade_management/auditlog.
+        if extra_reason is not None:
+            detail = str(extra_reason).strip()
+            if not detail:
+                raise ValueError("extra exit reason cannot be blank")
+            updates["exit_rule"] = f"{rule}:{detail}"
         return updates
 
     # -----------------------------------------------------------------

@@ -8,7 +8,8 @@
 # - trade_backfill_from_oms (reconciles OMS truth back into user_trades)
 #
 # NOTE:
-# - Trades are independent of signal lifecycle. signal_id is only a reference.
+# - Signal-originated trades are managed by the exact source-signal Auction contract.
+# - Manual trades remain independent and use price-only management.
 # - entry_status is ENTRY lifecycle; exit_status is EXIT lifecycle (separate).
 # - Stop-loss / targets are soft (monitor-managed). No broker SL/OCO fields here.
 
@@ -56,15 +57,15 @@ class TradeManagementSchema(BaseModel):
     # silently drops unknown keys, which hides handoff/persistence bugs.
     model_config = {"extra": "forbid"}
 
-    """Clean Phase-1 adaptive trade-management state.
+    """Strict Auction-driven adaptive trade-management state.
 
-    Stored in user_trades.trade_management. It is intentionally compact and
-    restart-safe: target/stop are instrument prices, while the R-multipliers
-    allow deterministic recomputation from entry price and ATR unit.
+    Stored in user_trades.trade_management. Version 2 is intentionally not
+    backward-compatible: an open trade carrying an older management payload
+    must fail visibly and be handled explicitly.
     """
-    version: int = 1
-    mode: str = "EVIDENCE_ADAPTIVE_V1"
-    price_basis: str = "INSTRUMENT"
+    version: Literal[2]
+    mode: Literal["AUCTION_ADAPTIVE_V2"]
+    price_basis: Literal["INSTRUMENT"]
 
     posture: str = "HOLD"
 
@@ -113,14 +114,20 @@ class TradeManagementSchema(BaseModel):
     management_context: Optional[str] = None
     signal_context_available: Optional[bool] = None
 
-    # Active evidence management fields written by the monitor from
-    # signal.meta_json.active_signal_evidence.  These do not rediscover setup
-    # risk/target; they tell the monitor how defensive/aggressive to be.
-    target_expansion_allowed: bool = True
+    # Exact source-signal contract projected by TradeMonitor. Manual trades
+    # keep these nullable and are managed from price only.
+    target_expansion_allowed: bool = False
     trail_mode: str = "NORMAL"
     exit_pressure: str = "LOW"
-    active_evidence_action: Optional[str] = None
-    active_evidence_reason_code: Optional[str] = None
+    management_posture: Optional[str] = None
+    management_reason_code: Optional[str] = None
+    signal_stage: Optional[str] = None
+    signal_status: Optional[str] = None
+    lifecycle_trade_action: Optional[str] = None
+    directional_alignment: Optional[str] = None
+    auction_action: Optional[str] = None
+    auction_state: Optional[str] = None
+    should_exit_signal: bool = False
 
     # MFE-triggered profit protection. The stop is expressed in signed
     # profit-space R: negative retains risk, zero is cost, positive locks
@@ -159,9 +166,6 @@ class TradeManagementSchema(BaseModel):
     mae_risk_exit_required: bool = False
     mae_risk_exit_observed_price: Optional[Decimal] = None
 
-    # Legacy compatibility flag retained for existing audit/UI consumers.
-    # profit_protection_applied is authoritative for the new behavior.
-    risk_reduced: bool = False
     expansion_count: int = 0
     last_target_hit_price: Optional[Decimal] = None
 
@@ -172,16 +176,13 @@ class TradeManagementSchema(BaseModel):
     max_favorable_price: Optional[Decimal] = None
 
     last_managed_price: Optional[Decimal] = None
-    last_signal_stage: Optional[str] = None
-    last_signal_confidence: Optional[Decimal] = None
-    last_signal_quality: Optional[Decimal] = None
 
     last_updated_at: Optional[datetime] = None
     last_update_reason: Optional[str] = None
 
     def to_json_dict(self) -> Dict[str, Any]:
         """Return a DB JSON-safe dict."""
-        return sanitize_json(self.model_dump(mode="json", exclude_none=True))
+        return sanitize_json(self.model_dump(mode="json", exclude_none=False))
 
 def _normalize_trade_management(value: Any) -> Optional[Dict[str, Any]]:
     """
@@ -205,8 +206,9 @@ def _normalize_trade_management(value: Any) -> Optional[Dict[str, Any]]:
         # (setup_levels) and must not be silently accepted or cleaned here.
         return TradeManagementSchema.model_validate(value).to_json_dict()
 
-    logger.warning("Ignoring unsupported trade_management payload type=%s", type(value).__name__)
-    return None
+    raise TypeError(
+        f"unsupported trade_management payload type: {type(value).__name__}"
+    )
 
 
 class UserTradeActiveContextRow(BaseModel):
@@ -553,6 +555,55 @@ class UserTradeSchema(BaseModel):
         with get_trades_db() as db:
             rec = db.get(UserTradeORM, id)
         return UserTradeSchema.model_validate(rec) if rec else None
+
+    @staticmethod
+    def fetch_user_trade_by_id_strict(id: int) -> "UserTradeSchema":
+        trade_id = int(id)
+        if trade_id <= 0:
+            raise ValueError("user_trade id must be positive")
+        with get_trades_db() as db:
+            rec = db.get(UserTradeORM, trade_id)
+        if rec is None:
+            raise LookupError(f"UserTrade[id={trade_id}] not found")
+        return UserTradeSchema.model_validate(rec)
+
+    @staticmethod
+    def update_user_trade_by_id_strict(id: int, updates: dict) -> "UserTradeSchema":
+        trade_id = int(id)
+        if trade_id <= 0:
+            raise ValueError("user_trade id must be positive")
+        if not isinstance(updates, dict) or not updates:
+            raise ValueError("non-empty user_trade updates dict is required")
+        clean = dict(updates)
+        for key in (
+            "instrument_type", "trade_type", "entry_status", "exit_status", "position_style"
+        ):
+            if key in clean and hasattr(clean[key], "value"):
+                clean[key] = clean[key].value
+        if "entry_snapshot" in clean:
+            clean["entry_snapshot"] = sanitize_json(clean["entry_snapshot"])
+        if "last_snapshot" in clean:
+            clean["last_snapshot"] = sanitize_json(clean["last_snapshot"])
+        if "trade_management" in clean:
+            clean["trade_management"] = _normalize_trade_management(clean["trade_management"])
+        with get_trades_db() as db:
+            rec = db.get(UserTradeORM, trade_id)
+            if rec is None:
+                raise LookupError(f"UserTrade[id={trade_id}] not found")
+            for key, value in list(clean.items()):
+                if isinstance(value, datetime):
+                    clean[key] = _to_ist_naive(value)
+            for key, value in clean.items():
+                if not hasattr(rec, key):
+                    raise AttributeError(f"UserTradeORM has no field {key!r}")
+                setattr(rec, key, value)
+            try:
+                db.commit()
+                db.refresh(rec)
+            except Exception:
+                db.rollback()
+                raise
+        return UserTradeSchema.model_validate(rec)
 
     @staticmethod
     def fetch_user_trades_by_user(userid: str) -> List["UserTradeSchema"]:

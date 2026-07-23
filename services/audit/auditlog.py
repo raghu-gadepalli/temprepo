@@ -35,17 +35,24 @@ _MONITOR_SIGNATURE_FIELDS = (
     "target_expansion_allowed",
     "trail_mode",
     "exit_pressure",
-    "active_evidence_action",
-    "active_evidence_reason_code",
+    "management_posture",
+    "management_reason_code",
+    "signal_stage",
+    "signal_status",
+    "lifecycle_trade_action",
+    "directional_alignment",
+    "auction_action",
+    "auction_state",
+    "should_exit_signal",
     "current_target_price",
     "current_stop_price",
     "target_r_multiple",
     "stop_r_multiple",
-    "risk_reduced",
+    "profit_protection_applied",
     "expansion_count",
     "last_target_hit_price",
-    "last_signal_stage",
 )
+
 
 _IMPORTANT_PAYLOAD_KEYS = (
     "signal_id",
@@ -64,7 +71,7 @@ _IMPORTANT_PAYLOAD_KEYS = (
     "risk_flags",
     "analytics",
     "management",
-    "monitor_resolution",
+    "signal_contract",
     "update_fields",
     "exit_status",
     "trade_ids",
@@ -210,7 +217,7 @@ def _payload_summary(clean: Dict[str, Any], *, original_bytes: int) -> Dict[str,
         value = clean.get(key)
         if key == "management":
             summary[key] = _small_mapping(value, allowed=_MONITOR_SIGNATURE_FIELDS + ("last_update_reason",))
-        elif key in {"decision", "result", "monitor_resolution", "analytics"}:
+        elif key in {"decision", "result", "signal_contract", "analytics"}:
             summary[key] = _small_mapping(value)
         elif value is None or isinstance(value, (str, int, float, bool, list)):
             summary[key] = value
@@ -309,11 +316,10 @@ def _production_low_value_event(
     # Generic HOLD/price refreshes belong in the service log, not permanent DB
     # audit. Any protection/expansion/exit/level change has a distinct signature
     # and is retained.
-    generic_reason = reason_s in {"", "MONITOR_UPDATE", "EVIDENCE_HOLD"}
+    generic_reason = reason_s in {"", "MONITOR_UPDATE"}
     generic_management = posture in {"", "HOLD"} and (
         not reason_family
         or reason_family.startswith("HOLD")
-        or reason_family.startswith("EVIDENCE_HOLD")
     )
     return generic_reason and generic_management
 

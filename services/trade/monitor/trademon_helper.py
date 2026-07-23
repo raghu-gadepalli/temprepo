@@ -18,15 +18,28 @@ from typing import Any, Dict, Optional
 
 from configs.monitor_config import MONITOR_CONFIG
 from enums.enums import TradePosture
+from services.trade.monitor.signal_contract import AuctionTradeSignalContext
 
 
 def d(x: Any) -> Decimal:
     if isinstance(x, Decimal):
         return x
+    if x is None:
+        raise ValueError("decimal value is required")
     try:
         return Decimal(str(x))
-    except Exception:
-        return Decimal("0")
+    except Exception as exc:
+        raise ValueError(f"invalid decimal value: {x!r}") from exc
+
+
+def _required(mapping: Dict[str, Any], key: str, path: str = "trade_management") -> Any:
+    if key not in mapping:
+        raise ValueError(f"{path}.{key} is required")
+    return mapping[key]
+
+
+def _optional(mapping: Dict[str, Any], key: str, default: Any = None) -> Any:
+    return mapping[key] if key in mapping else default
 
 
 def _cfg(name: str) -> Any:
@@ -43,28 +56,30 @@ def _cfg_dec(name: str) -> Decimal:
 def _json_number(value: Any) -> Optional[float]:
     if value is None:
         return None
-    try:
-        return float(d(value))
-    except Exception:
-        return None
+    return float(d(value))
 
 
 def _side(v: Any) -> str:
-    s = str(getattr(v, "value", v) or "BUY").upper().strip()
-    return "SELL" if s == "SELL" else "BUY"
+    s = str(getattr(v, "value", v) or "").upper().strip()
+    if s not in {"BUY", "SELL"}:
+        raise ValueError(f"trade side must be BUY or SELL, got {v!r}")
+    return s
 
 
 def _inst(v: Any) -> str:
-    s = str(getattr(v, "value", v) or "EQ").upper().strip()
-    if s in ("EQUITY", "CASH"):
-        return "EQ"
-    if s in ("FUTURE", "FUTURES"):
-        return "FUT"
-    if s in ("CALL",):
-        return "CE"
-    if s in ("PUT",):
-        return "PE"
-    return s or "EQ"
+    s = str(getattr(v, "value", v) or "").upper().strip()
+    aliases = {
+        "EQUITY": "EQ",
+        "CASH": "EQ",
+        "FUTURE": "FUT",
+        "FUTURES": "FUT",
+        "CALL": "CE",
+        "PUT": "PE",
+    }
+    s = aliases[s] if s in aliases else s
+    if s not in {"EQ", "FUT", "CE", "PE"}:
+        raise ValueError(f"unsupported instrument type: {v!r}")
+    return s
 
 
 def _target_price_from_r(*, side: str, entry_price: Decimal, atr_unit: Decimal, r_multiple: Decimal) -> Optional[Decimal]:
@@ -187,120 +202,57 @@ def _ratchet_trade_management_levels(
     tm: Dict[str, Any],
     previous_tm: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Keep adaptive levels monotonic after profit locking/target expansion.
+    """Keep stop, target, and expansion count monotonic."""
+    _validate_trade_management_shape(previous_tm)
+    _validate_trade_management_shape(tm)
+    out = dict(tm)
 
-    For BUY trades, stop and target may only move upward. For SELL trades,
-    stop and target may only move downward. Expansion count is also monotonic.
-    This prevents a later pullback from recomputing lower expansion levels and
-    undoing profit protection.
-    """
-    out = dict(tm or {})
-    prev_stop = d(previous_tm.get("current_stop_price") or 0)
-    new_stop = d(out.get("current_stop_price") or 0)
-    if prev_stop > 0 and new_stop > 0 and not _is_better_stop(side=side, new_stop=new_stop, old_stop=prev_stop):
+    prev_stop = d(_required(previous_tm, "current_stop_price"))
+    new_stop = d(_required(out, "current_stop_price"))
+    if prev_stop > 0 and new_stop > 0 and not _is_better_stop(
+        side=side, new_stop=new_stop, old_stop=prev_stop
+    ):
         out["current_stop_price"] = _json_number(prev_stop)
 
-    prev_target = d(previous_tm.get("current_target_price") or 0)
-    new_target = d(out.get("current_target_price") or 0)
-    if prev_target > 0 and new_target > 0 and not _is_better_target(side=side, new_target=new_target, old_target=prev_target):
+    prev_target = d(_required(previous_tm, "current_target_price"))
+    new_target = d(_required(out, "current_target_price"))
+    if prev_target > 0 and new_target > 0 and not _is_better_target(
+        side=side, new_target=new_target, old_target=prev_target
+    ):
         out["current_target_price"] = _json_number(prev_target)
 
-    try:
-        prev_count = int(previous_tm.get("expansion_count") or 0)
-    except Exception:
-        prev_count = 0
-    try:
-        new_count = int(out.get("expansion_count") or 0)
-    except Exception:
-        new_count = 0
+    prev_count = int(_required(previous_tm, "expansion_count"))
+    new_count = int(_required(out, "expansion_count"))
+    if prev_count < 0 or new_count < 0:
+        raise ValueError("trade_management.expansion_count cannot be negative")
     out["expansion_count"] = max(prev_count, new_count)
     return out
 
 
 def _as_dict_payload(raw: Any) -> Dict[str, Any]:
-    if raw is None:
-        return {}
     if isinstance(raw, dict):
         return dict(raw)
     if hasattr(raw, "model_dump"):
-        try:
-            obj = raw.model_dump(mode="python")
-            return obj if isinstance(obj, dict) else {}
-        except Exception:
-            pass
-    if hasattr(raw, "dict"):
-        try:
-            obj = raw.dict()
-            return obj if isinstance(obj, dict) else {}
-        except Exception:
-            pass
-    return {}
+        obj = raw.model_dump(mode="python")
+        if not isinstance(obj, dict):
+            raise TypeError("model_dump() must return a dict")
+        return obj
+    raise TypeError(f"trade_management must be dict/model, got {type(raw).__name__}")
 
 
-def _get_full_signal_meta(signal: Any) -> Dict[str, Any]:
-    if signal is None:
-        return {}
-    return _as_dict_payload(getattr(signal, "meta_json", None))
-
-
-def _get_signal_meta(signal: Any) -> Dict[str, Any]:
-    meta = _get_full_signal_meta(signal)
-    signal_meta = meta.get("signal")
-    if not isinstance(signal_meta, dict):
-        raise ValueError("signal.meta_json['signal'] is required for trade management")
-    return signal_meta
-
-
-def _active_signal_evidence(signal: Any) -> Dict[str, Any]:
-    meta = _get_full_signal_meta(signal)
-    active = meta.get("active_signal_evidence")
-    if isinstance(active, dict):
-        return active
-    current = meta.get("current_evidence")
-    if isinstance(current, dict) and isinstance(current.get("active_signal_evidence"), dict):
-        return current.get("active_signal_evidence") or {}
-    return {}
-
-
-def _signal_stage(signal: Any, signal_meta: Dict[str, Any]) -> str:
-    raw = signal_meta.get("stage") or getattr(signal, "stage", "")
-    return str(getattr(raw, "value", raw) or "").upper().strip()
-
-
-def _signal_confidence(signal_meta: Dict[str, Any]) -> Optional[Decimal]:
-    val = signal_meta.get("confidence")
-    if val is None:
-        return None
-    out = d(val)
-    return out if out >= 0 else None
-
-
-def _signal_quality(signal_meta: Dict[str, Any]) -> Optional[Decimal]:
-    val = signal_meta.get("quality")
-    if val is None:
-        return None
-    if isinstance(val, str):
-        label = val.upper().strip()
-        if label == "HIGH":
-            return Decimal("80")
-        if label == "MEDIUM":
-            return Decimal("60")
-        if label == "LOW":
-            return Decimal("35")
-    out = d(val)
-    return out if out >= 0 else None
-
-
-def extract_underlying_atr(snapshot_dict: Dict[str, Any]) -> Optional[Decimal]:
-    snap = snapshot_dict or {}
-    candidates = [
-        (((snap.get("indicators") or {}).get("atr") or {}).get("value")),
-    ]
-    for value in candidates:
-        val = d(value)
-        if val > 0:
-            return val
-    return None
+def extract_underlying_atr(snapshot_dict: Dict[str, Any]) -> Decimal:
+    if not isinstance(snapshot_dict, dict):
+        raise TypeError("snapshot payload must be a dict")
+    indicators = _required(snapshot_dict, "indicators", "snapshot")
+    if not isinstance(indicators, dict):
+        raise TypeError("snapshot.indicators must be an object")
+    atr = _required(indicators, "atr", "snapshot.indicators")
+    if not isinstance(atr, dict):
+        raise TypeError("snapshot.indicators.atr must be an object")
+    value = d(_required(atr, "value", "snapshot.indicators.atr"))
+    if value <= 0:
+        raise ValueError("snapshot.indicators.atr.value must be positive")
+    return value
 
 
 def instrument_atr_unit(*, instrument_type: Any, underlying_atr: Optional[Decimal]) -> Optional[Decimal]:
@@ -325,6 +277,51 @@ def initial_stop_r_for_instrument(instrument_type: Any) -> Decimal:
     if _inst(instrument_type) in ("CE", "PE"):
         return _cfg_dec("initial_option_stop_r_multiple")
     return _cfg_dec("initial_stop_r_multiple")
+
+
+def _validate_trade_management_shape(tm: Dict[str, Any]) -> None:
+    required_keys = (
+        "version",
+        "mode",
+        "price_basis",
+        "posture",
+        "entry_price",
+        "planned_entry_price",
+        "atr_at_entry",
+        "instrument_atr",
+        "instrument_atr_factor",
+        "target_r_multiple",
+        "stop_r_multiple",
+        "current_target_price",
+        "current_stop_price",
+        "initial_target_price",
+        "initial_stop_price",
+        "initial_stop_source",
+        "initial_stop_reason",
+        "initial_target_source",
+        "initial_target_reason",
+        "target_expansion_allowed",
+        "trail_mode",
+        "exit_pressure",
+        "profit_protection_applied",
+        "profit_protection_trigger_mfe_r",
+        "profit_protection_stop_profit_r",
+        "group_management_enabled",
+        "group_role",
+        "mae_risk_exit_required",
+        "expansion_count",
+        "last_managed_price",
+        "last_update_reason",
+    )
+    missing = [key for key in required_keys if key not in tm]
+    if missing:
+        raise ValueError(
+            "trade_management missing required keys: " + ", ".join(missing)
+        )
+    if int(tm["version"]) != 2:
+        raise ValueError(f"trade_management.version must be 2, got {tm['version']!r}")
+    if str(tm["price_basis"]).strip().upper() != "INSTRUMENT":
+        raise ValueError("trade_management.price_basis must be INSTRUMENT")
 
 
 @dataclass(frozen=True)
@@ -380,11 +377,8 @@ class TradeMonHelper:
                 stop = override_stop
                 if atr_unit > 0:
                     stop_r = abs(entry - stop) / atr_unit
-            elif stop_source == "SIGNAL_SETUP_LEVEL":
-                raise ValueError("SIGNAL_SETUP_LEVEL_STOP_INVALID_SIDE")
             else:
-                stop_source = "ATR_MULTIPLE"
-                stop_reason = "initial_stop_invalid_side_using_atr_default"
+                raise ValueError("initial stop price is invalid for trade side")
 
         override_target = d(initial_target_price) if initial_target_price is not None else Decimal("0")
         if target_source == "SIGNAL_SETUP_TARGET" and override_target <= 0:
@@ -397,14 +391,11 @@ class TradeMonHelper:
                 target = override_target
                 if atr_unit > 0:
                     target_r = abs(target - entry) / atr_unit
-            elif target_source == "SIGNAL_SETUP_TARGET":
-                raise ValueError("SIGNAL_SETUP_TARGET_INVALID_SIDE")
             else:
-                target_source = "ATR_MULTIPLE"
-                target_reason = "initial_target_invalid_side_using_atr_default"
+                raise ValueError("initial target price is invalid for trade side")
 
         return {
-            "version": 1,
+            "version": 2,
             "mode": str(_cfg("mode")),
             "price_basis": "INSTRUMENT",
             "posture": TradePosture.HOLD.value,
@@ -424,13 +415,20 @@ class TradeMonHelper:
             "initial_target_source": target_source,
             "initial_target_reason": target_reason,
             "signal_setup_label": str(signal_setup_label or "").upper().strip() or None,
-            "target_expansion_allowed": True,
+            "target_expansion_allowed": False,
             "trail_mode": "NORMAL",
             "exit_pressure": "LOW",
-            "active_evidence_action": "CREATE",
-            # ``risk_reduced`` is retained for compatibility with existing
-            # audit/UI payloads. ``profit_protection_applied`` is authoritative.
-            "risk_reduced": False,
+            "management_context": None,
+            "signal_context_available": None,
+            "management_posture": None,
+            "management_reason_code": None,
+            "signal_stage": None,
+            "signal_status": None,
+            "lifecycle_trade_action": None,
+            "directional_alignment": None,
+            "auction_action": None,
+            "auction_state": None,
+            "should_exit_signal": False,
             "profit_protection_applied": False,
             "profit_protection_trigger_mfe_r": _json_number(d(_profit_protection_cfg("trigger_mfe_r"))),
             "profit_protection_stop_profit_r": _json_number(d(_profit_protection_cfg("stop_profit_r"))),
@@ -472,77 +470,92 @@ class TradeMonHelper:
         executed_entry_price: Any,
         asof_time: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        """Re-initialize risk/R state from broker/virtual fill truth.
-
-        The planned price remains an observability field only.  ATR-based
-        target, stop, R, MFE and protection thresholds must use the actual fill.
-        Setup-owned initial levels are preserved only when their explicit source
-        says they are authoritative signal handoff levels.
-        """
+        """Rebase one strict Auction trade-management record to fill truth."""
         old = _as_dict_payload(raw)
+        _validate_trade_management_shape(old)
         requested_planned = d(planned_entry_price)
-        stored_planned = d(old.get("planned_entry_price") or 0)
-        # The relational entry_price may be repriced while a broker LIMIT order
-        # is working.  Preserve the original trade-plan basis already stored in
-        # trade_management; use the caller value only for legacy rows.
-        planned = stored_planned if stored_planned > 0 else requested_planned
+        stored_planned = d(_required(old, "planned_entry_price"))
+        if stored_planned <= 0:
+            raise ValueError("trade_management.planned_entry_price must be positive")
+        if requested_planned > 0 and requested_planned != stored_planned:
+            raise ValueError(
+                "planned entry mismatch between trade row and trade_management"
+            )
         executed = d(executed_entry_price)
         if executed <= 0:
             raise ValueError("TRADE_MANAGEMENT_REBASE_REQUIRES_EXECUTED_ENTRY_PRICE")
 
-        atr0 = d(old.get("atr_at_entry") or 0)
-        stop_source = str(old.get("initial_stop_source") or "ATR_MULTIPLE").upper().strip()
-        target_source = str(old.get("initial_target_source") or "ATR_MULTIPLE").upper().strip()
+        atr0 = d(_required(old, "atr_at_entry"))
+        if atr0 <= 0:
+            raise ValueError("trade_management.atr_at_entry must be positive")
+        stop_source = str(_required(old, "initial_stop_source")).upper().strip()
+        target_source = str(_required(old, "initial_target_source")).upper().strip()
 
-        setup_stop = old.get("initial_stop_price") if stop_source == "SIGNAL_SETUP_LEVEL" else None
-        setup_target = old.get("initial_target_price") if target_source == "SIGNAL_SETUP_TARGET" else None
+        setup_stop = (
+            _required(old, "initial_stop_price")
+            if stop_source == "SIGNAL_SETUP_LEVEL"
+            else None
+        )
+        setup_target = (
+            _required(old, "initial_target_price")
+            if target_source == "SIGNAL_SETUP_TARGET"
+            else None
+        )
 
         tm = TradeMonHelper.initialize_trade_management(
             side=side,
             instrument_type=instrument_type,
             entry_price=executed,
-            underlying_atr=atr0 if atr0 > 0 else None,
+            underlying_atr=atr0,
             asof_time=asof_time,
             initial_stop_price=setup_stop,
             initial_stop_source=stop_source,
-            initial_stop_reason=old.get("initial_stop_reason"),
+            initial_stop_reason=_required(old, "initial_stop_reason"),
             initial_target_price=setup_target,
             initial_target_source=target_source,
-            initial_target_reason=old.get("initial_target_reason"),
-            signal_setup_label=old.get("signal_setup_label"),
+            initial_target_reason=_required(old, "initial_target_reason"),
+            signal_setup_label=_optional(old, "signal_setup_label"),
         )
 
-        # Preserve only current evidence controls that may have been attached
-        # between trade creation and fill. Runtime P&L/R/expansion state restarts
-        # from the actual execution point.
         for key in (
             "target_expansion_allowed",
             "trail_mode",
             "exit_pressure",
-            "active_evidence_action",
-            "active_evidence_reason_code",
-            "last_signal_stage",
-            "last_signal_confidence",
-            "last_signal_quality",
+            "management_context",
+            "signal_context_available",
+            "management_posture",
+            "management_reason_code",
+            "signal_stage",
+            "signal_status",
+            "lifecycle_trade_action",
+            "directional_alignment",
+            "auction_action",
+            "auction_state",
+            "should_exit_signal",
         ):
             if key in old:
-                tm[key] = old.get(key)
+                tm[key] = old[key]
 
-        adverse_slippage = Decimal("0")
-        if planned > 0:
-            adverse_slippage = executed - planned if _side(side) == "BUY" else planned - executed
-        atr_unit = d(tm.get("instrument_atr") or 0)
+        adverse_slippage = (
+            executed - stored_planned
+            if _side(side) == "BUY"
+            else stored_planned - executed
+        )
+        atr_unit = d(_required(tm, "instrument_atr"))
+        if atr_unit <= 0:
+            raise ValueError("trade_management.instrument_atr must be positive")
 
         tm.update({
-            "planned_entry_price": _json_number(planned) if planned > 0 else None,
+            "planned_entry_price": _json_number(stored_planned),
             "entry_price": _json_number(executed),
             "entry_slippage": _json_number(adverse_slippage),
-            "entry_slippage_r": _json_number(adverse_slippage / atr_unit) if atr_unit > 0 else None,
-            "entry_rebased_at": asof_time.isoformat() if hasattr(asof_time, "isoformat") else None,
+            "entry_slippage_r": _json_number(adverse_slippage / atr_unit),
+            "entry_rebased_at": asof_time.isoformat() if asof_time is not None else None,
             "entry_rebase_reason": "EXECUTED_ENTRY_PRICE",
             "last_managed_price": _json_number(executed),
             "last_update_reason": "ENTRY_REBASED_TO_EXECUTED_FILL",
         })
+        _validate_trade_management_shape(tm)
         return tm
 
     @staticmethod
@@ -555,105 +568,55 @@ class TradeMonHelper:
         underlying_atr: Optional[Decimal],
         asof_time: Optional[datetime] = None,
     ) -> Dict[str, Any]:
+        """Validate current trade-management state; never migrate or rebuild it."""
         tm = _as_dict_payload(raw)
-        if not tm or str(tm.get("mode") or "") != str(_cfg("mode")):
-            return TradeMonHelper.initialize_trade_management(
-                side=side,
-                instrument_type=instrument_type,
-                entry_price=entry_price,
-                underlying_atr=underlying_atr,
-                asof_time=asof_time,
+        _validate_trade_management_shape(tm)
+        if str(_required(tm, "mode")).strip() != str(_cfg("mode")):
+            raise ValueError(
+                f"unsupported trade_management.mode={tm['mode']!r}; "
+                f"expected {_cfg('mode')!r}"
             )
 
-        side_s = _side(side)
-        entry = d(tm.get("entry_price") or entry_price)
-        atr0 = d(tm.get("atr_at_entry") or underlying_atr or 0)
-        atr_unit = d(tm.get("instrument_atr") or 0)
-        if atr_unit <= 0:
-            unit = instrument_atr_unit(instrument_type=instrument_type, underlying_atr=atr0)
-            atr_unit = d(unit or 0)
+        requested_entry = d(entry_price)
+        stored_entry = d(_required(tm, "entry_price"))
+        if requested_entry <= 0 or stored_entry <= 0:
+            raise ValueError("entry prices must be positive")
+        if requested_entry != stored_entry:
+            raise ValueError(
+                f"trade entry/trade_management entry mismatch: "
+                f"{requested_entry} != {stored_entry}"
+            )
 
-        target_r = d(tm.get("target_r_multiple") or _cfg_dec("initial_target_r_multiple"))
-        stop_r = abs(d(tm.get("stop_r_multiple") or initial_stop_r_for_instrument(instrument_type)))
+        # ATR is frozen at trade creation. Current snapshots may legitimately
+        # carry a different ATR and must not rewrite or invalidate that basis.
+        current_snapshot_atr = d(underlying_atr)
+        stored_atr = d(_required(tm, "atr_at_entry"))
+        if current_snapshot_atr <= 0:
+            raise ValueError("current snapshot ATR must be positive")
+        if stored_atr <= 0:
+            raise ValueError("trade_management.atr_at_entry must be positive")
 
-        if tm.get("current_target_price") is None and atr_unit > 0:
-            tm["current_target_price"] = _json_number(_target_price_from_r(side=side_s, entry_price=entry, atr_unit=atr_unit, r_multiple=target_r))
-        if tm.get("current_stop_price") is None and atr_unit > 0:
-            tm["current_stop_price"] = _json_number(_stop_price_from_r(side=side_s, entry_price=entry, atr_unit=atr_unit, r_multiple=stop_r))
+        instrument_atr = d(_required(tm, "instrument_atr"))
+        if instrument_atr <= 0:
+            raise ValueError("trade_management.instrument_atr must be positive")
+        target = d(_required(tm, "current_target_price"))
+        stop = d(_required(tm, "current_stop_price"))
+        if target <= 0 or stop <= 0:
+            raise ValueError("current target and stop must be positive")
 
-        tm.setdefault("version", 1)
-        tm.setdefault("price_basis", "INSTRUMENT")
-        tm.setdefault("posture", TradePosture.HOLD.value)
-        tm["entry_price"] = _json_number(entry)
-        tm["atr_at_entry"] = _json_number(atr0) if atr0 > 0 else None
-        tm["instrument_atr"] = _json_number(atr_unit) if atr_unit > 0 else None
-        tm["target_r_multiple"] = _json_number(target_r)
-        tm["stop_r_multiple"] = _json_number(stop_r)
-        tm.setdefault("initial_stop_price", tm.get("current_stop_price"))
-        tm.setdefault("initial_target_price", tm.get("current_target_price"))
-        tm.setdefault("initial_stop_source", "ATR_MULTIPLE")
-        tm.setdefault("initial_stop_reason", "normalized_existing_trade_management")
-        tm.setdefault("initial_target_source", "ATR_MULTIPLE")
-        tm.setdefault("initial_target_reason", "normalized_existing_trade_management")
-        tm.setdefault("signal_setup_label", None)
-        tm.setdefault("target_expansion_allowed", True)
-        tm.setdefault("trail_mode", "NORMAL")
-        tm.setdefault("exit_pressure", "LOW")
-        tm.setdefault("active_evidence_action", None)
-        protection_applied = bool(
-            tm.get("profit_protection_applied", tm.get("risk_reduced", False))
+        normalized = dict(tm)
+        normalized["mae_risk_exit_required"] = False
+        normalized["mae_risk_exit_observed_price"] = None
+        normalized["last_updated_at"] = (
+            asof_time.isoformat() if asof_time is not None else _optional(tm, "last_updated_at")
         )
-        tm["profit_protection_applied"] = protection_applied
-        tm["risk_reduced"] = protection_applied
-        tm.setdefault(
-            "profit_protection_trigger_mfe_r",
-            _json_number(d(_profit_protection_cfg("trigger_mfe_r"))),
-        )
-        tm.setdefault(
-            "profit_protection_stop_profit_r",
-            _json_number(d(_profit_protection_cfg("stop_profit_r"))),
-        )
-        current_stop = d(tm.get("current_stop_price") or 0)
-        current_stop_profit_r = _profit_r_from_price(
-            side=side_s,
-            entry_price=entry,
-            price=current_stop,
-            atr_unit=atr_unit,
-        )
-        if current_stop_profit_r is not None:
-            tm["current_stop_profit_r"] = _json_number(current_stop_profit_r)
-        tm.setdefault("group_management_enabled", bool(_group_cfg("enabled")))
-        tm.setdefault("group_role", "STANDALONE")
-        tm.setdefault("group_reference_trade_id", None)
-        tm.setdefault("group_reference_instrument", None)
-        tm.setdefault("group_reference_symbol", None)
-        tm.setdefault("group_reference_entry_price", None)
-        tm.setdefault("group_reference_atr", None)
-        tm.setdefault("group_reference_current_price", None)
-        tm.setdefault("group_mfe_r", tm.get("mfe_profit_r"))
-        tm.setdefault("group_mae_r", None)
-        tm.setdefault("last_processed_group_mfe_bucket_r", None)
-        tm.setdefault("last_processed_group_mae_bucket_r", None)
-        tm.setdefault("group_stop_profit_r", tm.get("current_stop_profit_r"))
-        tm.setdefault("group_target_r", tm.get("target_r_multiple"))
-        tm.setdefault("group_projected_stop_price", tm.get("current_stop_price"))
-        tm.setdefault("group_projected_target_price", tm.get("current_target_price"))
-        tm.setdefault("group_update_source", None)
-        tm.setdefault("group_update_reason", None)
-        tm["mae_risk_exit_required"] = False
-        tm["mae_risk_exit_observed_price"] = None
-        try:
-            tm["expansion_count"] = int(tm.get("expansion_count") or 0)
-        except Exception:
-            tm["expansion_count"] = 0
-        tm.setdefault("last_target_hit_price", None)
-        return tm
+        return normalized
 
     @staticmethod
     def evaluate(
         *,
         trade: Any,
-        signal: Any,
+        signal_context: Optional[AuctionTradeSignalContext],
         side: Any,
         instrument_type: Any,
         entry_price: Any,
@@ -668,356 +631,400 @@ class TradeMonHelper:
         group_reference_instrument: Optional[str] = None,
         group_reference_symbol: Optional[str] = None,
     ) -> TradeManagementDecision:
+        del trade  # state is carried explicitly in the arguments and strict contract
         side_s = _side(side)
         last = d(last_price)
-        tm = dict(trade_management or {})
+        tm = dict(trade_management)
+        _validate_trade_management_shape(tm)
         previous_tm = dict(tm)
 
-        entry = d(tm.get("entry_price") or entry_price)
-        atr_unit = d(tm.get("instrument_atr") or 0)
-        target_r = d(tm.get("target_r_multiple") or _cfg_dec("initial_target_r_multiple"))
-        stop_r = abs(d(tm.get("stop_r_multiple") or initial_stop_r_for_instrument(instrument_type)))
+        entry = d(_required(tm, "entry_price"))
+        requested_entry = d(entry_price)
+        if entry <= 0 or requested_entry <= 0 or entry != requested_entry:
+            raise ValueError(
+                f"trade-management entry mismatch: stored={entry} requested={requested_entry}"
+            )
+        atr_unit = d(_required(tm, "instrument_atr"))
+        target_r = d(_required(tm, "target_r_multiple"))
+        stop_r = abs(d(_required(tm, "stop_r_multiple")))
+        if atr_unit <= 0 or target_r <= 0 or stop_r <= 0 or last <= 0:
+            raise ValueError("entry, last price, ATR and R multiples must be positive")
 
-        normalized_group_role = str(group_role or "STANDALONE").upper().strip()
+        normalized_group_role = str(group_role).upper().strip()
+        if normalized_group_role not in {"STANDALONE", "REFERENCE", "FOLLOWER"}:
+            raise ValueError(f"unsupported group role: {normalized_group_role}")
         group_reference_enabled = bool(_group_cfg("enabled")) and normalized_group_role == "REFERENCE"
         tm["group_management_enabled"] = bool(_group_cfg("enabled"))
         tm["group_role"] = normalized_group_role
         tm["group_reference_trade_id"] = group_reference_trade_id
-        tm["group_reference_instrument"] = str(group_reference_instrument or "").upper().strip() or None
-        tm["group_reference_symbol"] = str(group_reference_symbol or "").strip() or None
-        tm["group_reference_entry_price"] = _json_number(entry) if group_reference_enabled else tm.get("group_reference_entry_price")
-        tm["group_reference_atr"] = _json_number(atr_unit) if group_reference_enabled else tm.get("group_reference_atr")
-        tm["group_reference_current_price"] = _json_number(last) if group_reference_enabled else tm.get("group_reference_current_price")
+        tm["group_reference_instrument"] = (
+            str(group_reference_instrument).upper().strip()
+            if group_reference_instrument is not None
+            else None
+        )
+        tm["group_reference_symbol"] = (
+            str(group_reference_symbol).strip()
+            if group_reference_symbol is not None
+            else None
+        )
+        if group_reference_enabled:
+            tm["group_reference_entry_price"] = _json_number(entry)
+            tm["group_reference_atr"] = _json_number(atr_unit)
+            tm["group_reference_current_price"] = _json_number(last)
         tm["mae_risk_exit_required"] = False
         tm["mae_risk_exit_observed_price"] = None
 
-        # Manual orders deliberately have no source Signal row.  Treat them as
-        # explicit price-only standalone trades rather than fabricating empty
-        # signal quality/confidence values.  Missing context for a non-manual
-        # trade remains fail-loud through _get_signal_meta().
         manual_context = bool(manual_trade_context)
+        if manual_context and signal_context is not None:
+            raise ValueError("manual trade must not receive a signal context")
+        if not manual_context and signal_context is None:
+            raise ValueError("signal-managed trade requires Auction signal context")
+
         if manual_context:
-            signal_meta: Dict[str, Any] = {}
-            active_ev: Dict[str, Any] = {}
+            stage = "MANUAL"
+            management_posture = "MANUAL_PRICE_ONLY"
+            management_reason = "MANUAL_PRICE_ONLY"
             tm["management_context"] = "MANUAL_PRICE_ONLY"
             tm["signal_context_available"] = False
-            # Manual trades can hit their stored target, but may not extend it
-            # without an explicit signal lifecycle authorising continuation.
+            tm["management_posture"] = None
+            tm["management_reason_code"] = None
+            tm["signal_stage"] = None
+            tm["signal_status"] = None
+            tm["lifecycle_trade_action"] = None
+            tm["directional_alignment"] = None
+            tm["auction_action"] = None
+            tm["auction_state"] = None
+            tm["should_exit_signal"] = False
             tm["target_expansion_allowed"] = False
+            tm["trail_mode"] = "NORMAL"
+            tm["exit_pressure"] = "LOW"
+            hard_exit = False
+            defensive = False
+            strengthening = False
         else:
-            signal_meta = _get_signal_meta(signal)
-            active_ev = _active_signal_evidence(signal)
-            tm["management_context"] = "SIGNAL_LIFECYCLE"
+            assert signal_context is not None
+            stage = signal_context.stage
+            management_posture = signal_context.management_posture
+            management_reason = signal_context.management_reason_code
+            tm["management_context"] = "AUCTION_SIGNAL_LIFECYCLE"
             tm["signal_context_available"] = True
+            tm["management_posture"] = management_posture
+            tm["management_reason_code"] = management_reason
+            tm["signal_stage"] = stage
+            tm["signal_status"] = signal_context.status
+            tm["lifecycle_trade_action"] = signal_context.lifecycle_trade_action
+            tm["directional_alignment"] = signal_context.directional_alignment
+            tm["auction_action"] = signal_context.auction_action
+            tm["auction_state"] = signal_context.auction_state
+            tm["should_exit_signal"] = signal_context.should_exit_signal
+            tm["target_expansion_allowed"] = signal_context.target_expansion_allowed
+            tm["trail_mode"] = signal_context.trail_mode
+            tm["exit_pressure"] = signal_context.exit_pressure
+            hard_exit = signal_context.requires_exit
+            defensive = signal_context.is_defensive
+            strengthening = signal_context.is_strengthening
 
-        active_action = str(active_ev.get("active_evidence_action") or active_ev.get("evidence_action") or "").upper().strip()
-        active_reason_code = str(active_ev.get("reason_code") or "").upper().strip()
-        active_trail_mode = str(active_ev.get("trail_mode") or "").upper().strip()
-        active_exit_pressure = str(active_ev.get("exit_pressure") or "").upper().strip()
-        active_target_expansion_allowed = active_ev.get("target_expansion_allowed")
-        active_should_exit = bool(active_ev.get("should_exit_signal")) or active_action == "EXIT"
-        if active_action:
-            tm["active_evidence_action"] = active_action
-        if active_reason_code:
-            tm["active_evidence_reason_code"] = active_reason_code
-        if active_trail_mode:
-            tm["trail_mode"] = active_trail_mode
-        if active_exit_pressure:
-            tm["exit_pressure"] = active_exit_pressure
-        if active_target_expansion_allowed is not None:
-            tm["target_expansion_allowed"] = bool(active_target_expansion_allowed)
-        stage = "MANUAL" if manual_context else _signal_stage(signal, signal_meta)
-        confidence = None if manual_context else _signal_confidence(signal_meta)
-        quality = None if manual_context else _signal_quality(signal_meta)
-        prev_conf = d(tm.get("last_signal_confidence") or confidence or 0)
-        conf = d(confidence or 0)
-        qual = d(quality or 0)
+        profit_r = _profit_r(
+            side=side_s,
+            entry_price=entry,
+            last_price=last,
+            atr_unit=atr_unit,
+        )
+        favorable = d(max_favorable_price if max_favorable_price is not None else last)
+        adverse = d(max_adverse_price if max_adverse_price is not None else last)
+        mfe_profit_r = max(
+            Decimal("0"),
+            _profit_r(
+                side=side_s,
+                entry_price=entry,
+                last_price=favorable,
+                atr_unit=atr_unit,
+            ),
+        )
+        adverse_profit_r = _profit_r(
+            side=side_s,
+            entry_price=entry,
+            last_price=adverse,
+            atr_unit=atr_unit,
+        )
+        mae_r = max(Decimal("0"), -adverse_profit_r)
 
-        posture = TradePosture.HOLD.value
-        reason = "HOLD_MANUAL_PRICE_ONLY" if manual_context else "HOLD_NO_MATERIAL_CHANGE"
+        protection_reason: Optional[str] = None
+        adverse_reason: Optional[str] = None
+        protection_enabled = bool(_profit_protection_cfg("enabled"))
+        protection_trigger_r = max(
+            d(_profit_protection_cfg("trigger_mfe_r")),
+            Decimal("0"),
+        )
+        protection_stop_profit_r = d(_profit_protection_cfg("stop_profit_r"))
+        protection_applied = bool(_required(tm, "profit_protection_applied"))
 
-        if atr_unit <= 0 or entry <= 0 or last <= 0:
-            posture = TradePosture.HOLD.value
-            reason = "HOLD_MISSING_ATR_OR_PRICE"
-        else:
-            profit_r = _profit_r(side=side_s, entry_price=entry, last_price=last, atr_unit=atr_unit)
-            favorable = d(max_favorable_price if max_favorable_price is not None else last)
-            adverse = d(max_adverse_price if max_adverse_price is not None else last)
-            mfe_profit_r = max(Decimal("0"), _profit_r(side=side_s, entry_price=entry, last_price=favorable, atr_unit=atr_unit))
-            adverse_profit_r = _profit_r(side=side_s, entry_price=entry, last_price=adverse, atr_unit=atr_unit)
-            mae_r = max(Decimal("0"), -adverse_profit_r)
+        if group_reference_enabled:
+            step_r = max(_group_cfg_dec("step_r"), Decimal("0"))
+            tm["group_mfe_r"] = _json_number(mfe_profit_r)
+            tm["group_mae_r"] = _json_number(mae_r)
+            tm["group_reference_current_price"] = _json_number(last)
+            tm["group_target_r"] = _json_number(target_r)
 
-            hard_exit_stage = (
-                not manual_context
-                and (stage in {"FORCE_EXIT", "EXIT_BIAS", "REVERSED", "INVALIDATED", "CLOSED"} or active_should_exit)
+            current_stop_price = d(_required(tm, "current_stop_price"))
+            current_stop_profit_r = _profit_r_from_price(
+                side=side_s,
+                entry_price=entry,
+                price=current_stop_price,
+                atr_unit=atr_unit,
             )
-            protect_stage = (
-                not manual_context
-                and (stage in {"WEAKENING", "TRANSITION", "PROTECT"} or active_action == "CAUTION")
-            )
-            continuation_stage = (
-                not manual_context
-                and stage in {"ACTIVE", "EXPAND"}
-                and active_action not in {"CAUTION", "EXIT"}
-            )
-            expansion_allowed = False if manual_context else bool(tm.get("target_expansion_allowed", True))
-            if active_action == "STRENGTHEN":
-                expansion_allowed = True
-                tm["target_expansion_allowed"] = True
-            if active_action == "CAUTION":
-                expansion_allowed = False
-                tm["target_expansion_allowed"] = False
+            best_stop_profit_r = current_stop_profit_r
+            best_stop_source: Optional[str] = None
+            best_stop_reason: Optional[str] = None
 
-            # Price is the trigger. Signal evidence is permission.  The FUT/EQ
-            # reference owns the group MFE/MAE ratchets; standalone trades retain
-            # the legacy first-step behavior.
-            protection_reason = None
-            adverse_reason = None
-            protection_enabled = bool(_profit_protection_cfg("enabled"))
-            protection_trigger_r = max(d(_profit_protection_cfg("trigger_mfe_r")), Decimal("0"))
-            protection_stop_profit_r = d(_profit_protection_cfg("stop_profit_r"))
-            protection_applied = bool(
-                tm.get("profit_protection_applied", tm.get("risk_reduced", False))
-            )
-            confidence_weakened = (
-                prev_conf > 0 and (prev_conf - conf) >= _cfg_dec("protect_confidence_drop")
-            )
-            mae_weakening_confirmed = (not manual_context) and (protect_stage or confidence_weakened)
-            adverse_confirmed = (
-                not manual_context
-                and (mae_weakening_confirmed or qual <= _cfg_dec("protect_quality_max"))
-            )
+            if protection_enabled and mfe_profit_r >= protection_trigger_r:
+                completed = Decimal("0")
+                if bool(_group_cfg("mfe_ratchet_enabled")) and step_r > 0:
+                    completed = _floor_bucket(
+                        mfe_profit_r - protection_trigger_r,
+                        step_r,
+                    )
+                mfe_stop_profit_r = protection_stop_profit_r + completed
+                if (
+                    best_stop_profit_r is None
+                    or mfe_stop_profit_r > best_stop_profit_r
+                ):
+                    best_stop_profit_r = mfe_stop_profit_r
+                    best_stop_source = "GROUP_MFE_RATCHET"
+                    best_stop_reason = (
+                        f"GROUP_MFE_RATCHET_MFE_{mfe_profit_r:.2f}R_"
+                        f"STOP_{mfe_stop_profit_r:+.2f}R"
+                    )
+                tm["last_processed_group_mfe_bucket_r"] = _json_number(
+                    protection_trigger_r + completed
+                )
+                tm["profit_protection_applied"] = True
 
-            if group_reference_enabled:
-                step_r = max(_group_cfg_dec("step_r"), Decimal("0"))
-                tm["group_mfe_r"] = _json_number(mfe_profit_r)
-                tm["group_mae_r"] = _json_number(mae_r)
-                tm["group_reference_current_price"] = _json_number(last)
-                tm["group_target_r"] = _json_number(target_r)
+            mae_requires_defensive = bool(_group_cfg("mae_requires_weakening"))
+            unproven_mfe_max = d(_group_cfg("unproven_mfe_max_r"))
+            allow_mae_ratchet = (
+                not mae_requires_defensive or defensive
+            ) and mfe_profit_r <= unproven_mfe_max
+            if allow_mae_ratchet:
+                chosen_step = None
+                for step in _group_cfg("mae_steps"):
+                    if mae_r >= d(step.mae_r):
+                        if chosen_step is None or d(step.mae_r) > d(chosen_step.mae_r):
+                            chosen_step = step
+                if chosen_step is not None:
+                    mae_stop_profit_r = d(chosen_step.stop_profit_r)
+                    if (
+                        best_stop_profit_r is None
+                        or mae_stop_profit_r > best_stop_profit_r
+                    ):
+                        best_stop_profit_r = mae_stop_profit_r
+                        best_stop_source = "GROUP_MAE_RATCHET"
+                        best_stop_reason = (
+                            f"GROUP_MAE_RATCHET_MAE_{mae_r:.2f}R_"
+                            f"STOP_{mae_stop_profit_r:+.2f}R_"
+                            f"POSTURE_{management_posture}"
+                        )
+                    tm["last_processed_group_mae_bucket_r"] = _json_number(
+                        d(chosen_step.mae_r)
+                    )
 
-                current_stop_price = d(tm.get("current_stop_price") or 0)
-                current_stop_profit_r = _profit_r_from_price(
+            if best_stop_profit_r is not None and best_stop_source is not None:
+                candidate_stop = _stop_price_from_profit_r(
                     side=side_s,
                     entry_price=entry,
-                    price=current_stop_price,
                     atr_unit=atr_unit,
+                    stop_profit_r=best_stop_profit_r,
                 )
-                best_stop_profit_r = current_stop_profit_r
-                best_stop_source = None
-                best_stop_reason = None
-
-                # First proof remains +1R -> -0.5R.  Every additional 0.5R
-                # reference MFE tightens the stop by another 0.5R.
-                if protection_enabled and mfe_profit_r >= protection_trigger_r:
-                    mfe_bucket = protection_trigger_r
-                    mfe_stop_profit_r = protection_stop_profit_r
-                    if bool(_group_cfg("mfe_ratchet_enabled")) and step_r > 0:
-                        completed = _floor_bucket(mfe_profit_r - protection_trigger_r, step_r)
-                        mfe_bucket = protection_trigger_r + completed
-                        mfe_stop_profit_r = protection_stop_profit_r + completed
-                    tm["last_processed_group_mfe_bucket_r"] = _json_number(mfe_bucket)
-                    if best_stop_profit_r is None or mfe_stop_profit_r > best_stop_profit_r:
-                        best_stop_profit_r = mfe_stop_profit_r
-                        best_stop_source = "GROUP_MFE_RATCHET"
-                        best_stop_reason = (
-                            f"GROUP_MFE_{mfe_profit_r:.2f}R_BUCKET_{mfe_bucket:.2f}R"
-                            f"_STOP_{mfe_stop_profit_r:+.2f}R"
-                        )
-                    tm["profit_protection_applied"] = True
-                    tm["risk_reduced"] = True
-
-                # MAE only tightens a trade that has not demonstrated +0.5R and
-                # whose signal evidence is weakening.  Select the highest reached
-                # configured bucket; do not advance from repeated service polls.
-                unproven_limit = max(_group_cfg_dec("unproven_mfe_max_r"), Decimal("0"))
-                mae_permission = (
-                    mfe_profit_r < unproven_limit
-                    and (mae_weakening_confirmed or not bool(_group_cfg("mae_requires_weakening")))
-                )
-                if mae_permission:
-                    reached_mae_bucket = Decimal("0")
-                    mae_stop_profit_r = None
-                    for raw_step in list(_group_cfg("mae_steps") or []):
-                        threshold = d(getattr(raw_step, "mae_r", None))
-                        signed_stop = d(getattr(raw_step, "stop_profit_r", None))
-                        if threshold > 0 and mae_r >= threshold and threshold >= reached_mae_bucket:
-                            reached_mae_bucket = threshold
-                            mae_stop_profit_r = signed_stop
-                    if reached_mae_bucket > 0 and mae_stop_profit_r is not None:
-                        tm["last_processed_group_mae_bucket_r"] = _json_number(reached_mae_bucket)
-                        if best_stop_profit_r is None or mae_stop_profit_r > best_stop_profit_r:
-                            best_stop_profit_r = mae_stop_profit_r
-                            best_stop_source = "GROUP_MAE_RATCHET"
-                            best_stop_reason = (
-                                f"GROUP_MAE_{mae_r:.2f}R_BUCKET_{reached_mae_bucket:.2f}R"
-                                f"_MFE_{mfe_profit_r:.2f}R_STOP_{mae_stop_profit_r:+.2f}R"
-                                f"_STAGE_{stage}_CONF_{conf}_QUALITY_{qual}"
+                old_stop = d(_required(tm, "current_stop_price"))
+                if _is_better_stop(
+                    side=side_s,
+                    new_stop=candidate_stop,
+                    old_stop=old_stop,
+                ):
+                    tm["current_stop_price"] = _json_number(candidate_stop)
+                    tm["current_stop_profit_r"] = _json_number(best_stop_profit_r)
+                    tm["stop_r_multiple"] = _json_number(abs(best_stop_profit_r))
+                    tm["group_stop_profit_r"] = _json_number(best_stop_profit_r)
+                    tm["group_update_source"] = best_stop_source
+                    tm["group_update_reason"] = best_stop_reason
+                    stop_r = abs(best_stop_profit_r)
+                    if best_stop_source == "GROUP_MFE_RATCHET":
+                        protection_reason = best_stop_reason
+                    else:
+                        adverse_reason = best_stop_reason
+                        if _stop_is_breached(
+                            side=side_s,
+                            last_price=last,
+                            stop_price=candidate_stop,
+                        ):
+                            tm["mae_risk_exit_required"] = True
+                            tm["mae_risk_exit_observed_price"] = _json_number(last)
+                            adverse_reason = (
+                                f"{adverse_reason};"
+                                "EXIT_AT_OBSERVED_PRICE_NEW_STOP_ALREADY_BREACHED"
                             )
-
-                if best_stop_profit_r is not None and best_stop_source:
-                    candidate_stop = _stop_price_from_profit_r(
-                        side=side_s,
-                        entry_price=entry,
-                        atr_unit=atr_unit,
-                        stop_profit_r=best_stop_profit_r,
-                    )
-                    old_stop = d(tm.get("current_stop_price") or 0)
-                    if _is_better_stop(side=side_s, new_stop=candidate_stop, old_stop=old_stop):
-                        tm["current_stop_price"] = _json_number(candidate_stop)
-                        tm["current_stop_profit_r"] = _json_number(best_stop_profit_r)
-                        tm["stop_r_multiple"] = _json_number(abs(best_stop_profit_r))
-                        tm["group_stop_profit_r"] = _json_number(best_stop_profit_r)
-                        tm["group_update_source"] = best_stop_source
-                        tm["group_update_reason"] = best_stop_reason
-                        stop_r = abs(best_stop_profit_r)
-                        if best_stop_source == "GROUP_MFE_RATCHET":
-                            protection_reason = best_stop_reason
-                        else:
-                            adverse_reason = best_stop_reason
-                            if _stop_is_breached(side=side_s, last_price=last, stop_price=candidate_stop):
-                                # The newly calculated MAE stop did not exist before
-                                # this observation, so replay/live must exit at the
-                                # observed market price rather than claim a trigger fill.
-                                tm["mae_risk_exit_required"] = True
-                                tm["mae_risk_exit_observed_price"] = _json_number(last)
-                                adverse_reason = f"{adverse_reason};EXIT_AT_OBSERVED_PRICE_NEW_STOP_ALREADY_BREACHED"
-                    elif best_stop_source == "GROUP_MFE_RATCHET":
-                        protection_reason = f"{best_stop_reason};ALREADY_SATISFIED"
-                    else:
-                        adverse_reason = f"{best_stop_reason};ALREADY_SATISFIED"
-
-            else:
-                # Standalone compatibility path. Group-managed followers are not
-                # evaluated here; the monitor projects reference levels to them.
-                if protection_enabled and mfe_profit_r >= protection_trigger_r and not protection_applied:
-                    new_stop = _stop_price_from_profit_r(
-                        side=side_s,
-                        entry_price=entry,
-                        atr_unit=atr_unit,
-                        stop_profit_r=protection_stop_profit_r,
-                    )
-                    old_stop = d(tm.get("current_stop_price") or 0)
-                    if _is_better_stop(side=side_s, new_stop=new_stop, old_stop=old_stop):
-                        tm["current_stop_price"] = _json_number(new_stop)
-                        tm["current_stop_profit_r"] = _json_number(protection_stop_profit_r)
-                        tm["stop_r_multiple"] = _json_number(abs(protection_stop_profit_r))
-                        stop_r = abs(protection_stop_profit_r)
-                        protection_reason = (
-                            f"PROFIT_PROTECTION_AFTER_MFE_{mfe_profit_r:.2f}R"
-                            f"_STOP_{protection_stop_profit_r:+.2f}R_CURRENT_{profit_r:.2f}R"
-                        )
-                    else:
-                        protection_reason = (
-                            f"PROFIT_PROTECTION_ALREADY_SATISFIED_AFTER_MFE_{mfe_profit_r:.2f}R"
-                        )
-                    tm["profit_protection_applied"] = True
-                    tm["risk_reduced"] = True
-
-                adverse_threshold = -abs(_cfg_dec("adverse_tighten_profit_r"))
-                adverse_stop_r = _cfg_dec("adverse_tighten_stop_r_multiple")
-                if profit_r <= adverse_threshold and adverse_confirmed and adverse_stop_r > 0 and adverse_stop_r < stop_r:
-                    new_stop = _stop_price_from_r(
-                        side=side_s,
-                        entry_price=entry,
-                        atr_unit=atr_unit,
-                        r_multiple=adverse_stop_r,
-                    )
-                    old_stop = d(tm.get("current_stop_price") or 0)
-                    if _is_better_stop(side=side_s, new_stop=new_stop, old_stop=old_stop):
-                        stop_r = adverse_stop_r
-                        tm["stop_r_multiple"] = _json_number(stop_r)
-                        tm["current_stop_price"] = _json_number(new_stop)
-                        adverse_reason = f"ADVERSE_TIGHTEN_{profit_r:.2f}R_STAGE_{stage}_CONF_{conf}_QUALITY_{qual}"
-
-            if hard_exit_stage:
-                posture = TradePosture.EXIT.value
-                reason = f"EXIT_ACTIVE_EVIDENCE_{active_reason_code or active_action}" if active_should_exit else f"EXIT_STAGE_{stage}"
-            elif expansion_allowed and continuation_stage and conf >= _cfg_dec("expand_confidence_min") and qual >= _cfg_dec("expand_quality_min") and profit_r >= _cfg_dec("expand_ready_profit_r"):
-                # EXPAND is permission only. Actual target/stop changes happen
-                # only when price hits the current target.
-                posture = TradePosture.EXPAND.value
-                reason = f"EXPAND_READY_{stage}_CONF_{conf}_QUALITY_{qual}_PROFIT_R_{profit_r:.2f}"
-                if protection_reason:
-                    reason = f"{reason};{protection_reason}"
-            elif adverse_reason:
-                posture = TradePosture.PROTECT.value
-                reason = adverse_reason
-            elif (
-                not manual_context
-                and (
-                    protect_stage
-                    or qual <= _cfg_dec("protect_quality_max")
-                    or (prev_conf > 0 and (prev_conf - conf) >= _cfg_dec("protect_confidence_drop"))
-                )
-            ):
-                if group_reference_enabled:
-                    # Group MFE/MAE ratchets above are the only reference-stop
-                    # writers. Signal weakening changes posture/permission but
-                    # cannot run the older adverse-space profit-stop formula.
-                    reason = (
-                        f"PROTECT_GROUP_REFERENCE_PROFIT_STAGE_{stage}_CONF_{conf}_QUALITY_{qual}"
-                        if profit_r > 0
-                        else f"PROTECT_GROUP_REFERENCE_WEAKENING_STAGE_{stage}_CONF_{conf}_QUALITY_{qual}"
-                    )
-                elif profit_r > 0:
-                    desired_stop_r = max(Decimal("0"), profit_r - _cfg_dec("protect_buffer_r"))
-                    stepped_stop_r = stop_r + _cfg_dec("stop_tighten_r_step")
-                    new_stop_r = max(stop_r, min(desired_stop_r, stepped_stop_r))
-                    candidate_stop = _stop_price_from_r(side=side_s, entry_price=entry, atr_unit=atr_unit, r_multiple=new_stop_r)
-                    old_stop = d(tm.get("current_stop_price") or 0)
-                    if _is_better_stop(side=side_s, new_stop=candidate_stop, old_stop=old_stop):
-                        tm["stop_r_multiple"] = _json_number(new_stop_r)
-                        tm["current_stop_price"] = _json_number(candidate_stop)
-                    reason = f"PROTECT_PROFIT_STAGE_{stage}_CONF_{conf}_QUALITY_{qual}"
+                elif best_stop_source == "GROUP_MFE_RATCHET":
+                    protection_reason = f"{best_stop_reason};ALREADY_SATISFIED"
                 else:
-                    reason = f"PROTECT_SIGNAL_WEAKENING_STAGE_{stage}_CONF_{conf}_QUALITY_{qual}"
-                posture = TradePosture.PROTECT.value
-            elif protection_reason:
-                posture = TradePosture.HOLD.value
-                reason = (
-                    f"MANUAL_PRICE_ONLY;{protection_reason}"
-                    if manual_context
-                    else protection_reason
+                    adverse_reason = f"{best_stop_reason};ALREADY_SATISFIED"
+        else:
+            if (
+                protection_enabled
+                and mfe_profit_r >= protection_trigger_r
+                and not protection_applied
+            ):
+                new_stop = _stop_price_from_profit_r(
+                    side=side_s,
+                    entry_price=entry,
+                    atr_unit=atr_unit,
+                    stop_profit_r=protection_stop_profit_r,
                 )
+                old_stop = d(_required(tm, "current_stop_price"))
+                if _is_better_stop(
+                    side=side_s,
+                    new_stop=new_stop,
+                    old_stop=old_stop,
+                ):
+                    tm["current_stop_price"] = _json_number(new_stop)
+                    tm["current_stop_profit_r"] = _json_number(
+                        protection_stop_profit_r
+                    )
+                    tm["stop_r_multiple"] = _json_number(
+                        abs(protection_stop_profit_r)
+                    )
+                    stop_r = abs(protection_stop_profit_r)
+                    protection_reason = (
+                        f"PROFIT_PROTECTION_MFE_{mfe_profit_r:.2f}R_"
+                        f"STOP_{protection_stop_profit_r:+.2f}R"
+                    )
+                else:
+                    protection_reason = "PROFIT_PROTECTION_ALREADY_SATISFIED"
+                tm["profit_protection_applied"] = True
 
-            if protection_reason and protection_reason not in reason:
-                reason = f"{reason};{protection_reason}"
+            adverse_threshold = -abs(_cfg_dec("adverse_tighten_profit_r"))
+            adverse_stop_r = _cfg_dec("adverse_tighten_stop_r_multiple")
+            if (
+                defensive
+                and profit_r <= adverse_threshold
+                and adverse_stop_r > 0
+                and adverse_stop_r < stop_r
+            ):
+                new_stop = _stop_price_from_r(
+                    side=side_s,
+                    entry_price=entry,
+                    atr_unit=atr_unit,
+                    r_multiple=adverse_stop_r,
+                )
+                old_stop = d(_required(tm, "current_stop_price"))
+                if _is_better_stop(
+                    side=side_s,
+                    new_stop=new_stop,
+                    old_stop=old_stop,
+                ):
+                    stop_r = adverse_stop_r
+                    tm["stop_r_multiple"] = _json_number(stop_r)
+                    tm["current_stop_price"] = _json_number(new_stop)
+                    adverse_reason = (
+                        f"ADVERSE_TIGHTEN_{profit_r:.2f}R_"
+                        f"STAGE_{stage}_POSTURE_{management_posture}"
+                    )
+
+        if hard_exit:
+            posture = TradePosture.EXIT.value
+            reason = f"EXIT_AUCTION_SIGNAL_{management_reason}"
+        elif adverse_reason is not None:
+            posture = TradePosture.PROTECT.value
+            reason = adverse_reason
+        elif defensive:
+            posture = TradePosture.PROTECT.value
+            if group_reference_enabled:
+                reason = (
+                    f"PROTECT_GROUP_REFERENCE_STAGE_{stage}_"
+                    f"POSTURE_{management_posture}"
+                )
+            elif profit_r > 0:
+                desired_stop_r = max(
+                    Decimal("0"),
+                    profit_r - _cfg_dec("protect_buffer_r"),
+                )
+                stepped_stop_r = stop_r + _cfg_dec("stop_tighten_r_step")
+                new_stop_r = max(stop_r, min(desired_stop_r, stepped_stop_r))
+                candidate_stop = _stop_price_from_r(
+                    side=side_s,
+                    entry_price=entry,
+                    atr_unit=atr_unit,
+                    r_multiple=new_stop_r,
+                )
+                old_stop = d(_required(tm, "current_stop_price"))
+                if _is_better_stop(
+                    side=side_s,
+                    new_stop=candidate_stop,
+                    old_stop=old_stop,
+                ):
+                    tm["stop_r_multiple"] = _json_number(new_stop_r)
+                    tm["current_stop_price"] = _json_number(candidate_stop)
+                reason = (
+                    f"PROTECT_PROFIT_STAGE_{stage}_POSTURE_{management_posture}"
+                )
+            else:
+                reason = (
+                    f"PROTECT_SIGNAL_STAGE_{stage}_POSTURE_{management_posture}"
+                )
+        elif (
+            strengthening
+            and bool(_required(tm, "target_expansion_allowed"))
+            and profit_r >= _cfg_dec("expand_ready_profit_r")
+        ):
+            posture = TradePosture.EXPAND.value
+            reason = f"EXPAND_READY_STAGE_{stage}_PROFIT_R_{profit_r:.2f}"
+        else:
+            posture = TradePosture.HOLD.value
+            reason = "HOLD_MANUAL_PRICE_ONLY" if manual_context else (
+                f"HOLD_AUCTION_SIGNAL_STAGE_{stage}_POSTURE_{management_posture}"
+            )
+
+        if protection_reason is not None and protection_reason not in reason:
+            reason = f"{reason};{protection_reason}"
 
         tm["posture"] = posture
-        try:
-            tm["mfe_profit_r"] = _json_number(mfe_profit_r)
-            tm["current_profit_r"] = _json_number(profit_r)
-            if max_favorable_price is not None:
-                tm["max_favorable_price"] = _json_number(d(max_favorable_price))
-        except Exception:
-            pass
-        current_stop = d(tm.get("current_stop_price") or 0)
+        tm["mfe_profit_r"] = _json_number(mfe_profit_r)
+        tm["current_profit_r"] = _json_number(profit_r)
+        tm["max_favorable_price"] = _json_number(favorable)
+        current_stop = d(_required(tm, "current_stop_price"))
         current_stop_profit_r = _profit_r_from_price(
             side=side_s,
             entry_price=entry,
             price=current_stop,
             atr_unit=atr_unit,
         )
-        if current_stop_profit_r is not None:
-            tm["current_stop_profit_r"] = _json_number(current_stop_profit_r)
-            if group_reference_enabled:
-                tm["group_stop_profit_r"] = _json_number(current_stop_profit_r)
+        if current_stop_profit_r is None:
+            raise ValueError("unable to derive current_stop_profit_r")
+        tm["current_stop_profit_r"] = _json_number(current_stop_profit_r)
         if group_reference_enabled:
-            tm["group_target_r"] = tm.get("target_r_multiple")
-            tm["group_projected_stop_price"] = tm.get("current_stop_price")
-            tm["group_projected_target_price"] = tm.get("current_target_price")
+            tm["group_stop_profit_r"] = _json_number(current_stop_profit_r)
+            tm["group_target_r"] = _required(tm, "target_r_multiple")
+            tm["group_projected_stop_price"] = _required(
+                tm,
+                "current_stop_price",
+            )
+            tm["group_projected_target_price"] = _required(
+                tm,
+                "current_target_price",
+            )
         tm["last_managed_price"] = _json_number(last)
-        if stage:
-            tm["last_signal_stage"] = stage
-        if confidence is not None:
-            tm["last_signal_confidence"] = _json_number(confidence)
-        if quality is not None:
-            tm["last_signal_quality"] = _json_number(quality)
-        tm["last_updated_at"] = asof_time.isoformat() if hasattr(asof_time, "isoformat") else None
+        tm["last_updated_at"] = asof_time.isoformat() if asof_time is not None else None
         tm["last_update_reason"] = reason
-        tm = _ratchet_trade_management_levels(side=side_s, tm=tm, previous_tm=previous_tm)
-
-        return TradeManagementDecision(posture=posture, reason=reason, trade_management=tm)
+        tm = _ratchet_trade_management_levels(
+            side=side_s,
+            tm=tm,
+            previous_tm=previous_tm,
+        )
+        _validate_trade_management_shape(tm)
+        return TradeManagementDecision(
+            posture=posture,
+            reason=reason,
+            trade_management=tm,
+        )
 
 
     @staticmethod
@@ -1034,27 +1041,29 @@ class TradeMonHelper:
         reference_symbol: str,
         asof_time: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        """Project one FUT/EQ reference state onto a sibling instrument.
+        """Project the exact reference-leg group state onto one follower."""
+        ref = dict(reference_trade_management)
+        tm = dict(follower_trade_management)
+        _validate_trade_management_shape(ref)
+        _validate_trade_management_shape(tm)
 
-        The reference owns the decision.  The sibling receives proportional
-        stop/target prices using its frozen ATR unit, but the monitor does not
-        let the follower independently trigger group target/stop exits.
-        """
-        ref = dict(reference_trade_management or {})
-        tm = dict(follower_trade_management or {})
         side_s = _side(side)
-        entry = d(tm.get("entry_price") or entry_price)
-        atr0 = d(tm.get("atr_at_entry") or underlying_atr or 0)
-        atr_unit = d(tm.get("instrument_atr") or 0)
-        if atr_unit <= 0:
-            atr_unit = d(instrument_atr_unit(instrument_type=instrument_type, underlying_atr=atr0) or 0)
-        if entry <= 0 or atr_unit <= 0:
-            raise ValueError("GROUP_FOLLOWER_PROJECTION_REQUIRES_ENTRY_AND_FROZEN_ATR")
+        _inst(instrument_type)
+        entry = d(_required(tm, "entry_price"))
+        requested_entry = d(entry_price)
+        if requested_entry <= 0 or requested_entry != entry:
+            raise ValueError("follower entry does not match trade_management.entry_price")
+        atr0 = d(_required(tm, "atr_at_entry"))
+        if underlying_atr is None or d(underlying_atr) != atr0:
+            raise ValueError("follower ATR does not match frozen trade_management ATR")
+        atr_unit = d(_required(tm, "instrument_atr"))
+        if entry <= 0 or atr0 <= 0 or atr_unit <= 0:
+            raise ValueError("group follower requires positive entry and frozen ATR")
 
-        stop_profit_r = d(ref.get("group_stop_profit_r") if ref.get("group_stop_profit_r") is not None else ref.get("current_stop_profit_r"))
-        target_r = d(ref.get("group_target_r") or ref.get("target_r_multiple") or 0)
+        stop_profit_r = d(_required(ref, "group_stop_profit_r", "reference_trade_management"))
+        target_r = d(_required(ref, "group_target_r", "reference_trade_management"))
         if target_r <= 0:
-            raise ValueError("GROUP_FOLLOWER_PROJECTION_REQUIRES_REFERENCE_TARGET_R")
+            raise ValueError("reference group_target_r must be positive")
 
         mapped_stop = _stop_price_from_profit_r(
             side=side_s, entry_price=entry, atr_unit=atr_unit, stop_profit_r=stop_profit_r
@@ -1062,52 +1071,64 @@ class TradeMonHelper:
         mapped_target = _target_price_from_r(
             side=side_s, entry_price=entry, atr_unit=atr_unit, r_multiple=target_r
         )
-        old_stop = d(tm.get("current_stop_price") or 0)
+        if mapped_stop is None or mapped_target is None:
+            raise ValueError("unable to map reference stop/target to follower")
+
+        old_stop = d(_required(tm, "current_stop_price"))
         if _is_better_stop(side=side_s, new_stop=mapped_stop, old_stop=old_stop):
             tm["current_stop_price"] = _json_number(mapped_stop)
             tm["current_stop_profit_r"] = _json_number(stop_profit_r)
             tm["stop_r_multiple"] = _json_number(abs(stop_profit_r))
 
-        # Followers never decide the group target, so keep the projected target
-        # exactly aligned with the reference R rather than preserving an older
-        # independent option target.
         tm["current_target_price"] = _json_number(mapped_target)
         tm["target_r_multiple"] = _json_number(target_r)
-        tm["posture"] = str(ref.get("posture") or TradePosture.HOLD.value)
-        tm["target_expansion_allowed"] = bool(ref.get("target_expansion_allowed", True))
+        tm["posture"] = str(_required(ref, "posture", "reference_trade_management"))
+        tm["target_expansion_allowed"] = bool(
+            _required(ref, "target_expansion_allowed", "reference_trade_management")
+        )
         tm["group_management_enabled"] = True
         tm["group_role"] = "FOLLOWER"
-        tm["group_reference_trade_id"] = reference_trade_id
-        tm["group_reference_instrument"] = str(reference_instrument or "").upper().strip() or None
-        tm["group_reference_symbol"] = str(reference_symbol or "").strip() or None
-        tm["group_reference_entry_price"] = ref.get("group_reference_entry_price") or ref.get("entry_price")
-        tm["group_reference_atr"] = ref.get("group_reference_atr") or ref.get("instrument_atr")
-        tm["group_reference_current_price"] = ref.get("group_reference_current_price") or ref.get("last_managed_price")
-        tm["group_mfe_r"] = ref.get("group_mfe_r") or ref.get("mfe_profit_r")
-        tm["group_mae_r"] = ref.get("group_mae_r")
-        tm["last_processed_group_mfe_bucket_r"] = ref.get("last_processed_group_mfe_bucket_r")
-        tm["last_processed_group_mae_bucket_r"] = ref.get("last_processed_group_mae_bucket_r")
+        if reference_trade_id is None:
+            raise ValueError("reference_trade_id is required for follower projection")
+        tm["group_reference_trade_id"] = int(reference_trade_id)
+        ref_inst = str(reference_instrument).upper().strip()
+        if ref_inst not in {"EQ", "FUT"}:
+            raise ValueError("reference_instrument must be EQ or FUT")
+        tm["group_reference_instrument"] = ref_inst
+        ref_symbol = str(reference_symbol).strip()
+        if not ref_symbol:
+            raise ValueError("reference_symbol is required")
+        tm["group_reference_symbol"] = ref_symbol
+        tm["group_reference_entry_price"] = _required(ref, "group_reference_entry_price", "reference_trade_management")
+        tm["group_reference_atr"] = _required(ref, "group_reference_atr", "reference_trade_management")
+        tm["group_reference_current_price"] = _required(ref, "group_reference_current_price", "reference_trade_management")
+        tm["group_mfe_r"] = _required(ref, "group_mfe_r", "reference_trade_management")
+        tm["group_mae_r"] = _required(ref, "group_mae_r", "reference_trade_management")
+        tm["last_processed_group_mfe_bucket_r"] = _required(ref, "last_processed_group_mfe_bucket_r", "reference_trade_management")
+        tm["last_processed_group_mae_bucket_r"] = _required(ref, "last_processed_group_mae_bucket_r", "reference_trade_management")
         tm["group_stop_profit_r"] = _json_number(stop_profit_r)
         tm["group_target_r"] = _json_number(target_r)
         tm["group_projected_stop_price"] = _json_number(mapped_stop)
         tm["group_projected_target_price"] = _json_number(mapped_target)
-        tm["profit_protection_applied"] = bool(ref.get("profit_protection_applied", False))
-        tm["risk_reduced"] = bool(ref.get("risk_reduced", tm["profit_protection_applied"]))
-        try:
-            tm["expansion_count"] = int(ref.get("expansion_count") or 0)
-        except Exception:
-            tm["expansion_count"] = 0
-        tm["last_target_hit_price"] = ref.get("last_target_hit_price")
+        tm["profit_protection_applied"] = bool(
+            _required(ref, "profit_protection_applied", "reference_trade_management")
+        )
+        tm["expansion_count"] = int(_required(ref, "expansion_count", "reference_trade_management"))
+        tm["last_target_hit_price"] = _required(ref, "last_target_hit_price", "reference_trade_management")
         tm["group_update_source"] = "REFERENCE_PROJECTION"
-        tm["group_update_reason"] = str(ref.get("group_update_reason") or ref.get("last_update_reason") or "REFERENCE_STATE")
+        tm["group_update_reason"] = str(_required(ref, "group_update_reason", "reference_trade_management"))
         tm["mae_risk_exit_required"] = False
         tm["mae_risk_exit_observed_price"] = None
-        tm["last_updated_at"] = asof_time.isoformat() if hasattr(asof_time, "isoformat") else None
+        tm["last_updated_at"] = asof_time.isoformat() if asof_time is not None else None
         tm["last_update_reason"] = (
-            f"FOLLOW_GROUP_REFERENCE_{reference_instrument}_{reference_trade_id}:"
+            f"FOLLOW_GROUP_REFERENCE_{ref_inst}_{reference_trade_id}:"
             f"{tm['group_update_reason']}"
         )
-        return _ratchet_trade_management_levels(side=side_s, tm=tm, previous_tm=follower_trade_management or {})
+        tm = _ratchet_trade_management_levels(
+            side=side_s, tm=tm, previous_tm=follower_trade_management
+        )
+        _validate_trade_management_shape(tm)
+        return tm
 
 
     @staticmethod
@@ -1119,112 +1140,94 @@ class TradeMonHelper:
         trade_management: Dict[str, Any],
         asof_time: Optional[datetime] = None,
     ) -> TradeManagementDecision:
-        """Expand target after current target is actually hit.
-
-        Lifecycle posture grants permission (EXPAND), but price is the trigger.
-        If the current price has already moved beyond the next expanded target,
-        keep expanding within this same monitor tick until the active target is
-        ahead of the current price. Each completed target becomes the new
-        profit-lock stop with the configured 0.5R buffer.
-        """
+        """Expand an enabled target after the current target is reached."""
         side_s = _side(side)
-        tm = dict(trade_management or {})
+        tm = dict(trade_management)
+        _validate_trade_management_shape(tm)
         previous_tm = dict(tm)
-        if tm.get("target_expansion_allowed") is False:
-            reason = "TARGET_HIT_EXPAND_SKIPPED_TARGET_EXPANSION_DISABLED_BY_EVIDENCE"
-            tm["last_update_reason"] = reason
-            tm["posture"] = TradePosture.PROTECT.value
-            return TradeManagementDecision(posture=TradePosture.PROTECT.value, reason=reason, trade_management=tm)
-        entry = d(tm.get("entry_price") or entry_price)
+
+        if not bool(_required(tm, "target_expansion_allowed")):
+            raise ValueError("target expansion called while disabled by signal contract")
+
+        entry = d(_required(tm, "entry_price"))
+        requested_entry = d(entry_price)
+        if requested_entry <= 0 or requested_entry != entry:
+            raise ValueError("entry price does not match trade_management.entry_price")
         last = d(last_price)
-        atr_unit = d(tm.get("instrument_atr") or 0)
-        current_target = d(tm.get("current_target_price") or 0)
-        target_r = d(tm.get("target_r_multiple") or _cfg_dec("initial_target_r_multiple"))
+        atr_unit = d(_required(tm, "instrument_atr"))
+        current_target = d(_required(tm, "current_target_price"))
+        target_r = d(_required(tm, "target_r_multiple"))
+        if entry <= 0 or last <= 0 or atr_unit <= 0 or current_target <= 0 or target_r <= 0:
+            raise ValueError("target expansion requires positive entry, LTP, ATR, target, and target R")
+        if not _price_reached_target(
+            side=side_s, last_price=last, target_price=current_target
+        ):
+            raise ValueError("target expansion called before current target was reached")
 
-        if atr_unit <= 0 or entry <= 0 or current_target <= 0:
-            reason = "TARGET_HIT_EXPAND_SKIPPED_MISSING_PRICE_OR_ATR"
-            tm["last_update_reason"] = reason
-            return TradeManagementDecision(posture=str(tm.get("posture") or TradePosture.HOLD.value), reason=reason, trade_management=tm)
-
-        if not _price_reached_target(side=side_s, last_price=last, target_price=current_target):
-            reason = "TARGET_HIT_EXPAND_SKIPPED_TARGET_NOT_REACHED"
-            tm["last_update_reason"] = reason
-            return TradeManagementDecision(posture=str(tm.get("posture") or TradePosture.HOLD.value), reason=reason, trade_management=tm)
-
-        step = max(_cfg_dec("target_expand_r_step"), Decimal("0"))
+        step = _cfg_dec("target_expand_r_step")
         if step <= 0:
-            reason = "TARGET_HIT_EXPAND_SKIPPED_ZERO_STEP"
-            tm["last_update_reason"] = reason
-            return TradeManagementDecision(posture=TradePosture.HOLD.value, reason=reason, trade_management=tm)
+            raise ValueError("target_expand_r_step must be positive")
 
-        old_stop = d(tm.get("current_stop_price") or 0)
+        old_stop = d(_required(tm, "current_stop_price"))
         completed_target = current_target
-        new_stop = _lock_stop_from_target(side=side_s, previous_target=completed_target, atr_unit=atr_unit)
+        new_stop = _lock_stop_from_target(
+            side=side_s, previous_target=completed_target, atr_unit=atr_unit
+        )
+        if new_stop is None:
+            raise ValueError("unable to derive target-lock stop")
         expansions_this_tick = 0
 
-        # No business max-expansion cap is imposed. The range guard only
-        # prevents an accidental infinite loop if config/input is corrupt.
         for _ in range(50):
             new_target_r = target_r + step
             new_target = _target_price_from_r(
-                side=side_s,
-                entry_price=entry,
-                atr_unit=atr_unit,
-                r_multiple=new_target_r,
+                side=side_s, entry_price=entry, atr_unit=atr_unit, r_multiple=new_target_r
             )
             if new_target is None or new_target <= 0 or new_target == current_target:
-                break
-
+                raise ValueError("target expansion produced an invalid target")
             target_r = new_target_r
             current_target = new_target
             expansions_this_tick += 1
-
-            if _price_reached_target(side=side_s, last_price=last, target_price=current_target):
-                # Price has already crossed the newly-created target too.
-                # Treat it as another completed milestone and continue to
-                # create the next active target.
+            if _price_reached_target(
+                side=side_s, last_price=last, target_price=current_target
+            ):
                 completed_target = current_target
-                candidate_stop = _lock_stop_from_target(side=side_s, previous_target=completed_target, atr_unit=atr_unit)
-                if _is_better_stop(side=side_s, new_stop=candidate_stop, old_stop=new_stop):
+                candidate_stop = _lock_stop_from_target(
+                    side=side_s, previous_target=completed_target, atr_unit=atr_unit
+                )
+                if candidate_stop is None:
+                    raise ValueError("unable to derive repeated target-lock stop")
+                if _is_better_stop(
+                    side=side_s, new_stop=candidate_stop, old_stop=new_stop
+                ):
                     new_stop = candidate_stop
                 continue
-
-            # current_target is now ahead of the latest price; keep it active.
             break
-
-        if expansions_this_tick <= 0:
-            reason = "TARGET_HIT_EXPAND_SKIPPED_NO_TARGET_IMPROVEMENT"
-            tm["last_update_reason"] = reason
-            return TradeManagementDecision(posture=TradePosture.HOLD.value, reason=reason, trade_management=tm)
+        else:
+            raise RuntimeError("target expansion exceeded 50 deterministic steps")
 
         tm["target_r_multiple"] = _json_number(target_r)
         tm["current_target_price"] = _json_number(current_target)
         if _is_better_stop(side=side_s, new_stop=new_stop, old_stop=old_stop):
             tm["current_stop_price"] = _json_number(new_stop)
-            # After target-locking the stop is no longer a simple initial-risk
-            # stop. Keep stop_r_multiple as distance from entry for audit/debug.
-            if entry > 0 and atr_unit > 0:
-                locked_r = abs((entry - new_stop) / atr_unit) if side_s == "SELL" else abs((new_stop - entry) / atr_unit)
-                tm["stop_r_multiple"] = _json_number(locked_r)
+            locked_r = abs((new_stop - entry) / atr_unit)
+            tm["stop_r_multiple"] = _json_number(locked_r)
 
-        try:
-            tm["expansion_count"] = int(tm.get("expansion_count") or 0) + expansions_this_tick
-        except Exception:
-            tm["expansion_count"] = expansions_this_tick
+        tm["expansion_count"] = int(_required(tm, "expansion_count")) + expansions_this_tick
         tm["last_target_hit_price"] = _json_number(completed_target)
         tm["group_target_r"] = _json_number(target_r)
-        locked_stop = d(tm.get("current_stop_price") or 0)
+        locked_stop = d(_required(tm, "current_stop_price"))
         locked_stop_profit_r = _profit_r_from_price(
             side=side_s, entry_price=entry, price=locked_stop, atr_unit=atr_unit
         )
-        if locked_stop_profit_r is not None:
-            tm["current_stop_profit_r"] = _json_number(locked_stop_profit_r)
-            tm["group_stop_profit_r"] = _json_number(locked_stop_profit_r)
-        tm["group_projected_stop_price"] = tm.get("current_stop_price")
-        tm["group_projected_target_price"] = tm.get("current_target_price")
+        if locked_stop_profit_r is None:
+            raise ValueError("unable to derive locked stop profit R")
+        tm["current_stop_profit_r"] = _json_number(locked_stop_profit_r)
+        tm["group_stop_profit_r"] = _json_number(locked_stop_profit_r)
+        tm["group_projected_stop_price"] = _required(tm, "current_stop_price")
+        tm["group_projected_target_price"] = _required(tm, "current_target_price")
         tm["group_update_source"] = "TARGET_EXPANSION"
         tm["last_managed_price"] = _json_number(last)
-        tm["last_updated_at"] = asof_time.isoformat() if hasattr(asof_time, "isoformat") else None
+        tm["last_updated_at"] = asof_time.isoformat() if asof_time is not None else None
         reason = (
             f"TARGET_HIT_EXPANDED_{expansions_this_tick}_STEP"
             f"_TO_{target_r}R_LOCK_STOP_AT_COMPLETED_TARGET_BUFFER"
@@ -1232,5 +1235,11 @@ class TradeMonHelper:
         tm["last_update_reason"] = reason
         tm["group_update_reason"] = reason
         tm["posture"] = TradePosture.EXPAND.value
-        tm = _ratchet_trade_management_levels(side=side_s, tm=tm, previous_tm=previous_tm)
-        return TradeManagementDecision(posture=TradePosture.EXPAND.value, reason=reason, trade_management=tm)
+        tm = _ratchet_trade_management_levels(
+            side=side_s, tm=tm, previous_tm=previous_tm
+        )
+        _validate_trade_management_shape(tm)
+        return TradeManagementDecision(
+            posture=TradePosture.EXPAND.value, reason=reason, trade_management=tm
+        )
+

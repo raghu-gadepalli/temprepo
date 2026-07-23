@@ -20,21 +20,8 @@
               </div>
             </div>
 
-            <div class="d-flex align-items-center gap-2">
-              <div class="btn-group btn-group-sm" role="group" aria-label="Trade mode">
-                <input type="radio" class="btn-check" name="wtm-mode" id="wtm-mode-basic" value="BASIC" checked>
-                <label class="btn btn-light text-primary fw-semibold" for="wtm-mode-basic">Basic</label>
-
-                <input type="radio" class="btn-check" name="wtm-mode" id="wtm-mode-advanced" value="ADVANCED" disabled>
-                <label class="btn btn-light text-muted fw-semibold" for="wtm-mode-advanced"
-                  title="Advanced editing will be enabled later">
-                  Advanced
-                </label>
-              </div>
-
-              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
-                aria-label="Close"></button>
-            </div>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+              aria-label="Close"></button>
           </div>
         </div>
       </div>
@@ -60,6 +47,13 @@
 
             <div id="wtm-users-list" class="border rounded bg-white p-2" style="max-height:170px; overflow:auto;">
             </div>
+          </div>
+        </div>
+
+        <div id="wtm-entry-context-card" class="card border-0 bg-light mb-3 d-none">
+          <div class="card-body py-2 px-2">
+            <div class="fw-semibold mb-2">Entry Context</div>
+            <div id="wtm-entry-context-grid" class="row g-2"></div>
           </div>
         </div>
 
@@ -150,7 +144,7 @@
         </div>
 
         <div id="wtm-warning-card" class="alert alert-warning d-none py-2 px-2 mb-2" style="font-size:0.85rem;">
-          <div class="fw-semibold mb-1">Trade Validation</div>
+          <div class="fw-semibold mb-1">Entry Eligibility</div>
 
           <ul id="wtm-warning-list" class="mb-2 ps-3">
             <li>Review context before creating this trade.</li>
@@ -159,19 +153,8 @@
           <div class="form-check mb-0">
             <input class="form-check-input" type="checkbox" value="1" id="wtm-warning-confirm">
             <label class="form-check-label" for="wtm-warning-confirm">
-              I understand the validation warning and want to proceed.
+              I understand the current defensive signal posture and want to enter manually.
             </label>
-          </div>
-        </div>
-
-        <div id="wtm-advanced-fields" class="d-none">
-          <div class="alert alert-light border py-2 px-2 mb-2" style="font-size:0.85rem;">
-            <div class="fw-semibold mb-1">Trade Management</div>
-            <div>
-              Stop, target, expansion, and exit handling are created from
-              <code>trade_management</code> and managed by monitor configuration.
-              This screen only controls instrument selection, product, quantity, and entry price.
-            </div>
           </div>
         </div>
 

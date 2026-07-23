@@ -101,13 +101,6 @@
     return get(data, "structure.raw", {}) || {};
   }
 
-  function structureAnchors(data) {
-    return get(data, "structure.anchors", get(data, "structure.anchor", {})) || {};
-  }
-
-  function structureBreakout(data) {
-    return get(data, "structure.breakout", {}) || {};
-  }
 
   function structureState(data) {
     return first(data, ["structure.accepted.state", "structure.state", "indicators.hma.state"], "UNKNOWN");
@@ -164,27 +157,50 @@
   }
 
   function renderSnapshotIndicatorsRows(data) {
+    const accepted = structureAccepted(data);
+    const raw = structureRaw(data);
+    const candidate = get(data, "structure.candidate", {}) || {};
+    const decision = get(data, "auction.decision", {}) || {};
+    const boundary = get(data, "auction.boundary", {}) || {};
+    const auctionState = get(data, "auction.state", {}) || {};
+
+    const rangeText = (range) => {
+      const r = range || {};
+      return `${num(r.low)} - ${num(r.high)} · width ${pct(r.width_pct)} · ${text(r.range_type)}`;
+    };
+
+    const windowText = (name) => {
+      const w = get(data, `market_windows.${name}`, {}) || {};
+      return `${text(w.status)} · move ${signedPct(w.move_pct)} · range ${pct(w.range_pct)} · close pos ${num(w.close_position_in_range, 3)}`;
+    };
+
     const rows = [
       ["VWAP", `Value ${num(get(data, "indicators.vwap.value"))} · Δ ${signedPct(get(data, "indicators.vwap.distance_pct"))}`],
-      ["HMA", `${text(get(data, "indicators.hma.state"))} · ${text(get(data, "indicators.hma.strength"))}`],
+      ["HMA", `${text(get(data, "indicators.hma.state"))} · ${text(get(data, "indicators.hma.strength"))} · flips ${intNum(get(data, "indicators.hma.flip_count_today"))}`],
       ["RSI", `${num(get(data, "indicators.rsi.value"))} · ${text(get(data, "indicators.rsi.zone"))}`],
       ["ADX", `${num(get(data, "indicators.adx.value"))} · ${text(get(data, "indicators.adx.band"))}`],
       ["ATR", `${num(get(data, "indicators.atr.value"))} · ${text(get(data, "indicators.atr.band"))}`],
       ["BB Zone", `${text(get(data, "indicators.bollinger.zone"))} · Pos ${num(get(data, "indicators.bollinger.position"), 3)}`],
 
-      ["Price Structure", `${text(structureState(data))} · ${text(structureSide(data))}`],
-      ["Raw Structure", `${text(first(data, ["structure.raw.state", "structure.raw_state"], "UNKNOWN"))} · ${text(first(data, ["structure.raw.side", "structure.raw_side"], "NEUTRAL"))}`],
-      ["Candidate", `${text(get(data, "structure.candidate.side", "NEUTRAL"))} · active ${text(get(data, "structure.candidate.active", false))} · bars ${intNum(get(data, "structure.candidate.bars_confirmed"))}`],
-      ["Breakout", `${text(get(data, "structure.breakout.status", "NONE"))} · ${text(get(data, "structure.breakout.side", "NEUTRAL"))} · outside ${intNum(get(data, "structure.breakout.bars_outside"))} · reclaimed ${intNum(get(data, "structure.breakout.bars_reclaimed"))}`],
-      ["Structure Count", `${intNum(get(data, "structure.count"))} · flips ${intNum(get(data, "structure.flip_count_today"))}`],
-      ["Active Anchor", text(first(data, ["structure.anchors.active_anchor", "structure.anchor.active_anchor"], "UNKNOWN"))],
-      ["Accepted Range", `${num(first(data, ["structure.accepted.range.low", "structure.anchor.range_low"]))} - ${num(first(data, ["structure.accepted.range.high", "structure.anchor.range_high"]))} · width ${pct(first(data, ["structure.accepted.range.width_pct", "structure.anchor.range_width_pct"]))}`],
-      ["Raw Range", `${num(get(data, "structure.raw.range.low"))} - ${num(get(data, "structure.raw.range.high"))} · width ${pct(get(data, "structure.raw.range.width_pct"))}`],
-      ["Swing", `${text(get(data, "structure.breakout_context.swing"))} · ${num(get(data, "structure.raw.recent_swing_low"))} - ${num(get(data, "structure.raw.recent_swing_high"))}`],
-      ["PDH/PDL", `${text(get(data, "structure.breakout_context.pdh_pdl"))} · PDL ${num(first(data, ["structure.anchors.pdl", "structure.anchor.pdl"]))} · PDH ${num(first(data, ["structure.anchors.pdh", "structure.anchor.pdh"]))}`],
-      ["ORB", `${text(get(data, "structure.breakout_context.orb"))} · ${num(first(data, ["structure.anchors.orb_low", "structure.anchor.orb_low"]))} - ${num(first(data, ["structure.anchors.orb_high", "structure.anchor.orb_high"]))}`],
-      ["Recent 15m", `${text(get(data, "structure.breakout_context.recent15"))} · ${num(first(data, ["structure.anchors.recent15_low", "structure.anchor.recent15_low"]))} - ${num(first(data, ["structure.anchors.recent15_high", "structure.anchor.recent15_high"]))}`],
-      ["Structure Reason", text(first(data, ["structure.reason", "structure.accepted.reason", "structure.raw.reason"]))],
+      ["Auction State", `${text(auctionState.current)} · previous ${text(auctionState.previous)}`],
+      ["Local Decision", `${text(decision.action, "NO_LOCAL_OPPORTUNITY")} · ${text(decision.family, "NONE")} · ${text(decision.side, "NONE")}`],
+      ["Boundary", `${text(boundary.status, "NONE")} · ${text(boundary.boundary_side, "NONE")} · ${num(boundary.boundary_price)}`],
+      ["Decision Reason", Array.isArray(decision.reason_codes) ? decision.reason_codes.join(", ") : "—"],
+
+      ["Accepted Structure", `${text(accepted.state, "UNKNOWN")} · frozen ${accepted.frozen === true ? "YES" : "NO"}`],
+      ["Accepted Range", rangeText(accepted.range)],
+      ["Raw Structure", `${text(raw.state, "UNKNOWN")} · ${text(raw.side, "NEUTRAL")}`],
+      ["Raw Range", rangeText(raw.range)],
+      ["Candidate", `${text(candidate.status, "NONE")} · ${text(candidate.side, "NEUTRAL")} · active ${text(candidate.active, false)} · bars ${intNum(candidate.bars_confirmed)}`],
+      ["Structure Flips", intNum(get(data, "structure.flip_count_today"))],
+
+      ["Opening Range", `${num(get(data, "levels.opening_range.low"))} - ${num(get(data, "levels.opening_range.high"))} · ready ${text(get(data, "levels.opening_range.ready", false))}`],
+      ["Previous Day", `PDL ${num(get(data, "levels.prev_day.low"))} · PDH ${num(get(data, "levels.prev_day.high"))} · close ${num(get(data, "levels.prev_day.close"))}`],
+      ["15m Window", windowText("15m")],
+      ["30m Window", windowText("30m")],
+      ["60m Window", windowText("60m")],
+      ["Session Window", windowText("sod")],
+      ["Price Action", `${text(get(data, "price_action.slope.state"))} · 3-bar ATR ${num(get(data, "price_action.slope.bars_3_atr"), 3)} · 5-bar ATR ${num(get(data, "price_action.slope.bars_5_atr"), 3)}`],
     ];
 
     return rows.map(([k, v]) => `

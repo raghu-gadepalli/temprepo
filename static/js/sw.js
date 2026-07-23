@@ -1,6 +1,6 @@
 // static/js/sw.js
 // UI contract refresh: 2026-07-14
-const CACHE_NAME = "autotrades-verx-v4.6-account-scope";
+const CACHE_NAME = "autotrades-p53-v1";
 
 const PRECACHE_URLS = [
   // CSS
@@ -13,7 +13,6 @@ const PRECACHE_URLS = [
   // Dashboard JS
   "/static/js/watchlist.js",
   "/static/js/signals.js",
-  "/static/js/signalsmodal.js",
   "/static/js/snapshot.js",
   "/static/js/orders.js",
   "/static/js/positions.js",
