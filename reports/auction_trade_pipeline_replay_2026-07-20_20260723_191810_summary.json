@@ -10,9 +10,9 @@
     "TRADE_MONITOR": 27
   },
   "cleared": {
-    "audit": 68,
-    "signals": 1,
-    "trades": 3
+    "audit": 0,
+    "signals": 0,
+    "trades": 0
   },
   "derivative_validation_failures": 0,
   "derivative_validation_rows": 2,
@@ -29,21 +29,21 @@
       "exit_reason": "RELATED_PRIMARY_EXIT",
       "exit_rule": "close_sibling_legs_on_primary_exit:ADAPTIVE_TARGET:exit_on_current_adaptive_target",
       "exit_status": "FILLED",
-      "trade_id": 4
+      "trade_id": 1
     },
     {
       "exit_exec_time": "2026-07-20T12:12:00",
       "exit_reason": "ADAPTIVE_TARGET",
       "exit_rule": "exit_on_current_adaptive_target",
       "exit_status": "FILLED",
-      "trade_id": 5
+      "trade_id": 2
     },
     {
       "exit_exec_time": "2026-07-20T12:12:00",
       "exit_reason": "RELATED_PRIMARY_EXIT",
       "exit_rule": "close_sibling_legs_on_primary_exit:ADAPTIVE_TARGET:exit_on_current_adaptive_target",
       "exit_status": "FILLED",
-      "trade_id": 6
+      "trade_id": 3
     }
   ],
   "final_exit_status_counts": {
