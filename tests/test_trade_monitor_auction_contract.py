@@ -5,12 +5,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from configs.signal_config import SIGNAL_CONFIG
 from enums.enums import TradePosture
 from services.signals.signal_generator import SignalAssembler
 from services.trade.monitor.signal_contract import AuctionTradeSignalContext
 from services.trade.monitor.trademon_helper import TradeMonHelper
+from services.trade.monitor.trade_monitor import _audit_trade_monitor
 from tests.test_signal_generator_auction_snapshot import (
     FakeFetcher,
     FakePersister,
@@ -216,6 +218,43 @@ class StrictAuctionTradeMonitorContractTests(unittest.TestCase):
     def test_removed_signal_helper_is_not_retained(self):
         root = Path(__file__).resolve().parents[1]
         self.assertFalse((root / "services" / "signals" / "signal_helper.py").exists())
+
+
+    def test_trade_monitor_audit_executes_with_canonical_management_converter(self):
+        ctx = SimpleNamespace(
+            trade=SimpleNamespace(
+                id=1,
+                symbol="COFORGE",
+                userid="DR1812",
+                signal_id="signal-1",
+                exit_status="PENDING",
+            ),
+            instrument_type="EQ",
+            side="SELL",
+            last_price=99.0,
+            entry_price=100.0,
+            basis_price=100.0,
+            pnl_per_unit=1.0,
+            pnl_value=1.0,
+            last_time=TS,
+            trade_management=_trade_management(),
+            signal_contract=None,
+        )
+        updates = {
+            "trade_management": _trade_management(),
+            "last_price": 99.0,
+        }
+        with patch(
+            "services.trade.monitor.trade_monitor.write_auditlog",
+            return_value=True,
+        ) as writer:
+            _audit_trade_monitor(ctx, updates)
+        writer.assert_called_once()
+        kwargs = writer.call_args.kwargs
+        self.assertTrue(kwargs["strict"])
+        self.assertTrue(kwargs["force_persist"])
+        self.assertEqual("TRADE_MONITOR", kwargs["evaluation_stage"])
+        self.assertIn("management", kwargs["payload_json"])
 
     def test_trade_monitor_audit_is_strict_and_forced(self):
         root = Path(__file__).resolve().parents[1]

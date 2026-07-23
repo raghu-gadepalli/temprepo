@@ -185,9 +185,9 @@ def _audit_trade_monitor(ctx: "TradeMonitorContext", updates: Dict[str, Any]) ->
 
     updated_management = updates["trade_management"] if "trade_management" in updates else None
     management = (
-        _as_dict(updated_management)
+        _tm_as_dict(updated_management)
         if updated_management is not None
-        else _as_dict(ctx.trade_management)
+        else _tm_as_dict(ctx.trade_management)
     )
     management_keys = (
         "version",
