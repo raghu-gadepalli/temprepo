@@ -1,0 +1,249 @@
+{
+  "adaptive_stop_exit_enabled": true,
+  "adaptive_target_exit_enabled": true,
+  "auction_recomputed": false,
+  "audit_rows": 2123,
+  "audit_stage_counts": {
+    "SIGNAL_GENERATOR": 142,
+    "TRADE_EXECUTOR": 42,
+    "TRADE_GENERATOR": 34,
+    "TRADE_MONITOR": 1905
+  },
+  "cleared": {
+    "audit": 0,
+    "signals": 0,
+    "trades": 0
+  },
+  "derivative_validation_failures": 2,
+  "derivative_validation_rows": 14,
+  "derivatives_enabled": true,
+  "executor_entry_updates": 21,
+  "executor_exit_updates": 21,
+  "expected_trade_executor_audit_rows": 42,
+  "final_entry_status_counts": {
+    "FILLED": 21
+  },
+  "final_exit_details": [
+    {
+      "exit_exec_time": "2026-07-23T11:27:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:ADAPTIVE_STOP:exit_on_current_adaptive_stop",
+      "exit_status": "FILLED",
+      "trade_id": 1
+    },
+    {
+      "exit_exec_time": "2026-07-23T11:27:00",
+      "exit_reason": "ADAPTIVE_STOP",
+      "exit_rule": "exit_on_current_adaptive_stop",
+      "exit_status": "FILLED",
+      "trade_id": 2
+    },
+    {
+      "exit_exec_time": "2026-07-23T11:27:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:ADAPTIVE_STOP:exit_on_current_adaptive_stop",
+      "exit_status": "FILLED",
+      "trade_id": 3
+    },
+    {
+      "exit_exec_time": "2026-07-23T11:27:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:ADAPTIVE_STOP:exit_on_current_adaptive_stop",
+      "exit_status": "FILLED",
+      "trade_id": 4
+    },
+    {
+      "exit_exec_time": "2026-07-23T11:27:00",
+      "exit_reason": "ADAPTIVE_STOP",
+      "exit_rule": "exit_on_current_adaptive_stop",
+      "exit_status": "FILLED",
+      "trade_id": 5
+    },
+    {
+      "exit_exec_time": "2026-07-23T11:27:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:ADAPTIVE_STOP:exit_on_current_adaptive_stop",
+      "exit_status": "FILLED",
+      "trade_id": 6
+    },
+    {
+      "exit_exec_time": "2026-07-23T12:24:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:ADAPTIVE_TARGET:exit_on_current_adaptive_target",
+      "exit_status": "FILLED",
+      "trade_id": 7
+    },
+    {
+      "exit_exec_time": "2026-07-23T12:24:00",
+      "exit_reason": "ADAPTIVE_TARGET",
+      "exit_rule": "exit_on_current_adaptive_target",
+      "exit_status": "FILLED",
+      "trade_id": 8
+    },
+    {
+      "exit_exec_time": "2026-07-23T12:24:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:ADAPTIVE_TARGET:exit_on_current_adaptive_target",
+      "exit_status": "FILLED",
+      "trade_id": 9
+    },
+    {
+      "exit_exec_time": "2026-07-23T14:39:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:ADAPTIVE_STOP:exit_on_current_adaptive_stop",
+      "exit_status": "FILLED",
+      "trade_id": 16
+    },
+    {
+      "exit_exec_time": "2026-07-23T14:39:00",
+      "exit_reason": "ADAPTIVE_STOP",
+      "exit_rule": "exit_on_current_adaptive_stop",
+      "exit_status": "FILLED",
+      "trade_id": 17
+    },
+    {
+      "exit_exec_time": "2026-07-23T14:39:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:ADAPTIVE_STOP:exit_on_current_adaptive_stop",
+      "exit_status": "FILLED",
+      "trade_id": 18
+    },
+    {
+      "exit_exec_time": "2026-07-23T13:33:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:SIGNAL_LIFECYCLE_EXIT:exit_on_auction_signal_downstream_contract",
+      "exit_status": "FILLED",
+      "trade_id": 10
+    },
+    {
+      "exit_exec_time": "2026-07-23T13:33:00",
+      "exit_reason": "SIGNAL_LIFECYCLE_EXIT",
+      "exit_rule": "exit_on_auction_signal_downstream_contract",
+      "exit_status": "FILLED",
+      "trade_id": 11
+    },
+    {
+      "exit_exec_time": "2026-07-23T13:33:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:SIGNAL_LIFECYCLE_EXIT:exit_on_auction_signal_downstream_contract",
+      "exit_status": "FILLED",
+      "trade_id": 12
+    },
+    {
+      "exit_exec_time": "2026-07-23T15:21:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:INTRADAY_CUTOFF:intraday_auto_exit_fail_safe",
+      "exit_status": "FILLED",
+      "trade_id": 13
+    },
+    {
+      "exit_exec_time": "2026-07-23T15:21:00",
+      "exit_reason": "INTRADAY_CUTOFF",
+      "exit_rule": "intraday_auto_exit_fail_safe",
+      "exit_status": "FILLED",
+      "trade_id": 14
+    },
+    {
+      "exit_exec_time": "2026-07-23T15:21:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:INTRADAY_CUTOFF:intraday_auto_exit_fail_safe",
+      "exit_status": "FILLED",
+      "trade_id": 15
+    },
+    {
+      "exit_exec_time": "2026-07-23T14:57:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:ADAPTIVE_STOP:exit_on_current_adaptive_stop",
+      "exit_status": "FILLED",
+      "trade_id": 19
+    },
+    {
+      "exit_exec_time": "2026-07-23T14:57:00",
+      "exit_reason": "ADAPTIVE_STOP",
+      "exit_rule": "exit_on_current_adaptive_stop",
+      "exit_status": "FILLED",
+      "trade_id": 20
+    },
+    {
+      "exit_exec_time": "2026-07-23T14:57:00",
+      "exit_reason": "RELATED_PRIMARY_EXIT",
+      "exit_rule": "close_sibling_legs_on_primary_exit:ADAPTIVE_STOP:exit_on_current_adaptive_stop",
+      "exit_status": "FILLED",
+      "trade_id": 21
+    }
+  ],
+  "final_exit_status_counts": {
+    "FILLED": 21
+  },
+  "final_instrument_counts": {
+    "CE": 3,
+    "EQ": 7,
+    "FUT": 7,
+    "PE": 4
+  },
+  "first_entry_fill_time": "2026-07-23T11:06:00",
+  "first_exit_fill_time": "2026-07-23T11:27:00",
+  "first_signal_exit_request_time": "2026-07-23T13:33:00+05:30",
+  "first_snapshot_time": "2026-07-23T09:15:00+05:30",
+  "instrument_choice": "MULTI",
+  "last_snapshot_time": "2026-07-23T15:27:00+05:30",
+  "lifecycle": "DEFAULT",
+  "monitor_error_count": 0,
+  "monitor_updates": 1905,
+  "require_derivatives": true,
+  "require_exit": true,
+  "require_trade": true,
+  "signal_action_counts": {
+    "CREATE": 7,
+    "DOWNGRADE": 39,
+    "HOLD": 303,
+    "NO_ACTION": 854,
+    "PROMOTE": 47
+  },
+  "signal_stage_observation_counts": {
+    "ACTIVE": 191,
+    "EXIT_BIAS": 6,
+    "EXPAND": 7,
+    "PROTECT": 128,
+    "TRANSITION": 12,
+    "WEAKENING": 52
+  },
+  "signals_persisted": 7,
+  "snapshots": 1250,
+  "snapshots_marked_processed": 0,
+  "symbols": [
+    "ASTRAL",
+    "GVT&D",
+    "INFY",
+    "KOTAKBANK",
+    "LICHSGFIN",
+    "MANAPPURAM",
+    "NIFTY 50",
+    "NIFTY BANK",
+    "OFSS",
+    "SRF"
+  ],
+  "test_mode": "ADAPTIVE_EXIT",
+  "total_exit_pnl": 16312.45,
+  "trade_executor_audit_rows": 42,
+  "trade_monitor_audit_rows": 1905,
+  "tradegen_outcome_counts": {
+    "ALREADY_DEPLOYED": 353,
+    "CREATED": 7,
+    "NOT_ELIGIBLE": 36
+  },
+  "trades_persisted": 21,
+  "trading_day": "2026-07-23",
+  "userid": "DR1812",
+  "validation_error_count": 1,
+  "validation_errors": [
+    {
+      "code": "DERIVATIVE_COVERAGE",
+      "details": {
+        "error_type": "AssertionError"
+      },
+      "message": "Derivative entry quote validation failed: [{'trade_id': 17, 'instrument_type': 'FUT', 'trade_symbol': 'INFY26AUGFUT', 'entry_snapshot_time': datetime.datetime(2026, 7, 23, 12, 36, tzinfo=TzInfo(19800)), 'expected_symbol': 'INFY26AUGFUT', 'expected_entry_price': 1045.8, 'planned_entry_price': 1048.1, 'executed_entry_price': 1048.1, 'symbol_matches': True, 'planned_price_matches': False, 'executed_price_matches': False, 'validation_status': 'FAILED'}, {'trade_id': 18, 'instrument_type': 'CE', 'trade_symbol': 'INFY26AUG1060CE', 'entry_snapshot_time': datetime.datetime(2026, 7, 23, 12, 36, tzinfo=TzInfo(19800)), 'expected_symbol': 'INFY26AUG1060CE', 'expected_entry_price': 39.15, 'planned_entry_price': 41.15, 'executed_entry_price': 41.15, 'symbol_matches': True, 'planned_price_matches': False, 'executed_price_matches': False, 'validation_status': 'FAILED'}]"
+    }
+  ],
+  "validation_status": "FAILED"
+}
