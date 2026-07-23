@@ -1,0 +1,56 @@
+{
+  "auction_recomputed": false,
+  "audit_rows": 37,
+  "cleared": {
+    "audit": 0,
+    "signals": 0,
+    "trades": 0
+  },
+  "executor_entry_updates": 1,
+  "executor_exit_updates": 1,
+  "final_entry_status_counts": {
+    "FILLED": 1
+  },
+  "final_exit_status_counts": {
+    "FILLED": 1
+  },
+  "final_instrument_counts": {
+    "EQ": 1
+  },
+  "first_entry_fill_time": "2026-07-20T11:48:00",
+  "first_exit_fill_time": "2026-07-20T12:12:00",
+  "first_snapshot_time": "2026-07-20T09:15:00+05:30",
+  "instrument_choice": "EQ",
+  "last_snapshot_time": "2026-07-20T15:27:00+05:30",
+  "lifecycle": "DEFAULT",
+  "monitor_updates": 9,
+  "require_exit": true,
+  "require_trade": true,
+  "signal_action_counts": {
+    "CREATE": 1,
+    "DOWNGRADE": 9,
+    "HOLD": 57,
+    "NO_ACTION": 51,
+    "PROMOTE": 7
+  },
+  "signal_stage_observation_counts": {
+    "ACTIVE": 11,
+    "EXIT_BIAS": 32,
+    "PROTECT": 17,
+    "WEAKENING": 14
+  },
+  "signals_persisted": 1,
+  "snapshots": 125,
+  "snapshots_marked_processed": 0,
+  "symbols": [
+    "COFORGE"
+  ],
+  "total_exit_pnl": 6.7,
+  "tradegen_outcome_counts": {
+    "ALREADY_DEPLOYED": 73,
+    "CREATED": 1
+  },
+  "trades_persisted": 1,
+  "trading_day": "2026-07-20",
+  "userid": "DR1812"
+}
