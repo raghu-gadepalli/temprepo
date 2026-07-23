@@ -21,7 +21,7 @@ from services.snapshot.snapshot_generator import SnapshotGenerator
 
 #  Configuration
 API_KEY = "d17pao9dsc9jsp84"
-ACCESS_TOKEN = "r3pcOIBTz6KveSwDdso8jLjo3M3pAiWF"
+ACCESS_TOKEN = "q505JJsaMgUStUok5CEJK4rnXLCeU583"
 
 START = datetime(2026, 7, 23, 9, 18, tzinfo=ZoneInfo("Asia/Kolkata"))
 END = datetime(2026, 7, 23, 15, 30, tzinfo=ZoneInfo("Asia/Kolkata"))

@@ -100,7 +100,7 @@ class FoConfig:
     regenerating symbols only because the front month changes.
     """
 
-    FRONT_EXPIRY = date(2026, 7, 28)
+    FRONT_EXPIRY = date(2026, 8, 25)
     LOAD_EXPIRY_COUNT = 3
 
 
