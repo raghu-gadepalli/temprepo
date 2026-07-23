@@ -520,6 +520,10 @@ class TradeMonitor:
         self._pp = PriceProvider()
         self._pass_ltp_map: Dict[str, Tuple[Optional[Decimal], datetime]] = {}
         self._pass_group_reference_ids: Dict[Tuple[str, str], int] = {}
+        # Per-pass item failures are recorded so long-running backend services
+        # can continue with the next trade while callers/replays can still fail
+        # the cycle explicitly after inspecting the complete result set.
+        self.last_pass_errors: List[Dict[str, Any]] = []
 
         self._dt_keys = {
             "last_time",
@@ -563,6 +567,7 @@ class TradeMonitor:
         - entry_status = FILLED
         - exit_status not terminal/filled
         """
+        self.last_pass_errors = []
         trades = UserTradeSchema.fetch_open_positions()
 
         if not trades:
@@ -688,15 +693,33 @@ class TradeMonitor:
                         _optional(updates, "exit_reason"),
                     )
 
-            except Exception:
+            except Exception as exc:
+                error = {
+                    "trade_id": getattr(ut, "id", None),
+                    "symbol": getattr(ut, "symbol", None),
+                    "userid": getattr(ut, "userid", None),
+                    "signal_id": getattr(ut, "signal_id", None),
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                }
+                self.last_pass_errors.append(error)
                 logger.exception(
-                    "TradeMonitor: fatal trade evaluation error trade_id=%s symbol=%s",
-                    getattr(ut, "id", "?"),
-                    getattr(ut, "symbol", "?"),
+                    "TradeMonitor: trade evaluation error; continuing with next trade "
+                    "trade_id=%s symbol=%s error_type=%s",
+                    error["trade_id"],
+                    error["symbol"],
+                    error["error_type"],
                 )
-                raise
+                continue
 
-        logger.info("TradeMonitor: pass updated %d positions", updated_count)
+        if self.last_pass_errors:
+            logger.error(
+                "TradeMonitor: pass completed with item errors updated=%d errors=%d",
+                updated_count,
+                len(self.last_pass_errors),
+            )
+        else:
+            logger.info("TradeMonitor: pass updated %d positions", updated_count)
         return updated_count
 
 
@@ -1399,11 +1422,13 @@ class TradeMonitor:
             return {}
         if not contract.requires_exit:
             return {}
+        # Keep exit_rule as an exact machine-readable contract value. The
+        # detailed lifecycle reason remains available in trade_management and
+        # the TradeMonitor audit payload.
         return self._exit_payload(
             ctx,
             reason="SIGNAL_LIFECYCLE_EXIT",
             rule="exit_on_auction_signal_downstream_contract",
-            extra_reason=contract.management_reason_code,
         )
 
     def _dynamic_target_hit(self, ctx: TradeMonitorContext) -> bool:

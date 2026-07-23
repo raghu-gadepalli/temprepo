@@ -12,7 +12,7 @@ from enums.enums import TradePosture
 from services.signals.signal_generator import SignalAssembler
 from services.trade.monitor.signal_contract import AuctionTradeSignalContext
 from services.trade.monitor.trademon_helper import TradeMonHelper
-from services.trade.monitor.trade_monitor import _audit_trade_monitor
+from services.trade.monitor.trade_monitor import TradeMonitor, _audit_trade_monitor
 from tests.test_signal_generator_auction_snapshot import (
     FakeFetcher,
     FakePersister,
@@ -288,6 +288,61 @@ class StrictAuctionTradeMonitorContractTests(unittest.TestCase):
         self.assertIn("signal_auction_action", source)
         self.assertIn("current_signal_stage", source)
         self.assertIn("trade_state_frozen_at_exit", source)
+
+    def test_signal_lifecycle_exit_uses_exact_canonical_rule(self):
+        signal = _signal()
+        signal.meta_json = deepcopy(signal.meta_json)
+        signal.stage = "EXIT_BIAS"
+        signal.meta_json["signal"]["stage"] = "EXIT_BIAS"
+        signal.meta_json["lifecycle"]["stage"] = "EXIT_BIAS"
+        signal.meta_json["lifecycle"]["trade_action"] = "EXIT_POSITION"
+        evidence = signal.meta_json["active_signal_evidence"]
+        evidence["stage"] = "EXIT_BIAS"
+        evidence["active_evidence_action"] = "EXIT"
+        evidence["evidence_action"] = "EXIT"
+        evidence["trade_action"] = "EXIT_POSITION"
+        evidence["should_exit_signal"] = True
+        evidence["target_expansion_allowed"] = False
+        contract = AuctionTradeSignalContext.from_signal(signal)
+        ctx = SimpleNamespace(
+            signal_contract=contract,
+            last_time=TS,
+            last_price=101.0,
+            pnl_value=-1.0,
+            pnl_per_unit=-1.0,
+        )
+        payload = TradeMonitor()._signal_exit_payload(ctx)
+        self.assertEqual("SIGNAL_LIFECYCLE_EXIT", payload["exit_reason"])
+        self.assertEqual(
+            "exit_on_auction_signal_downstream_contract",
+            payload["exit_rule"],
+        )
+        self.assertNotIn(":", payload["exit_rule"])
+
+    def test_monitor_records_item_errors_and_continues_contract(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (
+            root / "services" / "trade" / "monitor" / "trade_monitor.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("self.last_pass_errors", source)
+        self.assertIn("continuing with next trade", source)
+        self.assertIn("pass completed with item errors", source)
+        self.assertNotIn("fatal trade evaluation error", source)
+
+    def test_replay_writes_validation_reports_and_returns_clean_failure_code(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (
+            root / "tests" / "replay_auction_signal_trade_pipeline.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("_validation.csv", source)
+        self.assertIn("_monitor_errors.csv", source)
+        self.assertIn('"validation_status"', source)
+        self.assertIn('return 2', source)
+        self.assertIn("REPLAY_VALIDATION_FAILED", source)
+        self.assertNotIn(
+            'raise AssertionError("SIGNAL_EXIT replay did not produce',
+            source,
+        )
 
     def test_exact_signal_exit_precedes_generic_adaptive_exit(self):
         root = Path(__file__).resolve().parents[1]

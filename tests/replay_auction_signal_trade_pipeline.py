@@ -873,6 +873,44 @@ def _validate_replay_timestamps(
                     f"trade {trade.id} {field} escaped replay day: {value}"
                 )
 
+def _record_validation_failure(
+    failures: List[Dict[str, Any]],
+    *,
+    code: str,
+    message: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    row = {
+        "code": str(code).strip().upper(),
+        "message": str(message).strip(),
+        "details": sanitize_json(details or {}),
+    }
+    failures.append(row)
+    logger.error(
+        "REPLAY_VALIDATION_FAILED | code=%s | message=%s | details=%s",
+        row["code"],
+        row["message"],
+        json.dumps(row["details"], sort_keys=True, default=str),
+    )
+
+
+def _capture_validation(
+    failures: List[Dict[str, Any]],
+    *,
+    code: str,
+    validator: Any,
+) -> None:
+    try:
+        validator()
+    except Exception as exc:
+        _record_validation_failure(
+            failures,
+            code=code,
+            message=str(exc),
+            details={"error_type": type(exc).__name__},
+        )
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _args(argv)
     trading_day = date.fromisoformat(args.date)
@@ -955,6 +993,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     tradegen_outcome_counts: Counter[str] = Counter()
     executor_entry_total = 0
     monitor_update_total = 0
+    monitor_error_total = 0
+    monitor_error_rows: List[Dict[str, Any]] = []
     executor_exit_total = 0
     first_signal_exit_request_time: Optional[datetime] = None
 
@@ -1034,6 +1074,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     snapshot_time=snapshot.snapshot_time
                 )
                 monitor_update_total += int(monitor_updates or 0)
+                pass_monitor_errors = list(trade_monitor.last_pass_errors)
+                monitor_error_total += len(pass_monitor_errors)
+                for monitor_error in pass_monitor_errors:
+                    monitor_error_rows.append(
+                        {
+                            "snapshot_index": index,
+                            "snapshot_time": snapshot.snapshot_time,
+                            **monitor_error,
+                        }
+                    )
 
                 exit_updates = trade_executor.execute_user_once(
                     userid=userid,
@@ -1080,6 +1130,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "tradegen_created_count": tradegen_created_count,
                         "executor_entry_updates": int(entry_updates or 0),
                         "monitor_updates": int(monitor_updates or 0),
+                        "monitor_error_count": len(pass_monitor_errors),
                         "executor_exit_updates": int(exit_updates or 0),
                         "trade_count": len(current_trades),
                         "entry_status_counts": json.dumps(
@@ -1140,39 +1191,101 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         symbols=symbols,
         userid=userid,
     )
-    _validate_final_results(
-        signals=final_signals,
-        trades=final_trades,
-        require_trade=bool(args.require_trade),
-        require_exit=bool(args.require_exit),
+    validation_failures: List[Dict[str, Any]] = []
+
+    _capture_validation(
+        validation_failures,
+        code="FINAL_RESULT_CONTRACT",
+        validator=lambda: _validate_final_results(
+            signals=final_signals,
+            trades=final_trades,
+            require_trade=bool(args.require_trade),
+            require_exit=bool(args.require_exit),
+        ),
     )
-    _validate_replay_timestamps(trades=final_trades, trading_day=trading_day)
+    _capture_validation(
+        validation_failures,
+        code="REPLAY_TIMESTAMP_CONTRACT",
+        validator=lambda: _validate_replay_timestamps(
+            trades=final_trades,
+            trading_day=trading_day,
+        ),
+    )
+
     if test_mode == "SIGNAL_EXIT":
         if first_signal_exit_request_time is None:
-            raise AssertionError("SIGNAL_EXIT replay never observed should_exit_signal=true")
+            _record_validation_failure(
+                validation_failures,
+                code="SIGNAL_EXIT_REQUEST_MISSING",
+                message="SIGNAL_EXIT replay never observed should_exit_signal=true",
+            )
+
         filled_signal_exits = [
             trade
             for trade in final_trades
             if trade.exit_status.value == ExitStatus.FILLED.value
             and str(trade.exit_reason or "").strip().upper() == "SIGNAL_LIFECYCLE_EXIT"
-            and str(trade.exit_rule or "").strip()
-            == "exit_on_auction_signal_downstream_contract"
+        ]
+        actual_exits = [
+            {
+                "trade_id": trade.id,
+                "exit_status": trade.exit_status.value,
+                "exit_reason": trade.exit_reason,
+                "exit_rule": trade.exit_rule,
+                "exit_exec_time": trade.exit_exec_time,
+            }
+            for trade in final_trades
         ]
         if not filled_signal_exits:
-            raise AssertionError(
-                "SIGNAL_EXIT replay did not produce a filled SIGNAL_LIFECYCLE_EXIT"
+            _record_validation_failure(
+                validation_failures,
+                code="SIGNAL_LIFECYCLE_EXIT_NOT_FILLED",
+                message=(
+                    "SIGNAL_EXIT replay did not produce a filled "
+                    "SIGNAL_LIFECYCLE_EXIT"
+                ),
+                details={"actual_exits": actual_exits},
             )
+
         for trade in filled_signal_exits:
+            expected_rule = "exit_on_auction_signal_downstream_contract"
+            actual_rule = str(trade.exit_rule or "").strip()
+            if actual_rule != expected_rule:
+                _record_validation_failure(
+                    validation_failures,
+                    code="SIGNAL_EXIT_RULE_MISMATCH",
+                    message="signal lifecycle exit used a non-canonical exit_rule",
+                    details={
+                        "trade_id": trade.id,
+                        "expected_rule": expected_rule,
+                        "actual_rule": actual_rule,
+                    },
+                )
             if trade.exit_exec_time is None:
-                raise AssertionError("signal lifecycle exit is missing exit_exec_time")
+                _record_validation_failure(
+                    validation_failures,
+                    code="SIGNAL_EXIT_TIME_MISSING",
+                    message="signal lifecycle exit is missing exit_exec_time",
+                    details={"trade_id": trade.id},
+                )
+                continue
+            if first_signal_exit_request_time is None:
+                continue
             request_time = (
                 first_signal_exit_request_time.astimezone(IST).replace(tzinfo=None)
                 if first_signal_exit_request_time.tzinfo
                 else first_signal_exit_request_time
             )
             if trade.exit_exec_time < request_time:
-                raise AssertionError(
-                    "signal lifecycle exit filled before the first exit request"
+                _record_validation_failure(
+                    validation_failures,
+                    code="SIGNAL_EXIT_BEFORE_REQUEST",
+                    message="signal lifecycle exit filled before the first exit request",
+                    details={
+                        "trade_id": trade.id,
+                        "exit_exec_time": trade.exit_exec_time,
+                        "first_signal_exit_request_time": request_time,
+                    },
                 )
 
     signal_rows = [
@@ -1209,9 +1322,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     monitor_audit_rows = int(audit_stage_counts["TRADE_MONITOR"])
     if monitor_update_total > 0 and monitor_audit_rows < monitor_update_total:
-        raise AssertionError(
-            "TradeMonitor audit rows are missing: "
-            f"monitor_updates={monitor_update_total} audit_rows={monitor_audit_rows}"
+        _record_validation_failure(
+            validation_failures,
+            code="TRADE_MONITOR_AUDIT_MISSING",
+            message="TradeMonitor audit rows are missing",
+            details={
+                "monitor_updates": monitor_update_total,
+                "audit_rows": monitor_audit_rows,
+            },
+        )
+    if monitor_error_total > 0:
+        _record_validation_failure(
+            validation_failures,
+            code="TRADE_MONITOR_ITEM_ERRORS",
+            message="TradeMonitor completed with one or more per-trade errors",
+            details={"monitor_error_count": monitor_error_total},
         )
 
     final_entry_status = Counter(trade.entry_status.value for trade in final_trades)
@@ -1252,6 +1377,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "tradegen_outcome_counts": dict(sorted(tradegen_outcome_counts.items())),
             "executor_entry_updates": executor_entry_total,
             "monitor_updates": monitor_update_total,
+            "monitor_error_count": monitor_error_total,
             "executor_exit_updates": executor_exit_total,
             "signals_persisted": len(final_signals),
             "trades_persisted": len(final_trades),
@@ -1264,6 +1390,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "audit_rows": len(audit_rows),
             "audit_stage_counts": dict(sorted(audit_stage_counts.items())),
             "trade_monitor_audit_rows": monitor_audit_rows,
+            "validation_status": "PASSED" if not validation_failures else "FAILED",
+            "validation_error_count": len(validation_failures),
+            "validation_errors": validation_failures,
+            "final_exit_details": [
+                {
+                    "trade_id": trade.id,
+                    "exit_status": trade.exit_status.value,
+                    "exit_reason": trade.exit_reason,
+                    "exit_rule": trade.exit_rule,
+                    "exit_exec_time": trade.exit_exec_time,
+                }
+                for trade in final_trades
+            ],
             "require_trade": bool(args.require_trade),
             "require_exit": bool(args.require_exit),
         }
@@ -1279,6 +1418,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     _write_csv(prefix.with_name(prefix.name + "_signals.csv"), signal_rows)
     _write_csv(prefix.with_name(prefix.name + "_trades.csv"), trade_rows)
     _write_csv(prefix.with_name(prefix.name + "_audit.csv"), audit_rows)
+    _write_csv(
+        prefix.with_name(prefix.name + "_monitor_errors.csv"),
+        monitor_error_rows,
+    )
+    _write_csv(
+        prefix.with_name(prefix.name + "_validation.csv"),
+        validation_failures,
+    )
 
     prefix.with_name(prefix.name + "_summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True, default=str),
@@ -1309,9 +1456,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "final_instrument_counts": json.dumps(
                     summary["final_instrument_counts"], sort_keys=True
                 ),
+                "validation_errors": json.dumps(
+                    summary["validation_errors"], sort_keys=True, default=str
+                ),
+                "final_exit_details": json.dumps(
+                    summary["final_exit_details"], sort_keys=True, default=str
+                ),
             }
         ],
     )
+
+    if validation_failures:
+        logger.error(
+            "Strict Auction signal/trade replay completed with validation failures | "
+            "count=%d reports=%s_*",
+            len(validation_failures),
+            prefix,
+        )
+        return 2
 
     logger.info("Strict Auction signal/trade replay complete | %s", summary)
     logger.info("Reports: %s_*", prefix)
@@ -1319,4 +1481,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        exit_code = main()
+    except KeyboardInterrupt:
+        logger.warning("Replay interrupted by operator")
+        exit_code = 130
+    except Exception:
+        logger.exception("REPLAY_FATAL_ERROR | unexpected failure before clean completion")
+        exit_code = 1
+    raise SystemExit(exit_code)
