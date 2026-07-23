@@ -483,30 +483,42 @@ def write_auditlog(
     confidence: Optional[Any] = None,
     payload_json: Optional[Dict[str, Any]] = None,
     ts: Optional[datetime] = None,
+    strict: bool = False,
+    force_persist: bool = False,
 ) -> bool:
-    """Policy-controlled, best-effort append-only lifecycle writer.
+    """Policy-controlled append-only lifecycle writer.
 
-    Services emit candidate events; this central policy decides whether a row
-    is useful in DEBUGGING/PRODUCTION mode. It must never interrupt trading.
-    Any policy skip or insert error is non-fatal.
+    Normal callers retain the existing non-critical audit behaviour. Strict
+    lifecycle callers may set ``strict=True`` so an insert failure is visible,
+    and ``force_persist=True`` when the caller has already decided that the
+    event is a meaningful transition that must be recorded.
     """
     audit_reserved = False
     try:
         resolved_ts = _resolve_audit_ts(ts, payload_json)
-        if not _should_persist_event(
-            entity_type=entity_type,
-            entity_id=entity_id,
-            userid=userid,
-            evaluation_stage=evaluation_stage,
-            previous_state=previous_state,
-            new_state=new_state,
-            action=action,
-            reason_code=reason_code,
-            payload_json=payload_json,
-            resolved_ts=resolved_ts,
-        ):
+        if not bool(AUDIT_CONFIG.enabled):
+            if strict:
+                raise RuntimeError("audit logging is disabled for a strict audit event")
             return False
-        audit_reserved = True
+
+        if force_persist:
+            should_persist = True
+        else:
+            should_persist = _should_persist_event(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                userid=userid,
+                evaluation_stage=evaluation_stage,
+                previous_state=previous_state,
+                new_state=new_state,
+                action=action,
+                reason_code=reason_code,
+                payload_json=payload_json,
+                resolved_ts=resolved_ts,
+            )
+        if not should_persist:
+            return False
+        audit_reserved = not force_persist
 
         row = AuditLog(
             ts=resolved_ts,
@@ -563,4 +575,6 @@ def write_auditlog(
             )
         else:
             logger.warning("auditlog write failed: %s", exc, exc_info=True)
+        if strict:
+            raise
         return False

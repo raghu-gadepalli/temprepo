@@ -21,19 +21,14 @@ Safety and scope
   and underlying symbols so unrelated live/test trades cannot be touched.
 - Optional cleanup is explicit and restricted to the selected replay scope.
 
-Recommended COFORGE command (PowerShell)
-----------------------------------------
+Default COFORGE signal-exit command (PowerShell)
+--------------------------------------------------
 
     $env:PYTHONPATH = "$PWD;$PWD\\tests"
-    python tests/replay_auction_signal_trade_pipeline.py `
-        --date 2026-07-20 `
-        --symbols COFORGE `
-        --userid DR1812 `
-        --instrument-choice EQ `
-        --clear-run-data `
-        --require-trade `
-        --require-exit `
-        --report-dir reports
+    python tests/replay_auction_signal_trade_pipeline.py
+
+The defaults are declared near the top of this file. Every value can be
+overridden from the command line, for example ``--test-mode ADAPTIVE_EXIT``.
 """
 from __future__ import annotations
 
@@ -57,6 +52,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from configs.execution_config import EXECUTION_CONFIG
+from configs.monitor_config import MONITOR_CONFIG
 from configs.signal_config import SIGNAL_CONFIG
 from database.database import get_trades_db
 from enums.enums import EntryStatus, ExitStatus
@@ -71,12 +67,26 @@ from schemas.user_trade import TradeManagementSchema, UserTradeSchema
 from services.signals.signal_generator import SignalGenerator
 from services.trade.executor import trade_executor as executor_module
 from services.trade.executor.trade_executor import TradeExecutor
+from services.trade.generator import tradegen_helper as tradegen_helper_module
+from services.trade.generator import tradegen_validator as tradegen_validator_module
 from services.trade.generator.trade_generator import TradeGenerator
 from services.trade.monitor.trade_monitor import TradeMonitor
 from utils.json_utils import sanitize_json
 
 IST = ZoneInfo("Asia/Kolkata")
 logger = logging.getLogger(__name__)
+
+# Safe, visible defaults for the current dedicated COFORGE replay. Every value
+# can be overridden from the command line.
+DEFAULT_TRADING_DAY = "2026-07-20"
+DEFAULT_SYMBOLS = "COFORGE"
+DEFAULT_USERID = "DR1812"
+DEFAULT_INSTRUMENT_CHOICE = "EQ"
+DEFAULT_TEST_MODE = "SIGNAL_EXIT"
+DEFAULT_CLEAR_RUN_DATA = True
+DEFAULT_REQUIRE_TRADE = True
+DEFAULT_REQUIRE_EXIT = True
+DEFAULT_REPORT_DIR = "reports"
 
 _EXPECTED_TRADEGEN_NONFATAL = {
     "TRADE_DECISION_NOT_ALLOWED",
@@ -88,40 +98,66 @@ def _args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Replay persisted Auction snapshots through SignalGenerator, "
-            "TradeGenerator, virtual TradeExecutor, and strict TradeMonitor."
+            "TradeGenerator, virtual TradeExecutor, and strict TradeMonitor. "
+            "All options have visible source defaults and command-line overrides."
         )
     )
-    parser.add_argument("--date", required=True, help="Trading day YYYY-MM-DD")
-    parser.add_argument("--symbols", required=True, help="Comma-separated equity symbols")
-    parser.add_argument("--userid", required=True, help="Dedicated VIRTUAL replay userid")
+    parser.add_argument(
+        "--date",
+        default=DEFAULT_TRADING_DAY,
+        help=f"Trading day YYYY-MM-DD (default: {DEFAULT_TRADING_DAY})",
+    )
+    parser.add_argument(
+        "--symbols",
+        default=DEFAULT_SYMBOLS,
+        help=f"Comma-separated equity symbols (default: {DEFAULT_SYMBOLS})",
+    )
+    parser.add_argument(
+        "--userid",
+        default=DEFAULT_USERID,
+        help=f"Dedicated VIRTUAL replay userid (default: {DEFAULT_USERID})",
+    )
     parser.add_argument(
         "--instrument-choice",
-        default="EQ",
+        default=DEFAULT_INSTRUMENT_CHOICE,
         choices=("EQ", "FUT", "CE", "PE", "MULTI"),
-        help="Signal trade package to create; EQ is the safest first replay",
+        help=f"Signal trade package (default: {DEFAULT_INSTRUMENT_CHOICE})",
+    )
+    parser.add_argument(
+        "--test-mode",
+        default=DEFAULT_TEST_MODE,
+        choices=("SIGNAL_EXIT", "ADAPTIVE_EXIT"),
+        help=(
+            "SIGNAL_EXIT disables adaptive target/stop exits so the Auction "
+            "signal lifecycle must close the trade; ADAPTIVE_EXIT keeps normal "
+            f"monitor exits enabled (default: {DEFAULT_TEST_MODE})"
+        ),
     )
     parser.add_argument(
         "--clear-run-data",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_CLEAR_RUN_DATA,
         help=(
-            "Delete only selected-day signals, selected-user trades, and selected-symbol "
-            "audit rows before replay"
+            "Delete only selected-day signals, selected-user trades, and "
+            f"selected-symbol audit rows before replay (default: {DEFAULT_CLEAR_RUN_DATA})"
         ),
     )
     parser.add_argument(
         "--require-trade",
-        action="store_true",
-        help="Fail the replay if no user_trade row is created",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_REQUIRE_TRADE,
+        help=f"Require at least one created trade (default: {DEFAULT_REQUIRE_TRADE})",
     )
     parser.add_argument(
         "--require-exit",
-        action="store_true",
-        help="Fail the replay unless at least one created trade reaches exit_status=FILLED",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_REQUIRE_EXIT,
+        help=f"Require at least one FILLED exit (default: {DEFAULT_REQUIRE_EXIT})",
     )
     parser.add_argument("--start-time", help="Optional inclusive HH:MM[:SS] filter")
     parser.add_argument("--end-time", help="Optional inclusive HH:MM[:SS] filter")
     parser.add_argument("--batch-size", type=int, default=500)
-    parser.add_argument("--report-dir", default="reports")
+    parser.add_argument("--report-dir", default=DEFAULT_REPORT_DIR)
     parser.add_argument("--log-file")
     return parser.parse_args(argv)
 
@@ -534,6 +570,55 @@ def _restrict_trade_services(
         executor_module._fetch_candidates_for_user = original_executor_fetch
 
 
+
+@contextmanager
+def _deterministic_replay_clock() -> Iterator[Any]:
+    """Route generator/executor wall-clock helpers to the active snapshot time."""
+    clock: Dict[str, Optional[datetime]] = {"current": None}
+    original_helper_now = tradegen_helper_module.business_now_naive
+    original_validator_now = tradegen_validator_module.business_now_naive
+    original_executor_now = executor_module._now_ist_naive
+
+    def replay_now() -> datetime:
+        current = clock["current"]
+        if current is None:
+            raise RuntimeError("replay clock used before a snapshot time was assigned")
+        return current.astimezone(IST).replace(tzinfo=None) if current.tzinfo else current
+
+    def set_time(value: datetime) -> None:
+        if not isinstance(value, datetime):
+            raise TypeError("replay clock requires datetime snapshot_time")
+        clock["current"] = value
+
+    tradegen_helper_module.business_now_naive = replay_now
+    tradegen_validator_module.business_now_naive = replay_now
+    executor_module._now_ist_naive = replay_now
+    try:
+        yield set_time
+    finally:
+        tradegen_helper_module.business_now_naive = original_helper_now
+        tradegen_validator_module.business_now_naive = original_validator_now
+        executor_module._now_ist_naive = original_executor_now
+
+
+@contextmanager
+def _monitor_test_policy(test_mode: str) -> Iterator[None]:
+    """Temporarily select normal adaptive exit or signal-lifecycle exit testing."""
+    mode = str(test_mode).strip().upper()
+    tm = MONITOR_CONFIG.trade_management
+    old_target = bool(tm.exit_on_current_target)
+    old_stop = bool(tm.exit_on_current_stop)
+    if mode == "SIGNAL_EXIT":
+        tm.exit_on_current_target = False
+        tm.exit_on_current_stop = False
+    elif mode != "ADAPTIVE_EXIT":
+        raise ValueError(f"Unsupported replay test mode: {mode}")
+    try:
+        yield
+    finally:
+        tm.exit_on_current_target = old_target
+        tm.exit_on_current_stop = old_stop
+
 def _signal_context(signal: Optional[SignalSchema]) -> Dict[str, Any]:
     if signal is None:
         return {
@@ -544,9 +629,9 @@ def _signal_context(signal: Optional[SignalSchema]) -> Dict[str, Any]:
             "management_posture": None,
             "lifecycle_trade_action": None,
             "should_exit_signal": None,
-            "auction_action": None,
-            "auction_state": None,
-            "directional_alignment": None,
+            "signal_auction_action": None,
+            "signal_auction_state": None,
+            "signal_directional_alignment": None,
             "opportunity_key": None,
             "candidate_id": None,
             "boundary_event_key": None,
@@ -590,13 +675,13 @@ def _signal_context(signal: Optional[SignalSchema]) -> Dict[str, Any]:
         "should_exit_signal": _required_value(
             evidence, "should_exit_signal", "signal.meta_json.active_signal_evidence"
         ),
-        "auction_action": _required_value(
+        "signal_auction_action": _required_value(
             evidence, "auction_action", "signal.meta_json.active_signal_evidence"
         ),
-        "auction_state": _required_value(
+        "signal_auction_state": _required_value(
             evidence, "auction_state", "signal.meta_json.active_signal_evidence"
         ),
-        "directional_alignment": _required_value(
+        "signal_directional_alignment": _required_value(
             evidence, "directional_alignment", "signal.meta_json.active_signal_evidence"
         ),
         "opportunity_key": _required_value(
@@ -759,6 +844,35 @@ def _validate_final_results(
             raise AssertionError("Replay expected at least one FILLED exit")
 
 
+
+def _validate_replay_timestamps(
+    *, trades: List[UserTradeSchema], trading_day: date
+) -> None:
+    fields = (
+        "entry_time",
+        "entry_intent_time",
+        "entry_exec_time",
+        "entry_reconciled_at",
+        "exec_last_checked_at",
+        "exit_intent_time",
+        "exit_exec_time",
+        "exit_reconciled_at",
+        "reconcile_last_checked_at",
+        "last_time",
+    )
+    for trade in trades:
+        for field in fields:
+            value = getattr(trade, field, None)
+            if value is None:
+                continue
+            if not isinstance(value, datetime):
+                raise TypeError(f"trade {trade.id} {field} must be datetime")
+            observed = value.astimezone(IST).date() if value.tzinfo else value.date()
+            if observed != trading_day:
+                raise AssertionError(
+                    f"trade {trade.id} {field} escaped replay day: {value}"
+                )
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _args(argv)
     trading_day = date.fromisoformat(args.date)
@@ -768,6 +882,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise ValueError("--userid cannot be blank")
     lifecycle = SIGNAL_CONFIG.default_lifecycle.strip().upper()
     instrument_choice = str(args.instrument_choice).strip().upper()
+    test_mode = str(args.test_mode).strip().upper()
     report_dir = Path(args.report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
     log_file = args.log_file or str(report_dir / "replay_auction_signal_trade_pipeline.log")
@@ -775,6 +890,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     global logger
     logger = logging.getLogger(__name__)
 
+    logger.info(
+        "Resolved replay configuration | date=%s symbols=%s userid=%s "
+        "instrument=%s test_mode=%s clear=%s require_trade=%s require_exit=%s report_dir=%s",
+        trading_day,
+        symbols,
+        userid,
+        instrument_choice,
+        test_mode,
+        bool(args.clear_run_data),
+        bool(args.require_trade),
+        bool(args.require_exit),
+        report_dir,
+    )
     _validate_replay_user(userid, instrument_choice)
 
     cleared = {"signals": 0, "trades": 0, "audit": 0}
@@ -828,6 +956,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     executor_entry_total = 0
     monitor_update_total = 0
     executor_exit_total = 0
+    first_signal_exit_request_time: Optional[datetime] = None
 
     trade_generator = TradeGenerator()
     trade_executor = TradeExecutor()
@@ -835,11 +964,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     logger.info(
         "Starting strict Auction signal/trade replay | day=%s symbols=%s userid=%s "
-        "instrument=%s snapshots=%d cleared=%s",
+        "instrument=%s test_mode=%s snapshots=%d cleared=%s",
         trading_day,
         symbols,
         userid,
         instrument_choice,
+        test_mode,
         len(snapshots),
         cleared,
     )
@@ -849,8 +979,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             trading_day=trading_day,
             symbols=symbols,
             userid=userid,
-        ):
+        ), _deterministic_replay_clock() as set_replay_time, _monitor_test_policy(test_mode):
             for index, snapshot in enumerate(snapshots, start=1):
+                set_replay_time(snapshot.snapshot_time)
                 signal_action = SignalGenerator(snapshot).generate() or "NO_ACTION"
                 signal_action_counts[signal_action] += 1
 
@@ -862,6 +993,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 signal_ctx = _signal_context(signal)
                 if signal_ctx["signal_stage"] is not None:
                     signal_stage_counts[str(signal_ctx["signal_stage"])] += 1
+                if (
+                    signal_ctx["should_exit_signal"] is True
+                    and first_signal_exit_request_time is None
+                ):
+                    first_signal_exit_request_time = snapshot.snapshot_time
 
                 tradegen_attempted = False
                 tradegen_outcome = "NO_SIGNAL"
@@ -932,8 +1068,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "index": index,
                         "symbol": snapshot.symbol,
                         "snapshot_time": snapshot.snapshot_time,
-                        "auction_action": decision.action,
-                        "auction_state": auction_state,
+                        "snapshot_auction_action": decision.action,
+                        "snapshot_auction_state": auction_state,
                         "selected_opportunity_key": decision.selected_opportunity_key,
                         "selected_candidate_id": decision.selected_candidate_id,
                         "signal_action": signal_action,
@@ -956,11 +1092,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 )
 
                 for trade in current_trades:
+                    trade_row = _trade_row(trade)
                     trade_observation_rows.append(
                         {
                             "snapshot_index": index,
-                            "snapshot_time": snapshot.snapshot_time,
-                            **_trade_row(trade),
+                            "observation_snapshot_time": snapshot.snapshot_time,
+                            "current_signal_stage": signal_ctx["signal_stage"],
+                            "current_signal_status": signal_ctx["signal_status"],
+                            "current_signal_reason": signal_ctx["signal_reason"],
+                            "current_signal_management_posture": signal_ctx["management_posture"],
+                            "current_signal_trade_action": signal_ctx["lifecycle_trade_action"],
+                            "current_signal_should_exit": signal_ctx["should_exit_signal"],
+                            "current_signal_auction_action": signal_ctx["signal_auction_action"],
+                            "current_signal_auction_state": signal_ctx["signal_auction_state"],
+                            "current_signal_directional_alignment": signal_ctx["signal_directional_alignment"],
+                            "trade_state_frozen_at_exit": trade.exit_status.value == ExitStatus.FILLED.value,
+                            **trade_row,
                         }
                     )
 
@@ -999,6 +1146,34 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         require_trade=bool(args.require_trade),
         require_exit=bool(args.require_exit),
     )
+    _validate_replay_timestamps(trades=final_trades, trading_day=trading_day)
+    if test_mode == "SIGNAL_EXIT":
+        if first_signal_exit_request_time is None:
+            raise AssertionError("SIGNAL_EXIT replay never observed should_exit_signal=true")
+        filled_signal_exits = [
+            trade
+            for trade in final_trades
+            if trade.exit_status.value == ExitStatus.FILLED.value
+            and str(trade.exit_reason or "").strip().upper() == "SIGNAL_LIFECYCLE_EXIT"
+            and str(trade.exit_rule or "").strip()
+            == "exit_on_auction_signal_downstream_contract"
+        ]
+        if not filled_signal_exits:
+            raise AssertionError(
+                "SIGNAL_EXIT replay did not produce a filled SIGNAL_LIFECYCLE_EXIT"
+            )
+        for trade in filled_signal_exits:
+            if trade.exit_exec_time is None:
+                raise AssertionError("signal lifecycle exit is missing exit_exec_time")
+            request_time = (
+                first_signal_exit_request_time.astimezone(IST).replace(tzinfo=None)
+                if first_signal_exit_request_time.tzinfo
+                else first_signal_exit_request_time
+            )
+            if trade.exit_exec_time < request_time:
+                raise AssertionError(
+                    "signal lifecycle exit filled before the first exit request"
+                )
 
     signal_rows = [
         {
@@ -1029,6 +1204,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         symbols=symbols,
         userid=userid,
     )
+    audit_stage_counts = Counter(
+        str(row["evaluation_stage"] or "").strip().upper() for row in audit_rows
+    )
+    monitor_audit_rows = int(audit_stage_counts["TRADE_MONITOR"])
+    if monitor_update_total > 0 and monitor_audit_rows < monitor_update_total:
+        raise AssertionError(
+            "TradeMonitor audit rows are missing: "
+            f"monitor_updates={monitor_update_total} audit_rows={monitor_audit_rows}"
+        )
 
     final_entry_status = Counter(trade.entry_status.value for trade in final_trades)
     final_exit_status = Counter(trade.exit_status.value for trade in final_trades)
@@ -1052,6 +1236,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "symbols": symbols,
             "userid": userid,
             "instrument_choice": instrument_choice,
+            "test_mode": test_mode,
+            "adaptive_target_exit_enabled": test_mode == "ADAPTIVE_EXIT",
+            "adaptive_stop_exit_enabled": test_mode == "ADAPTIVE_EXIT",
+            "first_signal_exit_request_time": first_signal_exit_request_time,
             "lifecycle": lifecycle,
             "snapshots": len(snapshots),
             "first_snapshot_time": snapshots[0].snapshot_time,
@@ -1074,6 +1262,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "first_exit_fill_time": first_exit_fill,
             "total_exit_pnl": round(total_exit_pnl, 4),
             "audit_rows": len(audit_rows),
+            "audit_stage_counts": dict(sorted(audit_stage_counts.items())),
+            "trade_monitor_audit_rows": monitor_audit_rows,
             "require_trade": bool(args.require_trade),
             "require_exit": bool(args.require_exit),
         }

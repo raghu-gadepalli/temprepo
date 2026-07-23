@@ -168,97 +168,114 @@ def _quote_key(ut: Any) -> str:
 
 
 def _audit_trade_monitor(ctx: "TradeMonitorContext", updates: Dict[str, Any]) -> None:
-    """Write a compact best-effort audit after authoritative trade persistence."""
-    try:
-        exit_status = _enum_str(updates["exit_status"]) if "exit_status" in updates else ""
-        exit_reason = str(updates["exit_reason"]).strip() if "exit_reason" in updates and updates["exit_reason"] is not None else ""
-        exit_rule = str(updates["exit_rule"]).strip() if "exit_rule" in updates and updates["exit_rule"] is not None else ""
-        action = "EXIT_READY" if exit_status == ExitStatus.READY.value else "MONITOR"
-        reason_code = exit_reason or "monitor_update"
+    """Persist every authoritative TradeMonitor update or fail visibly."""
+    exit_status = _enum_str(updates["exit_status"]) if "exit_status" in updates else ""
+    exit_reason = (
+        str(updates["exit_reason"]).strip()
+        if "exit_reason" in updates and updates["exit_reason"] is not None
+        else ""
+    )
+    exit_rule = (
+        str(updates["exit_rule"]).strip()
+        if "exit_rule" in updates and updates["exit_rule"] is not None
+        else ""
+    )
+    action = "EXIT_READY" if exit_status == ExitStatus.READY.value else "MONITOR"
+    reason_code = exit_reason or "monitor_update"
 
-        updated_management = updates["trade_management"] if "trade_management" in updates else None
-        management = _as_dict(updated_management) if updated_management is not None else _as_dict(ctx.trade_management)
-        management_keys = (
-            "version",
-            "mode",
-            "posture",
-            "target_expansion_allowed",
-            "trail_mode",
-            "exit_pressure",
-            "management_posture",
-            "management_reason_code",
-            "signal_stage",
-            "signal_status",
-            "lifecycle_trade_action",
-            "directional_alignment",
-            "auction_action",
-            "auction_state",
-            "should_exit_signal",
-            "current_target_price",
-            "current_stop_price",
-            "target_r_multiple",
-            "stop_r_multiple",
-            "current_profit_r",
-            "mfe_profit_r",
-            "profit_protection_applied",
-            "expansion_count",
-            "last_target_hit_price",
-            "max_favorable_price",
-            "last_update_reason",
-        )
-        compact_management = {key: management[key] for key in management_keys if key in management}
-        contract = ctx.signal_contract
-        contract_payload = None
-        if contract is not None:
-            contract_payload = {
-                "contract_version": contract.contract_version,
-                "signal_id": contract.signal_id,
-                "stage": contract.stage,
-                "status": contract.status,
-                "management_posture": contract.management_posture,
-                "management_reason_code": contract.management_reason_code,
-                "lifecycle_trade_action": contract.lifecycle_trade_action,
-                "should_exit_signal": contract.should_exit_signal,
-                "auction_action": contract.auction_action,
-                "auction_state": contract.auction_state,
-                "directional_alignment": contract.directional_alignment,
-                "opportunity_key": contract.opportunity_key,
-                "candidate_id": contract.candidate_id,
-                "boundary_event_key": contract.boundary_event_key,
-            }
+    updated_management = updates["trade_management"] if "trade_management" in updates else None
+    management = (
+        _as_dict(updated_management)
+        if updated_management is not None
+        else _as_dict(ctx.trade_management)
+    )
+    management_keys = (
+        "version",
+        "mode",
+        "posture",
+        "target_expansion_allowed",
+        "trail_mode",
+        "exit_pressure",
+        "management_posture",
+        "management_reason_code",
+        "signal_stage",
+        "signal_status",
+        "lifecycle_trade_action",
+        "directional_alignment",
+        "auction_action",
+        "auction_state",
+        "should_exit_signal",
+        "current_target_price",
+        "current_stop_price",
+        "target_r_multiple",
+        "stop_r_multiple",
+        "current_profit_r",
+        "mfe_profit_r",
+        "profit_protection_applied",
+        "expansion_count",
+        "last_target_hit_price",
+        "max_favorable_price",
+        "last_update_reason",
+    )
+    compact_management = {
+        key: management[key] for key in management_keys if key in management
+    }
+    contract = ctx.signal_contract
+    contract_payload = None
+    if contract is not None:
+        contract_payload = {
+            "contract_version": contract.contract_version,
+            "signal_id": contract.signal_id,
+            "stage": contract.stage,
+            "status": contract.status,
+            "management_posture": contract.management_posture,
+            "management_reason_code": contract.management_reason_code,
+            "lifecycle_trade_action": contract.lifecycle_trade_action,
+            "should_exit_signal": contract.should_exit_signal,
+            "auction_action": contract.auction_action,
+            "auction_state": contract.auction_state,
+            "directional_alignment": contract.directional_alignment,
+            "opportunity_key": contract.opportunity_key,
+            "candidate_id": contract.candidate_id,
+            "boundary_event_key": contract.boundary_event_key,
+        }
 
-        write_auditlog(
-            entity_type="TRADE",
-            entity_id=getattr(ctx.trade, "id", None),
-            symbol=getattr(ctx.trade, "symbol", None),
-            userid=getattr(ctx.trade, "userid", None),
-            evaluation_stage="TRADE_MONITOR",
-            previous_state=_exit_status(ctx.trade),
-            new_state=exit_status or _exit_status(ctx.trade),
-            action=action,
-            reason_code=reason_code,
-            reason_text=exit_rule or reason_code,
-            confidence=None,
-            ts=ctx.last_time,
-            payload_json={
-                "signal_id": getattr(ctx.trade, "signal_id", None),
-                "instrument_type": ctx.instrument_type,
-                "side": ctx.side,
-                "last_price": ctx.last_price,
-                "entry_price": ctx.entry_price,
-                "basis_price": ctx.basis_price,
-                "pnl_per_unit": ctx.pnl_per_unit,
-                "pnl_value": ctx.pnl_value,
-                "management": compact_management,
-                "signal_contract": contract_payload,
-                "update_fields": sorted(str(key) for key in updates.keys()),
-                "exit_status": exit_status or None,
-                "exit_reason": exit_reason or None,
-                "exit_rule": exit_rule or None,
-            },
+    persisted = write_auditlog(
+        entity_type="TRADE",
+        entity_id=getattr(ctx.trade, "id", None),
+        symbol=getattr(ctx.trade, "symbol", None),
+        userid=getattr(ctx.trade, "userid", None),
+        evaluation_stage="TRADE_MONITOR",
+        previous_state=_exit_status(ctx.trade),
+        new_state=exit_status or _exit_status(ctx.trade),
+        action=action,
+        reason_code=reason_code,
+        reason_text=exit_rule or reason_code,
+        confidence=None,
+        ts=ctx.last_time,
+        payload_json={
+            "signal_id": getattr(ctx.trade, "signal_id", None),
+            "instrument_type": ctx.instrument_type,
+            "side": ctx.side,
+            "last_price": ctx.last_price,
+            "entry_price": ctx.entry_price,
+            "basis_price": ctx.basis_price,
+            "pnl_per_unit": ctx.pnl_per_unit,
+            "pnl_value": ctx.pnl_value,
+            "management": compact_management,
+            "signal_contract": contract_payload,
+            "update_fields": sorted(str(key) for key in updates.keys()),
+            "exit_status": exit_status or None,
+            "exit_reason": exit_reason or None,
+            "exit_rule": exit_rule or None,
+        },
+        strict=True,
+        force_persist=True,
+    )
+    if not persisted:
+        raise RuntimeError(
+            f"strict TradeMonitor audit was not persisted for trade_id={getattr(ctx.trade, 'id', None)}"
         )
-    except Exception:
-        logger.debug("trade monitor audit failed", exc_info=True)
 
 
 # =============================================================================
@@ -656,9 +673,8 @@ class TradeMonitor:
                     updated_count += 1
                     updated_count += self._mark_sibling_legs_on_primary_exit(ctx, payload)
 
-                    # Audit is deliberately after the authoritative user_trade
-                    # update and sibling-exit persistence.  Audit contention
-                    # must not delay or prevent trade-state updates.
+                    # Audit follows authoritative trade persistence. A missing
+                    # lifecycle audit is now fatal and visible to the caller.
                     _audit_trade_monitor(ctx, payload)
 
                     logger.info(
@@ -800,7 +816,7 @@ class TradeMonitor:
 
         for sib in marked:
             try:
-                write_auditlog(
+                persisted = write_auditlog(
                     entity_type="TRADE",
                     entity_id=getattr(sib, "id", None),
                     symbol=getattr(sib, "symbol", None),
@@ -829,9 +845,16 @@ class TradeMonitor:
                         "group_stop_profit_r": _required(ctx.trade_management, "group_stop_profit_r", "trade_management"),
                         "group_target_r": _required(ctx.trade_management, "group_target_r", "trade_management"),
                     },
+                    strict=True,
+                    force_persist=True,
                 )
+                if not persisted:
+                    raise RuntimeError(
+                        f"strict sibling TradeMonitor audit was not persisted for trade_id={getattr(sib, 'id', None)}"
+                    )
             except Exception:
-                logger.debug("TradeMonitor: sibling-leg audit failed", exc_info=True)
+                logger.exception("TradeMonitor: sibling-leg audit failed")
+                raise
 
         if marked:
             logger.info(
@@ -1338,6 +1361,13 @@ class TradeMonitor:
                 rule="exit_at_observed_price_when_new_mae_stop_is_already_breached",
             )
 
+        # An exact Auction signal-lifecycle exit is authoritative and must keep
+        # its own reason code. The adaptive posture may also be EXIT because it
+        # was derived from the same contract, but it must not obscure the source.
+        signal_exit = self._signal_exit_payload(ctx)
+        if signal_exit:
+            return signal_exit
+
         if _required(ctx.trade_management, "posture", "trade_management") == TradePosture.EXIT.value:
             return self._exit_payload(
                 ctx,
@@ -1345,19 +1375,12 @@ class TradeMonitor:
                 rule="exit_on_adaptive_trade_posture",
             )
 
-        # Current adaptive target is checked before signal invalidation so a
-        # profitable same-cycle target is captured instead of being overwritten
-        # by a signal close/replacement.
         if _tm_cfg_bool("exit_on_current_target") and self._dynamic_target_hit(ctx):
             return self._exit_payload(
                 ctx,
                 reason="ADAPTIVE_TARGET",
                 rule="exit_on_current_adaptive_target",
             )
-
-        signal_exit = self._signal_exit_payload(ctx)
-        if signal_exit:
-            return signal_exit
 
         # Protective SL is only a disaster/emergency guard. The preferred exit
         # path is target/signal/soft-profit protection above.

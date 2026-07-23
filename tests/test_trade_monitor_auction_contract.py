@@ -217,6 +217,50 @@ class StrictAuctionTradeMonitorContractTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         self.assertFalse((root / "services" / "signals" / "signal_helper.py").exists())
 
+    def test_trade_monitor_audit_is_strict_and_forced(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (
+            root / "services" / "trade" / "monitor" / "trade_monitor.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("strict=True", source)
+        self.assertIn("force_persist=True", source)
+        self.assertIn("strict TradeMonitor audit was not persisted", source)
+        self.assertNotIn("trade monitor audit failed", source)
+
+    def test_replay_has_overridable_defaults_and_signal_exit_mode(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (
+            root / "tests" / "replay_auction_signal_trade_pipeline.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('DEFAULT_TRADING_DAY = "2026-07-20"', source)
+        self.assertIn('DEFAULT_SYMBOLS = "COFORGE"', source)
+        self.assertIn('DEFAULT_USERID = "DR1812"', source)
+        self.assertIn('DEFAULT_TEST_MODE = "SIGNAL_EXIT"', source)
+        self.assertIn("argparse.BooleanOptionalAction", source)
+        self.assertIn("_deterministic_replay_clock", source)
+        self.assertIn("SIGNAL_LIFECYCLE_EXIT", source)
+
+    def test_replay_separates_snapshot_signal_and_frozen_trade_state(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (
+            root / "tests" / "replay_auction_signal_trade_pipeline.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("snapshot_auction_action", source)
+        self.assertIn("signal_auction_action", source)
+        self.assertIn("current_signal_stage", source)
+        self.assertIn("trade_state_frozen_at_exit", source)
+
+    def test_exact_signal_exit_precedes_generic_adaptive_exit(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (
+            root / "services" / "trade" / "monitor" / "trade_monitor.py"
+        ).read_text(encoding="utf-8")
+        signal_index = source.index("signal_exit = self._signal_exit_payload(ctx)")
+        adaptive_index = source.index(
+            '_required(ctx.trade_management, "posture", "trade_management") == TradePosture.EXIT.value'
+        )
+        self.assertLess(signal_index, adaptive_index)
+
 
 if __name__ == "__main__":
     unittest.main()
