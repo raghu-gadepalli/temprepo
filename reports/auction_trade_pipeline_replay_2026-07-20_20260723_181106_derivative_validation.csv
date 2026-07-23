@@ -1,3 +1,0 @@
-entry_snapshot_time,executed_entry_price,executed_price_matches,expected_entry_price,expected_symbol,instrument_type,planned_entry_price,planned_price_matches,symbol_matches,trade_id,trade_symbol,validation_status
-2026-07-20T11:48:00+05:30,1504.0,True,1504.0,COFORGE26JULFUT,FUT,1504.0,True,True,2,COFORGE26JULFUT,PASSED
-2026-07-20T11:48:00+05:30,37.85,True,37.85,COFORGE26JUL1500PE,PE,37.85,True,True,3,COFORGE26JUL1500PE,PASSED

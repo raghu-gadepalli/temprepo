@@ -323,11 +323,86 @@ def _scope_trade_query(db: Any, trading_day: date, symbols: List[str], userid: s
     )
 
 
-def _scope_audit_query(db: Any, trading_day: date, symbols: List[str], userid: str) -> Any:
+def _audit_scope_values(
+    *,
+    symbols: Sequence[str],
+    signals: Sequence[Any] = (),
+    trades: Sequence[Any] = (),
+) -> Tuple[List[str], List[str], List[str]]:
+    """Return deterministic signal, trade, and package-symbol audit scope.
+
+    Audit rows are not guaranteed to use the underlying equity symbol. Trade
+    executor and monitor rows use each package leg's actual instrument symbol,
+    while signal and trade-generator rows may be keyed by signal/trade entity
+    IDs. Build the complete replay scope from persisted replay rows so cleanup,
+    export, and validation all operate on the same package.
+    """
+
+    signal_ids = sorted(
+        {
+            str(getattr(signal, "signal_id", "") or "").strip()
+            for signal in signals
+            if str(getattr(signal, "signal_id", "") or "").strip()
+        }
+    )
+    trade_ids = sorted(
+        {
+            str(getattr(trade, "id", "") or "").strip()
+            for trade in trades
+            if str(getattr(trade, "id", "") or "").strip()
+        }
+    )
+    package_symbols = sorted(
+        {
+            str(value or "").strip().upper()
+            for value in (
+                list(symbols)
+                + [getattr(trade, "equity_ref", None) for trade in trades]
+                + [getattr(trade, "symbol", None) for trade in trades]
+            )
+            if str(value or "").strip()
+        }
+    )
+    return signal_ids, trade_ids, package_symbols
+
+
+def _scope_audit_query(
+    db: Any,
+    trading_day: date,
+    symbols: List[str],
+    userid: str,
+    *,
+    signal_ids: Sequence[str] = (),
+    trade_ids: Sequence[str] = (),
+    instrument_symbols: Sequence[str] = (),
+) -> Any:
     start, end = _day_bounds(trading_day)
+    scoped_symbols = sorted(
+        {
+            str(value or "").strip().upper()
+            for value in list(symbols) + list(instrument_symbols)
+            if str(value or "").strip()
+        }
+    )
+    scoped_entity_ids = sorted(
+        {
+            str(value or "").strip()
+            for value in list(signal_ids) + list(trade_ids)
+            if str(value or "").strip()
+        }
+    )
+
+    identity_filters = []
+    if scoped_symbols:
+        identity_filters.append(AuditLogORM.symbol.in_(scoped_symbols))
+    if scoped_entity_ids:
+        identity_filters.append(AuditLogORM.entity_id.in_(scoped_entity_ids))
+    if not identity_filters:
+        raise ValueError("Audit replay scope requires symbols or entity IDs")
+
     return (
         db.query(AuditLogORM)
-        .filter(AuditLogORM.symbol.in_(symbols))
+        .filter(or_(*identity_filters))
         .filter(AuditLogORM.ts >= start)
         .filter(AuditLogORM.ts < end)
         .filter(or_(AuditLogORM.userid == userid, AuditLogORM.userid.is_(None)))
@@ -342,8 +417,27 @@ def _clear_run_data(
     lifecycle: str,
 ) -> Dict[str, int]:
     with get_trades_db() as db:
+        scoped_signals = _scope_signal_query(
+            db, trading_day, symbols, lifecycle
+        ).all()
+        scoped_trades = _scope_trade_query(
+            db, trading_day, symbols, userid
+        ).all()
+        signal_ids, trade_ids, package_symbols = _audit_scope_values(
+            symbols=symbols,
+            signals=scoped_signals,
+            trades=scoped_trades,
+        )
         audit_deleted = int(
-            _scope_audit_query(db, trading_day, symbols, userid).delete(
+            _scope_audit_query(
+                db,
+                trading_day,
+                symbols,
+                userid,
+                signal_ids=signal_ids,
+                trade_ids=trade_ids,
+                instrument_symbols=package_symbols,
+            ).delete(
                 synchronize_session=False
             )
         )
@@ -775,11 +869,29 @@ def _trade_row(trade: UserTradeSchema) -> Dict[str, Any]:
 
 
 def _audit_rows(
-    *, trading_day: date, symbols: List[str], userid: str
+    *,
+    trading_day: date,
+    symbols: List[str],
+    userid: str,
+    signals: Sequence[Any],
+    trades: Sequence[Any],
 ) -> List[Dict[str, Any]]:
+    signal_ids, trade_ids, package_symbols = _audit_scope_values(
+        symbols=symbols,
+        signals=signals,
+        trades=trades,
+    )
     with get_trades_db() as db:
         rows = (
-            _scope_audit_query(db, trading_day, symbols, userid)
+            _scope_audit_query(
+                db,
+                trading_day,
+                symbols,
+                userid,
+                signal_ids=signal_ids,
+                trade_ids=trade_ids,
+                instrument_symbols=package_symbols,
+            )
             .order_by(AuditLogORM.ts.asc(), AuditLogORM.id.asc())
             .all()
         )
@@ -1495,19 +1607,35 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         trading_day=trading_day,
         symbols=symbols,
         userid=userid,
+        signals=final_signals,
+        trades=final_trades,
     )
     audit_stage_counts = Counter(
         str(row["evaluation_stage"] or "").strip().upper() for row in audit_rows
     )
     monitor_audit_rows = int(audit_stage_counts["TRADE_MONITOR"])
-    if monitor_update_total > 0 and monitor_audit_rows < monitor_update_total:
+    if monitor_audit_rows != monitor_update_total:
         _record_validation_failure(
             validation_failures,
-            code="TRADE_MONITOR_AUDIT_MISSING",
-            message="TradeMonitor audit rows are missing",
+            code="TRADE_MONITOR_AUDIT_COUNT_MISMATCH",
+            message="TradeMonitor audit rows do not match monitor updates",
             details={
                 "monitor_updates": monitor_update_total,
                 "audit_rows": monitor_audit_rows,
+            },
+        )
+    executor_audit_rows = int(audit_stage_counts["TRADE_EXECUTOR"])
+    expected_executor_audit_rows = int(executor_entry_total + executor_exit_total)
+    if executor_audit_rows != expected_executor_audit_rows:
+        _record_validation_failure(
+            validation_failures,
+            code="TRADE_EXECUTOR_AUDIT_COUNT_MISMATCH",
+            message="TradeExecutor audit rows do not match executor updates",
+            details={
+                "executor_entry_updates": executor_entry_total,
+                "executor_exit_updates": executor_exit_total,
+                "expected_audit_rows": expected_executor_audit_rows,
+                "audit_rows": executor_audit_rows,
             },
         )
     if monitor_error_total > 0:
@@ -1575,6 +1703,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "audit_rows": len(audit_rows),
             "audit_stage_counts": dict(sorted(audit_stage_counts.items())),
             "trade_monitor_audit_rows": monitor_audit_rows,
+            "trade_executor_audit_rows": executor_audit_rows,
+            "expected_trade_executor_audit_rows": expected_executor_audit_rows,
             "validation_status": "PASSED" if not validation_failures else "FAILED",
             "validation_error_count": len(validation_failures),
             "validation_errors": validation_failures,

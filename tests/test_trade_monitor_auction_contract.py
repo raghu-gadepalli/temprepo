@@ -342,6 +342,19 @@ class StrictAuctionTradeMonitorContractTests(unittest.TestCase):
             source,
         )
 
+    def test_replay_audit_scope_covers_package_ids_and_symbols(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (
+            root / "tests" / "replay_auction_signal_trade_pipeline.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("def _audit_scope_values(", source)
+        self.assertIn("signal_ids=signal_ids", source)
+        self.assertIn("trade_ids=trade_ids", source)
+        self.assertIn("instrument_symbols=package_symbols", source)
+        self.assertIn("TRADE_MONITOR_AUDIT_COUNT_MISMATCH", source)
+        self.assertIn("TRADE_EXECUTOR_AUDIT_COUNT_MISMATCH", source)
+        self.assertIn('"trade_executor_audit_rows"', source)
+
     def test_exact_signal_exit_precedes_generic_adaptive_exit(self):
         root = Path(__file__).resolve().parents[1]
         source = (
