@@ -37,7 +37,7 @@ class TradeServiceConfig(BaseModel):
     window_start: str = "09:15:00"
     window_end: str = "15:31:00"
     retry_interval_seconds: int = 15
-    log_file: str = "/var/www/autolabs/scripts/trades.log"
+    log_file: str = "/var/www/autotrades/scripts/trades.log"
 
     defaults: TradeDefaultsConfig = Field(default_factory=TradeDefaultsConfig)
     policy: TradePolicyConfig = Field(default_factory=TradePolicyConfig)
