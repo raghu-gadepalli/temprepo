@@ -1,0 +1,1132 @@
+#!/usr/bin/env python3
+"""Strict end-to-end replay of the Auction-driven signal/trade pipeline.
+
+Pipeline per persisted snapshot
+-------------------------------
+
+    stored validated snapshot.auction
+        -> SignalGenerator
+        -> TradeGenerator (selected replay user only)
+        -> TradeExecutor entry pass (selected replay scope only)
+        -> TradeMonitor (selected replay scope only)
+        -> TradeExecutor exit pass (selected replay scope only)
+
+Safety and scope
+----------------
+- Does NOT regenerate snapshots or Auction.
+- Does NOT read/write stock_setup_state, stock_opportunities, or checkpoints.
+- Does NOT mark snapshots processed.
+- Forces snapshot pricing and requires a VIRTUAL replay user.
+- Restricts executor and monitor reads to the selected userid, trading day,
+  and underlying symbols so unrelated live/test trades cannot be touched.
+- Optional cleanup is explicit and restricted to the selected replay scope.
+
+Recommended COFORGE command (PowerShell)
+----------------------------------------
+
+    $env:PYTHONPATH = "$PWD;$PWD\\tests"
+    python tests/replay_auction_signal_trade_pipeline.py `
+        --date 2026-07-20 `
+        --symbols COFORGE `
+        --userid DR1812 `
+        --instrument-choice EQ `
+        --clear-run-data `
+        --require-trade `
+        --require-exit `
+        --report-dir reports
+"""
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+from contextlib import contextmanager
+import csv
+from datetime import date, datetime, time, timedelta
+import json
+import logging
+import os
+from pathlib import Path
+import sys
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import or_
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from configs.execution_config import EXECUTION_CONFIG
+from configs.signal_config import SIGNAL_CONFIG
+from database.database import get_trades_db
+from enums.enums import EntryStatus, ExitStatus
+from logconfig import setup_logging
+from models.trade_models import AuditLog as AuditLogORM
+from models.trade_models import Signal as SignalORM
+from models.trade_models import UserTrade as UserTradeORM
+from schemas.signal import SignalSchema
+from schemas.snapshot import SnapshotSchema
+from schemas.user import UserSchema
+from schemas.user_trade import TradeManagementSchema, UserTradeSchema
+from services.signals.signal_generator import SignalGenerator
+from services.trade.executor import trade_executor as executor_module
+from services.trade.executor.trade_executor import TradeExecutor
+from services.trade.generator.trade_generator import TradeGenerator
+from services.trade.monitor.trade_monitor import TradeMonitor
+from utils.json_utils import sanitize_json
+
+IST = ZoneInfo("Asia/Kolkata")
+logger = logging.getLogger(__name__)
+
+_EXPECTED_TRADEGEN_NONFATAL = {
+    "TRADE_DECISION_NOT_ALLOWED",
+    "SIGNAL_ALREADY_DEPLOYED",
+}
+
+
+def _args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Replay persisted Auction snapshots through SignalGenerator, "
+            "TradeGenerator, virtual TradeExecutor, and strict TradeMonitor."
+        )
+    )
+    parser.add_argument("--date", required=True, help="Trading day YYYY-MM-DD")
+    parser.add_argument("--symbols", required=True, help="Comma-separated equity symbols")
+    parser.add_argument("--userid", required=True, help="Dedicated VIRTUAL replay userid")
+    parser.add_argument(
+        "--instrument-choice",
+        default="EQ",
+        choices=("EQ", "FUT", "CE", "PE", "MULTI"),
+        help="Signal trade package to create; EQ is the safest first replay",
+    )
+    parser.add_argument(
+        "--clear-run-data",
+        action="store_true",
+        help=(
+            "Delete only selected-day signals, selected-user trades, and selected-symbol "
+            "audit rows before replay"
+        ),
+    )
+    parser.add_argument(
+        "--require-trade",
+        action="store_true",
+        help="Fail the replay if no user_trade row is created",
+    )
+    parser.add_argument(
+        "--require-exit",
+        action="store_true",
+        help="Fail the replay unless at least one created trade reaches exit_status=FILLED",
+    )
+    parser.add_argument("--start-time", help="Optional inclusive HH:MM[:SS] filter")
+    parser.add_argument("--end-time", help="Optional inclusive HH:MM[:SS] filter")
+    parser.add_argument("--batch-size", type=int, default=500)
+    parser.add_argument("--report-dir", default="reports")
+    parser.add_argument("--log-file")
+    return parser.parse_args(argv)
+
+
+def _symbols(raw: str) -> List[str]:
+    values = sorted({item.strip().upper() for item in raw.split(",") if item.strip()})
+    if not values:
+        raise ValueError("At least one symbol is required")
+    return values
+
+
+def _parse_clock(raw: Optional[str]) -> Optional[time]:
+    if raw is None:
+        return None
+    value = raw.strip()
+    if not value:
+        return None
+    return time.fromisoformat(value)
+
+
+def _day_bounds(trading_day: date) -> Tuple[datetime, datetime]:
+    start = datetime.combine(trading_day, time.min)
+    return start, start + timedelta(days=1)
+
+
+def _enum_str(value: Any) -> str:
+    return str(getattr(value, "value", value) or "").strip().upper()
+
+
+def _required_mapping(value: Any, path: str) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        raise TypeError(f"{path} must be an object")
+    return value
+
+
+def _required_value(mapping: Dict[str, Any], key: str, path: str) -> Any:
+    if key not in mapping:
+        raise ValueError(f"{path}.{key} is required")
+    return mapping[key]
+
+
+def _optional_value(mapping: Dict[str, Any], key: str, default: Any = None) -> Any:
+    return mapping[key] if key in mapping else default
+
+
+def _write_csv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
+    data = [sanitize_json(row) for row in rows]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not data:
+        path.write_text("", encoding="utf-8")
+        return
+    fields = sorted({key for row in data for key in row})
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(data)
+
+
+def _load_snapshots(
+    *,
+    trading_day: date,
+    symbols: List[str],
+    batch_size: int,
+    start_clock: Optional[time],
+    end_clock: Optional[time],
+) -> List[SnapshotSchema]:
+    output: List[SnapshotSchema] = []
+    after_time: Optional[datetime] = None
+    after_symbol = ""
+    limit = max(1, int(batch_size))
+
+    while True:
+        batch = SnapshotSchema.fetch_day_replay_batch(
+            trading_day=trading_day,
+            after_time=after_time,
+            after_symbol=after_symbol,
+            symbols=symbols,
+            limit=limit,
+        )
+        if not batch:
+            break
+        output.extend(batch)
+        last = batch[-1]
+        after_time = last.snapshot_time.replace(tzinfo=None)
+        after_symbol = last.symbol
+        if len(batch) < limit:
+            break
+
+    filtered: List[SnapshotSchema] = []
+    for snapshot in output:
+        observed = snapshot.snapshot_time.astimezone(IST).time()
+        if start_clock is not None and observed < start_clock:
+            continue
+        if end_clock is not None and observed > end_clock:
+            continue
+        filtered.append(snapshot)
+
+    filtered.sort(key=lambda row: (row.snapshot_time, row.symbol))
+    return filtered
+
+
+def _validate_replay_user(userid: str, instrument_choice: str) -> UserSchema:
+    user = UserSchema.fetch_user(userid)
+    if user is None:
+        raise LookupError(f"Replay user not found: {userid}")
+
+    failures: List[str] = []
+    if int(getattr(user, "active", 0) or 0) != 1:
+        failures.append("users.active must be 1")
+    if int(getattr(user, "logged_in", 0) or 0) != 1:
+        failures.append("users.logged_in must be 1")
+    if int(getattr(user, "autotrade", 0) or 0) != 1:
+        failures.append("users.autotrade must be 1")
+    if _enum_str(getattr(user, "execution_mode", None)) != "VIRTUAL":
+        failures.append("users.execution_mode must be VIRTUAL")
+
+    if instrument_choice == "EQ" and int(getattr(user, "equity", 0) or 0) != 1:
+        failures.append("users.equity must be 1 for EQ replay")
+    if instrument_choice == "FUT" and int(getattr(user, "futures", 0) or 0) != 1:
+        failures.append("users.futures must be 1 for FUT replay")
+    if instrument_choice in {"CE", "PE"} and int(getattr(user, "options", 0) or 0) != 1:
+        failures.append("users.options must be 1 for option replay")
+
+    if failures:
+        raise ValueError(
+            f"Replay user {userid} is not eligible: " + "; ".join(failures)
+        )
+    return user
+
+
+def _scope_signal_query(db: Any, trading_day: date, symbols: List[str], lifecycle: str) -> Any:
+    start, end = _day_bounds(trading_day)
+    return (
+        db.query(SignalORM)
+        .filter(SignalORM.symbol.in_(symbols))
+        .filter(SignalORM.lifecycle == lifecycle)
+        .filter(SignalORM.first_seen_time >= start)
+        .filter(SignalORM.first_seen_time < end)
+    )
+
+
+def _scope_trade_query(db: Any, trading_day: date, symbols: List[str], userid: str) -> Any:
+    start, end = _day_bounds(trading_day)
+    return (
+        db.query(UserTradeORM)
+        .filter(UserTradeORM.userid == userid)
+        .filter(UserTradeORM.equity_ref.in_(symbols))
+        .filter(UserTradeORM.entry_time >= start)
+        .filter(UserTradeORM.entry_time < end)
+    )
+
+
+def _scope_audit_query(db: Any, trading_day: date, symbols: List[str], userid: str) -> Any:
+    start, end = _day_bounds(trading_day)
+    return (
+        db.query(AuditLogORM)
+        .filter(AuditLogORM.symbol.in_(symbols))
+        .filter(AuditLogORM.ts >= start)
+        .filter(AuditLogORM.ts < end)
+        .filter(or_(AuditLogORM.userid == userid, AuditLogORM.userid.is_(None)))
+    )
+
+
+def _clear_run_data(
+    *,
+    trading_day: date,
+    symbols: List[str],
+    userid: str,
+    lifecycle: str,
+) -> Dict[str, int]:
+    with get_trades_db() as db:
+        audit_deleted = int(
+            _scope_audit_query(db, trading_day, symbols, userid).delete(
+                synchronize_session=False
+            )
+        )
+        trades_deleted = int(
+            _scope_trade_query(db, trading_day, symbols, userid).delete(
+                synchronize_session=False
+            )
+        )
+        signals_deleted = int(
+            _scope_signal_query(db, trading_day, symbols, lifecycle).delete(
+                synchronize_session=False
+            )
+        )
+        db.commit()
+    return {
+        "signals": signals_deleted,
+        "trades": trades_deleted,
+        "audit": audit_deleted,
+    }
+
+
+def _assert_clean_scope(
+    *,
+    trading_day: date,
+    symbols: List[str],
+    userid: str,
+    lifecycle: str,
+) -> None:
+    with get_trades_db() as db:
+        signal_count = int(
+            _scope_signal_query(db, trading_day, symbols, lifecycle).count()
+        )
+        trade_count = int(_scope_trade_query(db, trading_day, symbols, userid).count())
+    if signal_count or trade_count:
+        raise RuntimeError(
+            "Replay scope is not clean. Re-run with --clear-run-data or clean the "
+            f"selected test scope manually. signals={signal_count} trades={trade_count}"
+        )
+
+
+
+def _assert_no_external_active_context(
+    *,
+    trading_day: date,
+    symbols: List[str],
+    userid: str,
+    lifecycle: str,
+) -> None:
+    """Fail when older/open context could contaminate the selected replay."""
+    start, end = _day_bounds(trading_day)
+    active_entry = [
+        EntryStatus.CREATED.value,
+        EntryStatus.READY.value,
+        EntryStatus.SUBMITTED.value,
+        EntryStatus.FILLED.value,
+    ]
+    terminal_exit = [ExitStatus.FILLED.value, ExitStatus.CANCELLED.value]
+
+    with get_trades_db() as db:
+        external_signals = (
+            db.query(SignalORM)
+            .filter(SignalORM.symbol.in_(symbols))
+            .filter(SignalORM.lifecycle == lifecycle)
+            .filter(SignalORM.status == "OPEN")
+            .filter(
+                or_(
+                    SignalORM.first_seen_time < start,
+                    SignalORM.first_seen_time >= end,
+                )
+            )
+            .count()
+        )
+        external_trades = (
+            db.query(UserTradeORM)
+            .filter(UserTradeORM.userid == userid)
+            .filter(UserTradeORM.equity_ref.in_(symbols))
+            .filter(UserTradeORM.entry_status.in_(active_entry))
+            .filter(
+                or_(
+                    UserTradeORM.exit_status.is_(None),
+                    ~UserTradeORM.exit_status.in_(terminal_exit),
+                )
+            )
+            .filter(
+                or_(
+                    UserTradeORM.entry_time < start,
+                    UserTradeORM.entry_time >= end,
+                )
+            )
+            .count()
+        )
+
+    if external_signals or external_trades:
+        raise RuntimeError(
+            "Open context outside the selected day would contaminate replay. "
+            f"external_open_signals={external_signals} "
+            f"external_active_trades={external_trades}. "
+            "Use a dedicated replay database/user or close the external rows first."
+        )
+
+def _signals_in_scope(
+    *, trading_day: date, symbols: List[str], lifecycle: str
+) -> List[SignalSchema]:
+    with get_trades_db() as db:
+        rows = (
+            _scope_signal_query(db, trading_day, symbols, lifecycle)
+            .order_by(SignalORM.first_seen_time.asc(), SignalORM.id.asc())
+            .all()
+        )
+    return [SignalSchema.model_validate(row) for row in rows]
+
+
+def _latest_signal_for_symbol(
+    *, trading_day: date, symbol: str, lifecycle: str
+) -> Optional[SignalSchema]:
+    with get_trades_db() as db:
+        row = (
+            _scope_signal_query(db, trading_day, [symbol], lifecycle)
+            .order_by(SignalORM.id.desc())
+            .first()
+        )
+    return SignalSchema.model_validate(row) if row is not None else None
+
+
+def _trades_in_scope(
+    *, trading_day: date, symbols: List[str], userid: str
+) -> List[UserTradeSchema]:
+    with get_trades_db() as db:
+        rows = (
+            _scope_trade_query(db, trading_day, symbols, userid)
+            .order_by(UserTradeORM.entry_time.asc(), UserTradeORM.id.asc())
+            .all()
+        )
+    return [UserTradeSchema.model_validate(row) for row in rows]
+
+
+def _trades_for_signal(userid: str, signal_id: str) -> List[UserTradeSchema]:
+    with get_trades_db() as db:
+        rows = (
+            db.query(UserTradeORM)
+            .filter(UserTradeORM.userid == userid)
+            .filter(UserTradeORM.signal_id == signal_id)
+            .order_by(UserTradeORM.id.asc())
+            .all()
+        )
+    return [UserTradeSchema.model_validate(row) for row in rows]
+
+
+def _scoped_open_positions(
+    *, trading_day: date, symbols: List[str], userid: str
+) -> List[UserTradeSchema]:
+    start, end = _day_bounds(trading_day)
+    with get_trades_db() as db:
+        rows = (
+            db.query(UserTradeORM)
+            .filter(UserTradeORM.userid == userid)
+            .filter(UserTradeORM.equity_ref.in_(symbols))
+            .filter(UserTradeORM.entry_time >= start)
+            .filter(UserTradeORM.entry_time < end)
+            .filter(UserTradeORM.entry_status == EntryStatus.FILLED.value)
+            .filter(
+                or_(
+                    UserTradeORM.exit_status.is_(None),
+                    UserTradeORM.exit_status != ExitStatus.FILLED.value,
+                )
+            )
+            .order_by(UserTradeORM.entry_time.asc(), UserTradeORM.id.asc())
+            .all()
+        )
+    return [UserTradeSchema.model_validate(row) for row in rows]
+
+
+def _scoped_executor_candidates(
+    *, trading_day: date, symbols: List[str], userid: str, limit: int
+) -> List[UserTradeSchema]:
+    start, end = _day_bounds(trading_day)
+    actionable = or_(
+        UserTradeORM.entry_status.in_([EntryStatus.READY.value, EntryStatus.SUBMITTED.value]),
+        UserTradeORM.exit_status.in_([ExitStatus.READY.value, ExitStatus.SUBMITTED.value]),
+    )
+    with get_trades_db() as db:
+        rows = (
+            db.query(UserTradeORM)
+            .filter(UserTradeORM.userid == userid)
+            .filter(UserTradeORM.equity_ref.in_(symbols))
+            .filter(UserTradeORM.entry_time >= start)
+            .filter(UserTradeORM.entry_time < end)
+            .filter(actionable)
+            .order_by(UserTradeORM.id.asc())
+            .limit(max(1, int(limit)))
+            .all()
+        )
+    return [UserTradeSchema.model_validate(row) for row in rows]
+
+
+@contextmanager
+def _restrict_trade_services(
+    *, trading_day: date, symbols: List[str], userid: str
+) -> Iterator[None]:
+    """Restrict monitor/executor reads to this replay's test scope."""
+
+    original_open_positions = UserTradeSchema.__dict__["fetch_open_positions"]
+    original_executor_fetch = executor_module._fetch_candidates_for_user
+
+    def fetch_open_positions(
+        *, userid: Optional[str] = None, symbol: Optional[str] = None
+    ) -> List[UserTradeSchema]:
+        if userid is not None and str(userid).strip() != str(replay_userid).strip():
+            raise ValueError("Replay monitor attempted to read another userid")
+        rows = _scoped_open_positions(
+            trading_day=trading_day,
+            symbols=symbols,
+            userid=replay_userid,
+        )
+        if symbol is not None:
+            wanted = str(symbol).strip().upper()
+            rows = [row for row in rows if str(row.symbol).strip().upper() == wanted]
+        return rows
+
+    def fetch_executor_candidates(requested_userid: str, limit: int = 500) -> List[UserTradeSchema]:
+        if str(requested_userid).strip() != str(replay_userid).strip():
+            raise ValueError("Replay executor attempted to read another userid")
+        return _scoped_executor_candidates(
+            trading_day=trading_day,
+            symbols=symbols,
+            userid=replay_userid,
+            limit=limit,
+        )
+
+    replay_userid = userid
+    UserTradeSchema.fetch_open_positions = staticmethod(fetch_open_positions)
+    executor_module._fetch_candidates_for_user = fetch_executor_candidates
+    try:
+        yield
+    finally:
+        UserTradeSchema.fetch_open_positions = original_open_positions
+        executor_module._fetch_candidates_for_user = original_executor_fetch
+
+
+def _signal_context(signal: Optional[SignalSchema]) -> Dict[str, Any]:
+    if signal is None:
+        return {
+            "signal_id": None,
+            "signal_stage": None,
+            "signal_status": None,
+            "signal_reason": None,
+            "management_posture": None,
+            "lifecycle_trade_action": None,
+            "should_exit_signal": None,
+            "auction_action": None,
+            "auction_state": None,
+            "directional_alignment": None,
+            "opportunity_key": None,
+            "candidate_id": None,
+            "boundary_event_key": None,
+        }
+
+    meta = _required_mapping(signal.meta_json, "signal.meta_json")
+    contract = _required_mapping(
+        _required_value(meta, "downstream_contract", "signal.meta_json"),
+        "signal.meta_json.downstream_contract",
+    )
+    version = str(
+        _required_value(contract, "version", "signal.meta_json.downstream_contract")
+    ).strip()
+    if version != "AUCTION_SIGNAL_DOWNSTREAM_V1":
+        raise ValueError(f"Unsupported signal downstream contract: {version}")
+
+    lifecycle = _required_mapping(
+        _required_value(meta, "lifecycle", "signal.meta_json"),
+        "signal.meta_json.lifecycle",
+    )
+    evidence = _required_mapping(
+        _required_value(meta, "active_signal_evidence", "signal.meta_json"),
+        "signal.meta_json.active_signal_evidence",
+    )
+    setup_levels = _required_mapping(
+        _required_value(meta, "setup_levels", "signal.meta_json"),
+        "signal.meta_json.setup_levels",
+    )
+
+    return {
+        "signal_id": signal.signal_id,
+        "signal_stage": signal.stage.value,
+        "signal_status": signal.status.value,
+        "signal_reason": signal.status_reason,
+        "management_posture": _required_value(
+            evidence, "active_evidence_action", "signal.meta_json.active_signal_evidence"
+        ),
+        "lifecycle_trade_action": _required_value(
+            lifecycle, "trade_action", "signal.meta_json.lifecycle"
+        ),
+        "should_exit_signal": _required_value(
+            evidence, "should_exit_signal", "signal.meta_json.active_signal_evidence"
+        ),
+        "auction_action": _required_value(
+            evidence, "auction_action", "signal.meta_json.active_signal_evidence"
+        ),
+        "auction_state": _required_value(
+            evidence, "auction_state", "signal.meta_json.active_signal_evidence"
+        ),
+        "directional_alignment": _required_value(
+            evidence, "directional_alignment", "signal.meta_json.active_signal_evidence"
+        ),
+        "opportunity_key": _required_value(
+            setup_levels, "opportunity_key", "signal.meta_json.setup_levels"
+        ),
+        "candidate_id": _required_value(
+            setup_levels, "candidate_id", "signal.meta_json.setup_levels"
+        ),
+        "boundary_event_key": _required_value(
+            setup_levels, "boundary_event_key", "signal.meta_json.setup_levels"
+        ),
+    }
+
+
+def _trade_row(trade: UserTradeSchema) -> Dict[str, Any]:
+    management_raw = trade.trade_management
+    if management_raw is None:
+        raise ValueError(f"Trade {trade.id} is missing trade_management")
+    management = TradeManagementSchema.model_validate(management_raw).model_dump(
+        mode="python"
+    )
+    if management["version"] != 2 or management["mode"] != "AUCTION_ADAPTIVE_V2":
+        raise ValueError(
+            f"Trade {trade.id} has unsupported management contract: "
+            f"version={management['version']} mode={management['mode']}"
+        )
+
+    return {
+        "trade_id": trade.id,
+        "userid": trade.userid,
+        "signal_id": trade.signal_id,
+        "source": trade.source,
+        "symbol": trade.symbol,
+        "equity_ref": trade.equity_ref,
+        "instrument_type": trade.instrument_type.value,
+        "trade_type": trade.trade_type.value,
+        "execution_mode": trade.execution_mode,
+        "entry_status": trade.entry_status.value,
+        "exit_status": trade.exit_status.value,
+        "entry_time": trade.entry_time,
+        "entry_intent_time": trade.entry_intent_time,
+        "entry_exec_time": trade.entry_exec_time,
+        "planned_entry_price": trade.entry_price,
+        "executed_entry_price": trade.executed_entry_price,
+        "quantity": trade.quantity,
+        "last_time": trade.last_time,
+        "last_price": trade.last_price,
+        "last_pnl": trade.last_pnl,
+        "last_pnl_value": trade.last_pnl_value,
+        "max_price": trade.max_price,
+        "min_price": trade.min_price,
+        "exit_reason": trade.exit_reason,
+        "exit_rule": trade.exit_rule,
+        "exit_intent_time": trade.exit_intent_time,
+        "exit_exec_time": trade.exit_exec_time,
+        "executed_exit_price": trade.executed_exit_price,
+        "executed_exit_qty": trade.executed_exit_qty,
+        "exit_pnl": trade.exit_pnl,
+        "trade_management_version": management["version"],
+        "trade_management_mode": management["mode"],
+        "trade_posture": management["posture"],
+        "management_posture": management["management_posture"],
+        "management_reason_code": management["management_reason_code"],
+        "signal_stage": management["signal_stage"],
+        "signal_status": management["signal_status"],
+        "lifecycle_trade_action": management["lifecycle_trade_action"],
+        "directional_alignment": management["directional_alignment"],
+        "auction_action": management["auction_action"],
+        "auction_state": management["auction_state"],
+        "should_exit_signal": management["should_exit_signal"],
+        "current_stop_price": management["current_stop_price"],
+        "current_target_price": management["current_target_price"],
+        "current_profit_r": management["current_profit_r"],
+        "mfe_profit_r": management["mfe_profit_r"],
+        "group_role": management["group_role"],
+        "last_update_reason": management["last_update_reason"],
+    }
+
+
+def _audit_rows(
+    *, trading_day: date, symbols: List[str], userid: str
+) -> List[Dict[str, Any]]:
+    with get_trades_db() as db:
+        rows = (
+            _scope_audit_query(db, trading_day, symbols, userid)
+            .order_by(AuditLogORM.ts.asc(), AuditLogORM.id.asc())
+            .all()
+        )
+    return [
+        {
+            "id": row.id,
+            "ts": row.ts,
+            "entity_type": row.entity_type,
+            "entity_id": row.entity_id,
+            "symbol": row.symbol,
+            "userid": row.userid,
+            "evaluation_stage": row.evaluation_stage,
+            "previous_state": row.previous_state,
+            "new_state": row.new_state,
+            "action": row.action,
+            "reason_code": row.reason_code,
+            "reason_text": row.reason_text,
+            "confidence": row.confidence,
+            "payload_json": json.dumps(sanitize_json(row.payload_json), sort_keys=True),
+        }
+        for row in rows
+    ]
+
+
+def _tradegen_outcome(result: Dict[str, Any]) -> Tuple[str, Optional[str], int]:
+    if not isinstance(result, dict):
+        raise TypeError("TradeGenerator result must be an object")
+    ok = bool(_optional_value(result, "ok", False))
+    error_raw = _optional_value(result, "error")
+    error = str(error_raw).strip() if error_raw is not None else None
+    created_count = int(_optional_value(result, "created_count", 0) or 0)
+    if ok:
+        return "CREATED", None, created_count
+    if error in _EXPECTED_TRADEGEN_NONFATAL:
+        return "NOT_ELIGIBLE", error, 0
+    raise RuntimeError(f"Unexpected TradeGenerator failure: {result}")
+
+
+def _validate_final_results(
+    *,
+    signals: List[SignalSchema],
+    trades: List[UserTradeSchema],
+    require_trade: bool,
+    require_exit: bool,
+) -> None:
+    signal_ids = [signal.signal_id for signal in signals]
+    if len(signal_ids) != len(set(signal_ids)):
+        raise AssertionError("Duplicate signal_id values persisted")
+
+    trade_identity = [
+        (trade.userid, trade.signal_id, trade.instrument_type.value) for trade in trades
+    ]
+    if len(trade_identity) != len(set(trade_identity)):
+        raise AssertionError("Duplicate userid/signal/instrument trade rows persisted")
+
+    for trade in trades:
+        _trade_row(trade)
+        if _enum_str(trade.execution_mode) != "VIRTUAL":
+            raise AssertionError(f"Replay created non-VIRTUAL trade {trade.id}")
+
+    if require_trade and not trades:
+        raise AssertionError("Replay expected at least one trade, but none was created")
+
+    filled_entries = [
+        trade for trade in trades if trade.entry_status.value == EntryStatus.FILLED.value
+    ]
+    if trades and not filled_entries:
+        raise AssertionError("Trade rows were created but no entry reached FILLED")
+
+    if require_exit:
+        filled_exits = [
+            trade for trade in trades if trade.exit_status.value == ExitStatus.FILLED.value
+        ]
+        if not filled_exits:
+            raise AssertionError("Replay expected at least one FILLED exit")
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = _args(argv)
+    trading_day = date.fromisoformat(args.date)
+    symbols = _symbols(args.symbols)
+    userid = str(args.userid).strip()
+    if not userid:
+        raise ValueError("--userid cannot be blank")
+    lifecycle = SIGNAL_CONFIG.default_lifecycle.strip().upper()
+    instrument_choice = str(args.instrument_choice).strip().upper()
+    report_dir = Path(args.report_dir)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    log_file = args.log_file or str(report_dir / "replay_auction_signal_trade_pipeline.log")
+    setup_logging(log_file=log_file)
+    global logger
+    logger = logging.getLogger(__name__)
+
+    _validate_replay_user(userid, instrument_choice)
+
+    cleared = {"signals": 0, "trades": 0, "audit": 0}
+    if args.clear_run_data:
+        cleared = _clear_run_data(
+            trading_day=trading_day,
+            symbols=symbols,
+            userid=userid,
+            lifecycle=lifecycle,
+        )
+    _assert_clean_scope(
+        trading_day=trading_day,
+        symbols=symbols,
+        userid=userid,
+        lifecycle=lifecycle,
+    )
+    _assert_no_external_active_context(
+        trading_day=trading_day,
+        symbols=symbols,
+        userid=userid,
+        lifecycle=lifecycle,
+    )
+
+    snapshots = _load_snapshots(
+        trading_day=trading_day,
+        symbols=symbols,
+        batch_size=max(1, int(args.batch_size)),
+        start_clock=_parse_clock(args.start_time),
+        end_clock=_parse_clock(args.end_time),
+    )
+    if not snapshots:
+        raise RuntimeError(
+            f"No stored snapshots found for date={trading_day} symbols={symbols}"
+        )
+
+    observed_symbols = {snapshot.symbol for snapshot in snapshots}
+    missing_symbols = [symbol for symbol in symbols if symbol not in observed_symbols]
+    if missing_symbols:
+        raise RuntimeError(f"No snapshots found for selected symbols: {missing_symbols}")
+
+    old_use_snapshot = EXECUTION_CONFIG.use_snapshot
+    old_live_virtual = EXECUTION_CONFIG.use_live_price_for_virtual
+    EXECUTION_CONFIG.use_snapshot = True
+    EXECUTION_CONFIG.use_live_price_for_virtual = False
+
+    timeline_rows: List[Dict[str, Any]] = []
+    trade_observation_rows: List[Dict[str, Any]] = []
+    signal_action_counts: Counter[str] = Counter()
+    signal_stage_counts: Counter[str] = Counter()
+    tradegen_outcome_counts: Counter[str] = Counter()
+    executor_entry_total = 0
+    monitor_update_total = 0
+    executor_exit_total = 0
+
+    trade_generator = TradeGenerator()
+    trade_executor = TradeExecutor()
+    trade_monitor = TradeMonitor()
+
+    logger.info(
+        "Starting strict Auction signal/trade replay | day=%s symbols=%s userid=%s "
+        "instrument=%s snapshots=%d cleared=%s",
+        trading_day,
+        symbols,
+        userid,
+        instrument_choice,
+        len(snapshots),
+        cleared,
+    )
+
+    try:
+        with _restrict_trade_services(
+            trading_day=trading_day,
+            symbols=symbols,
+            userid=userid,
+        ):
+            for index, snapshot in enumerate(snapshots, start=1):
+                signal_action = SignalGenerator(snapshot).generate() or "NO_ACTION"
+                signal_action_counts[signal_action] += 1
+
+                signal = _latest_signal_for_symbol(
+                    trading_day=trading_day,
+                    symbol=snapshot.symbol,
+                    lifecycle=lifecycle,
+                )
+                signal_ctx = _signal_context(signal)
+                if signal_ctx["signal_stage"] is not None:
+                    signal_stage_counts[str(signal_ctx["signal_stage"])] += 1
+
+                tradegen_attempted = False
+                tradegen_outcome = "NO_SIGNAL"
+                tradegen_error: Optional[str] = None
+                tradegen_created_count = 0
+
+                if signal is not None:
+                    existing = _trades_for_signal(userid, signal.signal_id)
+                    if existing:
+                        tradegen_outcome = "ALREADY_DEPLOYED"
+                    else:
+                        tradegen_attempted = True
+                        result = trade_generator.generate_for_user_signal(
+                            userid=userid,
+                            signal_id=signal.signal_id,
+                            instrument_choice=instrument_choice,
+                            source="TRADE_GENERATOR",
+                        )
+                        (
+                            tradegen_outcome,
+                            tradegen_error,
+                            tradegen_created_count,
+                        ) = _tradegen_outcome(result)
+                    tradegen_outcome_counts[tradegen_outcome] += 1
+
+                entry_updates = trade_executor.execute_user_once(
+                    userid=userid,
+                    limit=500,
+                    snapshot_time=snapshot.snapshot_time,
+                )
+                executor_entry_total += int(entry_updates or 0)
+
+                monitor_updates = trade_monitor.run_once(
+                    snapshot_time=snapshot.snapshot_time
+                )
+                monitor_update_total += int(monitor_updates or 0)
+
+                exit_updates = trade_executor.execute_user_once(
+                    userid=userid,
+                    limit=500,
+                    snapshot_time=snapshot.snapshot_time,
+                )
+                executor_exit_total += int(exit_updates or 0)
+
+                current_trades = _trades_in_scope(
+                    trading_day=trading_day,
+                    symbols=symbols,
+                    userid=userid,
+                )
+                entry_status_counts = Counter(
+                    trade.entry_status.value for trade in current_trades
+                )
+                exit_status_counts = Counter(
+                    trade.exit_status.value for trade in current_trades
+                )
+
+                decision = snapshot.auction.decision
+                if decision is None:
+                    raise ValueError("snapshot.auction.decision is required")
+                auction_state = (
+                    snapshot.auction.state.current
+                    if snapshot.auction.state is not None
+                    else None
+                )
+
+                timeline_rows.append(
+                    {
+                        "index": index,
+                        "symbol": snapshot.symbol,
+                        "snapshot_time": snapshot.snapshot_time,
+                        "auction_action": decision.action,
+                        "auction_state": auction_state,
+                        "selected_opportunity_key": decision.selected_opportunity_key,
+                        "selected_candidate_id": decision.selected_candidate_id,
+                        "signal_action": signal_action,
+                        **signal_ctx,
+                        "tradegen_attempted": tradegen_attempted,
+                        "tradegen_outcome": tradegen_outcome,
+                        "tradegen_error": tradegen_error,
+                        "tradegen_created_count": tradegen_created_count,
+                        "executor_entry_updates": int(entry_updates or 0),
+                        "monitor_updates": int(monitor_updates or 0),
+                        "executor_exit_updates": int(exit_updates or 0),
+                        "trade_count": len(current_trades),
+                        "entry_status_counts": json.dumps(
+                            dict(sorted(entry_status_counts.items())), sort_keys=True
+                        ),
+                        "exit_status_counts": json.dumps(
+                            dict(sorted(exit_status_counts.items())), sort_keys=True
+                        ),
+                    }
+                )
+
+                for trade in current_trades:
+                    trade_observation_rows.append(
+                        {
+                            "snapshot_index": index,
+                            "snapshot_time": snapshot.snapshot_time,
+                            **_trade_row(trade),
+                        }
+                    )
+
+                logger.info(
+                    "REPLAY_TICK | %s @ %s | signal=%s stage=%s tradegen=%s "
+                    "entry_exec=%s monitor=%s exit_exec=%s trades=%s entry=%s exit=%s",
+                    snapshot.symbol,
+                    snapshot.snapshot_time,
+                    signal_action,
+                    signal_ctx["signal_stage"],
+                    tradegen_outcome,
+                    entry_updates,
+                    monitor_updates,
+                    exit_updates,
+                    len(current_trades),
+                    dict(entry_status_counts),
+                    dict(exit_status_counts),
+                )
+    finally:
+        EXECUTION_CONFIG.use_snapshot = old_use_snapshot
+        EXECUTION_CONFIG.use_live_price_for_virtual = old_live_virtual
+
+    final_signals = _signals_in_scope(
+        trading_day=trading_day,
+        symbols=symbols,
+        lifecycle=lifecycle,
+    )
+    final_trades = _trades_in_scope(
+        trading_day=trading_day,
+        symbols=symbols,
+        userid=userid,
+    )
+    _validate_final_results(
+        signals=final_signals,
+        trades=final_trades,
+        require_trade=bool(args.require_trade),
+        require_exit=bool(args.require_exit),
+    )
+
+    signal_rows = [
+        {
+            "signal_id": signal.signal_id,
+            "symbol": signal.symbol,
+            "equity_ref": signal.equity_ref,
+            "setup": signal.setup,
+            "side": signal.side.value,
+            "stage": signal.stage.value,
+            "status": signal.status.value,
+            "status_reason": signal.status_reason,
+            "first_seen_time": signal.first_seen_time,
+            "actionable_time": signal.actionable_time,
+            "last_eval_time": signal.last_eval_time,
+            "last_snapshot_time": signal.last_snapshot_time,
+            "created_price": signal.created_price,
+            "last_price": signal.last_price,
+            "last_pnl": signal.last_pnl,
+            "max_pnl": signal.max_pnl,
+            "min_pnl": signal.min_pnl,
+            **_signal_context(signal),
+        }
+        for signal in final_signals
+    ]
+    trade_rows = [_trade_row(trade) for trade in final_trades]
+    audit_rows = _audit_rows(
+        trading_day=trading_day,
+        symbols=symbols,
+        userid=userid,
+    )
+
+    final_entry_status = Counter(trade.entry_status.value for trade in final_trades)
+    final_exit_status = Counter(trade.exit_status.value for trade in final_trades)
+    final_instruments = Counter(trade.instrument_type.value for trade in final_trades)
+    first_entry_fill = min(
+        (trade.entry_exec_time for trade in final_trades if trade.entry_exec_time is not None),
+        default=None,
+    )
+    first_exit_fill = min(
+        (trade.exit_exec_time for trade in final_trades if trade.exit_exec_time is not None),
+        default=None,
+    )
+    total_exit_pnl = sum(
+        (float(trade.exit_pnl) for trade in final_trades if trade.exit_pnl is not None),
+        0.0,
+    )
+
+    summary = sanitize_json(
+        {
+            "trading_day": trading_day,
+            "symbols": symbols,
+            "userid": userid,
+            "instrument_choice": instrument_choice,
+            "lifecycle": lifecycle,
+            "snapshots": len(snapshots),
+            "first_snapshot_time": snapshots[0].snapshot_time,
+            "last_snapshot_time": snapshots[-1].snapshot_time,
+            "auction_recomputed": False,
+            "snapshots_marked_processed": 0,
+            "cleared": cleared,
+            "signal_action_counts": dict(sorted(signal_action_counts.items())),
+            "signal_stage_observation_counts": dict(sorted(signal_stage_counts.items())),
+            "tradegen_outcome_counts": dict(sorted(tradegen_outcome_counts.items())),
+            "executor_entry_updates": executor_entry_total,
+            "monitor_updates": monitor_update_total,
+            "executor_exit_updates": executor_exit_total,
+            "signals_persisted": len(final_signals),
+            "trades_persisted": len(final_trades),
+            "final_entry_status_counts": dict(sorted(final_entry_status.items())),
+            "final_exit_status_counts": dict(sorted(final_exit_status.items())),
+            "final_instrument_counts": dict(sorted(final_instruments.items())),
+            "first_entry_fill_time": first_entry_fill,
+            "first_exit_fill_time": first_exit_fill,
+            "total_exit_pnl": round(total_exit_pnl, 4),
+            "audit_rows": len(audit_rows),
+            "require_trade": bool(args.require_trade),
+            "require_exit": bool(args.require_exit),
+        }
+    )
+
+    stamp = datetime.now(IST).strftime("%Y%m%d_%H%M%S")
+    prefix = report_dir / f"auction_trade_pipeline_replay_{trading_day}_{stamp}"
+    _write_csv(prefix.with_name(prefix.name + "_timeline.csv"), timeline_rows)
+    _write_csv(
+        prefix.with_name(prefix.name + "_trade_observations.csv"),
+        trade_observation_rows,
+    )
+    _write_csv(prefix.with_name(prefix.name + "_signals.csv"), signal_rows)
+    _write_csv(prefix.with_name(prefix.name + "_trades.csv"), trade_rows)
+    _write_csv(prefix.with_name(prefix.name + "_audit.csv"), audit_rows)
+
+    prefix.with_name(prefix.name + "_summary.json").write_text(
+        json.dumps(summary, indent=2, sort_keys=True, default=str),
+        encoding="utf-8",
+    )
+    _write_csv(
+        prefix.with_name(prefix.name + "_summary.csv"),
+        [
+            {
+                **summary,
+                "symbols": json.dumps(summary["symbols"]),
+                "cleared": json.dumps(summary["cleared"], sort_keys=True),
+                "signal_action_counts": json.dumps(
+                    summary["signal_action_counts"], sort_keys=True
+                ),
+                "signal_stage_observation_counts": json.dumps(
+                    summary["signal_stage_observation_counts"], sort_keys=True
+                ),
+                "tradegen_outcome_counts": json.dumps(
+                    summary["tradegen_outcome_counts"], sort_keys=True
+                ),
+                "final_entry_status_counts": json.dumps(
+                    summary["final_entry_status_counts"], sort_keys=True
+                ),
+                "final_exit_status_counts": json.dumps(
+                    summary["final_exit_status_counts"], sort_keys=True
+                ),
+                "final_instrument_counts": json.dumps(
+                    summary["final_instrument_counts"], sort_keys=True
+                ),
+            }
+        ],
+    )
+
+    logger.info("Strict Auction signal/trade replay complete | %s", summary)
+    logger.info("Reports: %s_*", prefix)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
