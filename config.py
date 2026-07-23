@@ -13,7 +13,7 @@ class AppConfig:
     """Secrets, DB URIs & global defaults."""
 
     SECRET_KEY = "AUTOTRADES2.0"
-    DATA_USER = "DR1812"
+    DATA_USER = "VZS807"
     DEMO_USER = "AT1234"
     DEMO_SESSION_HOURS = 1
     SIGNAL_SOURCE = "autotrades"
