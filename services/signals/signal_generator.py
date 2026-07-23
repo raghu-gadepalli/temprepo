@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LIFECYCLE = SIGNAL_CONFIG.default_lifecycle.strip().upper()
 _SIGNAL_ID_NAMESPACE = uuid.UUID("66bf75a2-909b-4c44-b5db-b9dd2eff598e")
+_DOWNSTREAM_CONTRACT_VERSION = "AUCTION_SIGNAL_DOWNSTREAM_V1"
 
 _ALLOWED_AUCTION_ACTIONS = {
     "NO_LOCAL_OPPORTUNITY",
@@ -1231,19 +1232,27 @@ def _create_meta_json(
 ) -> Dict[str, Any]:
     identity = _require_instruction_identity(instruction)
     latest = _latest_auction_evaluation(snapshot, instruction)
-    return sanitize_json({
+    setup_levels = _entry_setup_levels(snapshot, instruction, identity)
+    downstream = _downstream_projection(
+        snapshot=snapshot,
+        instruction=instruction,
+        identity=identity,
+        setup_levels=setup_levels,
+    )
+    meta = {
         "reason": _status_reason(instruction),
         "source": "AUCTION",
+        "strategy": "AUCTION",
+        "setup_label": identity.setup_family,
+        "primary_pattern": identity.setup_subtype,
+        "setup_levels": setup_levels,
         "initiated_setup_label": identity.setup_family,
-        "initiated_setup": {
-            "setup_label": identity.setup_family,
-            "setup_subtype": identity.setup_subtype,
-            "side": identity.side,
-            "candidate_id": identity.candidate_id,
-            "opportunity_key": identity.opportunity_key,
-            "boundary_event_key": identity.boundary_event_key,
-            "snapshot_time": snapshot.snapshot_time,
-        },
+        "initiated_setup": _initiated_setup_payload(
+            snapshot=snapshot,
+            instruction=instruction,
+            identity=identity,
+            setup_levels=setup_levels,
+        ),
         "auction_signal": {
             "opportunity_key": identity.opportunity_key,
             "candidate_id": identity.candidate_id,
@@ -1263,7 +1272,10 @@ def _create_meta_json(
         "auction_posture_history": [
             _posture_history_record(snapshot, instruction)
         ],
-    })
+        **downstream,
+    }
+    _validate_downstream_contract(meta, identity)
+    return sanitize_json(meta)
 
 
 def _update_meta_json(
@@ -1289,6 +1301,30 @@ def _update_meta_json(
     next_meta["reason"] = _status_reason(instruction)
     next_meta["current_criteria_json"] = criteria_json
     next_meta["latest_auction_evaluation"] = _latest_auction_evaluation(snapshot, instruction)
+
+    setup_levels, migrated = _existing_or_migrated_setup_levels(
+        meta=meta,
+        active_identity=active_identity,
+    )
+    next_meta["setup_levels"] = setup_levels
+    next_meta["strategy"] = "AUCTION"
+    next_meta["setup_label"] = active_identity.setup_family
+    next_meta["primary_pattern"] = active_identity.setup_subtype
+    initiated_setup = _existing_or_migrated_initiated_setup(
+        meta=meta,
+        snapshot=snapshot,
+        instruction=instruction,
+        active_identity=active_identity,
+        setup_levels=setup_levels,
+    )
+    next_meta["initiated_setup"] = initiated_setup
+    next_meta["initiated_setup_label"] = active_identity.setup_family
+    if migrated:
+        next_meta["downstream_contract_migration"] = {
+            "version": _DOWNSTREAM_CONTRACT_VERSION,
+            "snapshot_time": snapshot.snapshot_time,
+            "reason": "PATCH5_2_BACKFILLED_FROM_IMMUTABLE_ENTRY_CRITERIA",
+        }
 
     posture_record = _posture_history_record(snapshot, instruction)
     previous_posture_signature = None
@@ -1343,6 +1379,14 @@ def _update_meta_json(
     stored_identity = _signal_identity(existing_signal)
     if stored_identity != active_identity:
         raise ValueError("Active signal Auction identity changed during update")
+    downstream = _downstream_projection(
+        snapshot=snapshot,
+        instruction=instruction,
+        identity=active_identity,
+        setup_levels=setup_levels,
+    )
+    next_meta.update(downstream)
+    _validate_downstream_contract(next_meta, active_identity)
     return sanitize_json(next_meta)
 
 
@@ -1376,6 +1420,711 @@ def _lifecycle_signature(record: Dict[str, Any]) -> Tuple[Any, ...]:
         raise ValueError(f"signal_lifecycle_history entry missing fields: {missing}")
     return tuple(record[key] for key in required)
 
+
+def _entry_setup_levels(
+    snapshot: SnapshotSchema,
+    instruction: AuctionSignalInstruction,
+    identity: AuctionSignalIdentity,
+) -> Dict[str, Any]:
+    decision = instruction.decision
+    if decision.entry_price is None:
+        raise ValueError("Auction signal CREATE missing decision.entry_price")
+    if decision.stop_anchor_price is None:
+        raise ValueError("Auction signal CREATE missing decision.stop_anchor_price")
+    if decision.stop_anchor_type is None:
+        raise ValueError("Auction signal CREATE missing decision.stop_anchor_type")
+    return sanitize_json({
+        "contract_version": _DOWNSTREAM_CONTRACT_VERSION,
+        "source": "AUCTION",
+        "setup_label": identity.setup_family,
+        "setup_subtype": identity.setup_subtype,
+        "side": identity.side,
+        "candidate_id": identity.candidate_id,
+        "opportunity_key": identity.opportunity_key,
+        "boundary_event_key": identity.boundary_event_key,
+        "snapshot_time": snapshot.snapshot_time,
+        "entry_price": decision.entry_price,
+        "initial_stop_reference_price": decision.stop_anchor_price,
+        "reference_price": decision.stop_anchor_price,
+        "reference_source": decision.stop_anchor_type,
+        "level_price": decision.stop_anchor_price,
+        "level_type": decision.stop_anchor_type,
+        "target_basis": decision.target_basis,
+        "target_reference_price": decision.target_reference_price,
+    })
+
+
+def _existing_or_migrated_setup_levels(
+    *,
+    meta: Dict[str, Any],
+    active_identity: AuctionSignalIdentity,
+) -> Tuple[Dict[str, Any], bool]:
+    if "setup_levels" in meta:
+        setup_levels = meta["setup_levels"]
+        if not isinstance(setup_levels, dict):
+            raise ValueError("Auction-linked signal setup_levels must be an object")
+        _validate_setup_levels_identity(setup_levels, active_identity)
+        return dict(setup_levels), False
+
+    if "entry_criteria_json" not in meta:
+        raise ValueError(
+            "Auction-linked signal missing setup_levels and immutable entry_criteria_json"
+        )
+    entry = meta["entry_criteria_json"]
+    if not isinstance(entry, dict):
+        raise ValueError("entry_criteria_json must be an object for downstream migration")
+    required = (
+        "entry_price",
+        "stop_anchor_price",
+        "stop_anchor_type",
+        "target_basis",
+        "target_reference_price",
+    )
+    missing = [key for key in required if key not in entry]
+    if missing:
+        raise ValueError(
+            f"entry_criteria_json missing downstream setup-level fields: {missing}"
+        )
+    if entry["entry_price"] is None:
+        raise ValueError("entry_criteria_json.entry_price is required for migration")
+    if entry["stop_anchor_price"] is None:
+        raise ValueError("entry_criteria_json.stop_anchor_price is required for migration")
+    if entry["stop_anchor_type"] is None:
+        raise ValueError("entry_criteria_json.stop_anchor_type is required for migration")
+
+    setup_levels = sanitize_json({
+        "contract_version": _DOWNSTREAM_CONTRACT_VERSION,
+        "source": "AUCTION",
+        "setup_label": active_identity.setup_family,
+        "setup_subtype": active_identity.setup_subtype,
+        "side": active_identity.side,
+        "candidate_id": active_identity.candidate_id,
+        "opportunity_key": active_identity.opportunity_key,
+        "boundary_event_key": active_identity.boundary_event_key,
+        "snapshot_time": active_identity.created_snapshot_time,
+        "entry_price": entry["entry_price"],
+        "initial_stop_reference_price": entry["stop_anchor_price"],
+        "reference_price": entry["stop_anchor_price"],
+        "reference_source": entry["stop_anchor_type"],
+        "level_price": entry["stop_anchor_price"],
+        "level_type": entry["stop_anchor_type"],
+        "target_basis": entry["target_basis"],
+        "target_reference_price": entry["target_reference_price"],
+    })
+    _validate_setup_levels_identity(setup_levels, active_identity)
+    return setup_levels, True
+
+
+def _validate_setup_levels_identity(
+    setup_levels: Dict[str, Any],
+    identity: AuctionSignalIdentity,
+) -> None:
+    required = (
+        "contract_version",
+        "source",
+        "setup_label",
+        "setup_subtype",
+        "side",
+        "candidate_id",
+        "opportunity_key",
+        "boundary_event_key",
+        "entry_price",
+        "initial_stop_reference_price",
+        "reference_price",
+        "reference_source",
+    )
+    missing = [key for key in required if key not in setup_levels]
+    if missing:
+        raise ValueError(f"setup_levels missing required fields: {missing}")
+    expected = {
+        "contract_version": _DOWNSTREAM_CONTRACT_VERSION,
+        "source": "AUCTION",
+        "setup_label": identity.setup_family,
+        "setup_subtype": identity.setup_subtype,
+        "side": identity.side,
+        "candidate_id": identity.candidate_id,
+        "opportunity_key": identity.opportunity_key,
+        "boundary_event_key": identity.boundary_event_key,
+    }
+    mismatches = [
+        key
+        for key in expected
+        if str(setup_levels[key]).strip() != str(expected[key]).strip()
+    ]
+    if mismatches:
+        raise ValueError(f"setup_levels Auction identity mismatch: {mismatches}")
+    _positive_decimal_required(
+        setup_levels["entry_price"],
+        "signal.meta_json.setup_levels.entry_price",
+    )
+    _positive_decimal_required(
+        setup_levels["initial_stop_reference_price"],
+        "signal.meta_json.setup_levels.initial_stop_reference_price",
+    )
+    _positive_decimal_required(
+        setup_levels["reference_price"],
+        "signal.meta_json.setup_levels.reference_price",
+    )
+
+
+def _initiated_setup_payload(
+    *,
+    snapshot: SnapshotSchema,
+    instruction: AuctionSignalInstruction,
+    identity: AuctionSignalIdentity,
+    setup_levels: Dict[str, Any],
+) -> Dict[str, Any]:
+    return sanitize_json({
+        "setup_label": identity.setup_family,
+        "setup_subtype": identity.setup_subtype,
+        "strategy": "AUCTION",
+        "side": identity.side,
+        "candidate_id": identity.candidate_id,
+        "opportunity_key": identity.opportunity_key,
+        "boundary_event_key": identity.boundary_event_key,
+        "snapshot_time": snapshot.snapshot_time,
+        "entry_price": setup_levels["entry_price"],
+        "entry_reason": {
+            "action": instruction.lifecycle.signal_action,
+            "reason_code": instruction.lifecycle.reason_code,
+            "auction_action": instruction.auction_action,
+            "auction_state": instruction.auction_state,
+        },
+        "setup_levels": setup_levels,
+    })
+
+
+def _existing_or_migrated_initiated_setup(
+    *,
+    meta: Dict[str, Any],
+    snapshot: SnapshotSchema,
+    instruction: AuctionSignalInstruction,
+    active_identity: AuctionSignalIdentity,
+    setup_levels: Dict[str, Any],
+) -> Dict[str, Any]:
+    if "initiated_setup" in meta:
+        initiated = meta["initiated_setup"]
+        if not isinstance(initiated, dict):
+            raise ValueError("initiated_setup must be an object")
+        next_initiated = dict(initiated)
+        next_initiated["setup_label"] = active_identity.setup_family
+        next_initiated["setup_subtype"] = active_identity.setup_subtype
+        next_initiated["strategy"] = "AUCTION"
+        next_initiated["side"] = active_identity.side
+        next_initiated["candidate_id"] = active_identity.candidate_id
+        next_initiated["opportunity_key"] = active_identity.opportunity_key
+        next_initiated["boundary_event_key"] = active_identity.boundary_event_key
+        next_initiated["setup_levels"] = setup_levels
+        if "entry_price" not in next_initiated:
+            next_initiated["entry_price"] = setup_levels["entry_price"]
+        if "entry_reason" not in next_initiated:
+            next_initiated["entry_reason"] = {
+                "action": "CREATE",
+                "reason_code": "PATCH5_2_MIGRATED_AUCTION_ENTRY_REASON",
+                "auction_action": "LOCAL_CONFIRMED",
+                "auction_state": None,
+            }
+        return sanitize_json(next_initiated)
+    return _initiated_setup_payload(
+        snapshot=snapshot,
+        instruction=instruction,
+        identity=active_identity,
+        setup_levels=setup_levels,
+    )
+
+
+def _downstream_projection(
+    *,
+    snapshot: SnapshotSchema,
+    instruction: AuctionSignalInstruction,
+    identity: AuctionSignalIdentity,
+    setup_levels: Dict[str, Any],
+) -> Dict[str, Any]:
+    signal_state = _downstream_signal_state(instruction)
+    evidence = _active_signal_evidence_projection(
+        snapshot=snapshot,
+        instruction=instruction,
+        identity=identity,
+    )
+    primary_candidate = _downstream_candidate_projection(instruction)
+    supports, warnings, conflicts = _downstream_reason_buckets(instruction)
+    quality: Optional[str] = None
+    confidence: Optional[float] = None
+
+    signal_block = sanitize_json({
+        "contract_version": _DOWNSTREAM_CONTRACT_VERSION,
+        "source": "AUCTION",
+        "stage": instruction.lifecycle.stage.value,
+        "side": identity.side,
+        "confidence": confidence,
+        "quality": quality,
+        "confidence_source": "NOT_EMITTED_BY_AUCTION",
+        "quality_source": "NOT_EMITTED_BY_AUCTION",
+        "signal_action": instruction.lifecycle.signal_action,
+        "signal_state": signal_state,
+        "setup_state": instruction.lifecycle.opportunity_lifecycle,
+        "signal_reason": instruction.lifecycle.reason_code,
+        "strategy": "AUCTION",
+        "setup_label": identity.setup_family,
+        "primary_pattern": identity.setup_subtype,
+        "evaluator_state": instruction.auction_state,
+        "decision": instruction.auction_action,
+        "price_action_confirmed": bool(
+            instruction.auction_action == "LOCAL_CONFIRMED"
+            and (
+                instruction.lifecycle.signal_action == "CREATE"
+                or instruction.same_opportunity
+            )
+        ),
+        "price_action_strength": None,
+        "blocked_by": (
+            list(instruction.reason_codes)
+            if instruction.auction_action == "LOCAL_BLOCKED"
+            else []
+        ),
+        "risk_flags": [],
+        "setup_levels": setup_levels,
+    })
+    lifecycle_block = sanitize_json({
+        "contract_version": _DOWNSTREAM_CONTRACT_VERSION,
+        "source": "AUCTION",
+        "stage": instruction.lifecycle.stage.value,
+        "side": identity.side,
+        "confidence": confidence,
+        "quality": quality,
+        "signal_action": instruction.lifecycle.signal_action,
+        "signal_state": signal_state,
+        "signal_reason": instruction.lifecycle.reason_code,
+        "trade_action": _downstream_trade_action(instruction),
+        "blocked_by_policy": instruction.auction_action == "LOCAL_BLOCKED",
+        "blocked_by_policy_reason": (
+            instruction.lifecycle.reason_code
+            if instruction.auction_action == "LOCAL_BLOCKED"
+            else None
+        ),
+        "supports": supports,
+        "warnings": warnings,
+        "conflicts": conflicts,
+        "blocks": (
+            list(instruction.reason_codes)
+            if instruction.auction_action == "LOCAL_BLOCKED"
+            else []
+        ),
+        "negative_cluster": conflicts,
+        "confidence_factors": [],
+        "summary": _status_reason(instruction),
+        "reason": instruction.lifecycle.reason_code,
+        "reasons": list(instruction.reason_codes),
+    })
+    setup_decision = sanitize_json({
+        "phase": (
+            "SIGNAL_CREATE"
+            if instruction.lifecycle.signal_action == "CREATE"
+            else "ACTIVE_SIGNAL_MANAGEMENT"
+        ),
+        "has_active_signal": True,
+        "active_side": identity.side,
+        "reference_side": evidence["reference_side"],
+        "decision": instruction.auction_action,
+        "evaluator_state": instruction.auction_state,
+        "preferred_side": evidence["reference_side"],
+        "primary_candidate": primary_candidate,
+        "entry_ready_candidates": (
+            [primary_candidate]
+            if primary_candidate is not None
+            and instruction.auction_action == "LOCAL_CONFIRMED"
+            else []
+        ),
+        "active_signal_evidence": evidence,
+    })
+    current_evidence = sanitize_json({
+        "contract_version": _DOWNSTREAM_CONTRACT_VERSION,
+        "source": "AUCTION",
+        "snapshot_time": snapshot.snapshot_time,
+        "stage": instruction.lifecycle.stage.value,
+        "side": identity.side,
+        "signal_action": instruction.lifecycle.signal_action,
+        "signal_state": signal_state,
+        "signal_reason": instruction.lifecycle.reason_code,
+        "reason": {
+            "code": instruction.lifecycle.reason_code,
+            "text": _status_reason(instruction),
+        },
+        "strategy": "AUCTION",
+        "setup_label": identity.setup_family,
+        "primary_pattern": identity.setup_subtype,
+        "entry_permission": _downstream_entry_permission(instruction),
+        "evaluator_state": instruction.auction_state,
+        "decision": instruction.auction_action,
+        "preferred_side": evidence["reference_side"],
+        "blocked_by": signal_block["blocked_by"],
+        "risk_flags": [],
+        "setup_decision": setup_decision,
+        "active_signal_evidence": evidence,
+        "primary_candidate": primary_candidate,
+        "entry_ready_candidates": setup_decision["entry_ready_candidates"],
+    })
+    return {
+        "downstream_contract": sanitize_json({
+            "version": _DOWNSTREAM_CONTRACT_VERSION,
+            "source": "AUCTION_SIGNAL_GENERATOR",
+            "snapshot_time": snapshot.snapshot_time,
+            "setup_levels_immutable": True,
+            "confidence_provided": False,
+            "quality_provided": False,
+        }),
+        "signal": signal_block,
+        "lifecycle": lifecycle_block,
+        "active_signal_evidence": evidence,
+        "setup_decision": setup_decision,
+        "current_evidence": current_evidence,
+        "evidence_reason": {
+            "code": instruction.lifecycle.reason_code,
+            "text": _status_reason(instruction),
+        },
+        "supports": supports,
+        "warnings": warnings,
+        "conflicts": conflicts,
+    }
+
+
+def _downstream_signal_state(instruction: AuctionSignalInstruction) -> str:
+    if instruction.lifecycle.status != SignalStatus.OPEN:
+        return instruction.lifecycle.status.value
+    if instruction.lifecycle.signal_action == "CREATE":
+        return "READY"
+    stage = instruction.lifecycle.stage
+    if stage in {LifecycleStage.ACTIVE, LifecycleStage.EXPAND}:
+        return "ACCEPTED"
+    if stage in {LifecycleStage.DISCOVERY, LifecycleStage.BUILDING}:
+        return "TRACKING"
+    return "MANAGE"
+
+
+def _downstream_trade_action(instruction: AuctionSignalInstruction) -> str:
+    stage = instruction.lifecycle.stage
+    if instruction.lifecycle.terminal or stage == LifecycleStage.FORCE_EXIT:
+        return "FORCE_EXIT"
+    if stage == LifecycleStage.EXIT_BIAS:
+        return "EXIT_POSITION"
+    if stage in {
+        LifecycleStage.WEAKENING,
+        LifecycleStage.TRANSITION,
+        LifecycleStage.PROTECT,
+    }:
+        return "TIGHTEN_STOP"
+    if instruction.lifecycle.signal_action == "CREATE":
+        return "CREATE_TRADE"
+    return "HOLD_POSITION"
+
+
+def _downstream_entry_permission(instruction: AuctionSignalInstruction) -> str:
+    if instruction.lifecycle.status != SignalStatus.OPEN:
+        return "BLOCK"
+    if instruction.lifecycle.signal_action == "CREATE":
+        return "ALLOW"
+    if instruction.lifecycle.stage in {LifecycleStage.ACTIVE, LifecycleStage.EXPAND}:
+        return "ALLOW"
+    if instruction.lifecycle.stage in {
+        LifecycleStage.PROTECT,
+        LifecycleStage.TRANSITION,
+        LifecycleStage.WEAKENING,
+    }:
+        return "CAUTION"
+    return "BLOCK"
+
+
+def _active_signal_evidence_projection(
+    *,
+    snapshot: SnapshotSchema,
+    instruction: AuctionSignalInstruction,
+    identity: AuctionSignalIdentity,
+) -> Dict[str, Any]:
+    stage = instruction.lifecycle.stage
+    if instruction.lifecycle.terminal or stage in {
+        LifecycleStage.EXIT_BIAS,
+        LifecycleStage.FORCE_EXIT,
+    }:
+        evidence_action = "EXIT"
+        exit_pressure = "HIGH"
+        trail_mode = "EXIT_READY"
+        target_expansion_allowed = False
+        should_exit_signal = True
+    elif stage == LifecycleStage.WEAKENING:
+        evidence_action = "CAUTION"
+        exit_pressure = "MEDIUM"
+        trail_mode = "DEFENSIVE"
+        target_expansion_allowed = False
+        should_exit_signal = False
+    elif stage in {LifecycleStage.TRANSITION, LifecycleStage.PROTECT}:
+        evidence_action = "CAUTION"
+        exit_pressure = "MEDIUM" if stage == LifecycleStage.TRANSITION else "LOW"
+        trail_mode = "DEFENSIVE"
+        target_expansion_allowed = False
+        should_exit_signal = False
+    elif stage in {LifecycleStage.ACTIVE, LifecycleStage.EXPAND}:
+        evidence_action = (
+            "STRENGTHEN"
+            if instruction.lifecycle.directional_alignment == "ALIGNED"
+            else "HOLD"
+        )
+        exit_pressure = "LOW"
+        trail_mode = "NORMAL"
+        target_expansion_allowed = bool(
+            instruction.lifecycle.directional_alignment == "ALIGNED"
+        )
+        should_exit_signal = False
+    elif stage in {LifecycleStage.DISCOVERY, LifecycleStage.BUILDING}:
+        evidence_action = "HOLD"
+        exit_pressure = "LOW"
+        trail_mode = "NORMAL"
+        target_expansion_allowed = False
+        should_exit_signal = False
+    else:
+        raise ValueError(
+            f"Unsupported stage for downstream active evidence: {stage.value}"
+        )
+
+    current_side = _current_side(instruction)
+    reference_side = current_side if current_side is not None else identity.side
+    primary_candidate = _downstream_candidate_projection(instruction)
+    top_same = (
+        primary_candidate
+        if primary_candidate is not None and reference_side == identity.side
+        else None
+    )
+    top_opposite = (
+        primary_candidate
+        if primary_candidate is not None and reference_side != identity.side
+        else None
+    )
+    return sanitize_json({
+        "contract_version": _DOWNSTREAM_CONTRACT_VERSION,
+        "mode": "AUCTION_LIFECYCLE_ADAPTER_NO_AUTO_REVERSAL",
+        "has_active_signal": True,
+        "active_side": identity.side,
+        "active_setup_label": identity.setup_family,
+        "active_setup_subtype": identity.setup_subtype,
+        "active_opportunity_key": identity.opportunity_key,
+        "active_candidate_id": identity.candidate_id,
+        "active_boundary_event_key": identity.boundary_event_key,
+        "stage": stage.value,
+        "signal_status": instruction.lifecycle.status.value,
+        "reference_side": reference_side,
+        "evidence_action": evidence_action,
+        "active_evidence_action": evidence_action,
+        "reason_code": instruction.lifecycle.reason_code,
+        "reason_text": _status_reason(instruction),
+        "exit_pressure": exit_pressure,
+        "trail_mode": trail_mode,
+        "target_expansion_allowed": target_expansion_allowed,
+        "should_exit_signal": should_exit_signal,
+        "same_pass_reversal_allowed": False,
+        "next_pass_create_policy": "ALLOW_ONLY_IF_NO_ACTIVE_SIGNAL_AT_PASS_START",
+        "support_score": None,
+        "opposition_score": None,
+        "same_side_candidate_count": 1 if top_same is not None else 0,
+        "same_side_confirmed_count": (
+            1
+            if top_same is not None and instruction.auction_action == "LOCAL_CONFIRMED"
+            else 0
+        ),
+        "same_side_entry_ready_count": (
+            1
+            if top_same is not None and instruction.auction_action == "LOCAL_CONFIRMED"
+            else 0
+        ),
+        "opposite_candidate_count": 1 if top_opposite is not None else 0,
+        "opposite_confirmed_count": (
+            1
+            if top_opposite is not None and instruction.auction_action == "LOCAL_CONFIRMED"
+            else 0
+        ),
+        "opposite_entry_ready_count": (
+            1
+            if top_opposite is not None and instruction.auction_action == "LOCAL_CONFIRMED"
+            else 0
+        ),
+        "top_same_side_candidate": top_same,
+        "top_opposite_candidate": top_opposite,
+        "primary_candidate": primary_candidate,
+        "auction_action": instruction.auction_action,
+        "auction_state": instruction.auction_state,
+        "opportunity_lifecycle": instruction.lifecycle.opportunity_lifecycle,
+        "directional_alignment": instruction.lifecycle.directional_alignment,
+        "snapshot_time": snapshot.snapshot_time,
+    })
+
+
+def _downstream_candidate_projection(
+    instruction: AuctionSignalInstruction,
+) -> Optional[Dict[str, Any]]:
+    candidate = instruction.current_candidate
+    opportunity = instruction.current_opportunity
+    if candidate is None and opportunity is None:
+        return None
+    return sanitize_json({
+        "candidate_id": _current_candidate_id(instruction),
+        "opportunity_key": (
+            opportunity.opportunity_key if opportunity is not None else None
+        ),
+        "setup_label": _current_family(instruction),
+        "setup_subtype": _current_subtype(instruction),
+        "side": _current_side(instruction),
+        "eligibility": _current_eligibility(instruction),
+        "event_key": (
+            opportunity.boundary_event_key if opportunity is not None else None
+        ),
+        "entry_price": instruction.decision.entry_price,
+        "stop_anchor_price": instruction.decision.stop_anchor_price,
+        "stop_anchor_type": instruction.decision.stop_anchor_type,
+        "target_basis": instruction.decision.target_basis,
+        "target_reference_price": instruction.decision.target_reference_price,
+    })
+
+
+def _downstream_reason_buckets(
+    instruction: AuctionSignalInstruction,
+) -> Tuple[List[str], List[str], List[str]]:
+    reasons = list(instruction.reason_codes)
+    if instruction.lifecycle.terminal or instruction.lifecycle.stage in {
+        LifecycleStage.EXIT_BIAS,
+        LifecycleStage.FORCE_EXIT,
+    }:
+        return [], [], reasons
+    if instruction.lifecycle.stage in {
+        LifecycleStage.PROTECT,
+        LifecycleStage.TRANSITION,
+        LifecycleStage.WEAKENING,
+    }:
+        return [], reasons, []
+    return reasons, [], []
+
+
+def _validate_downstream_contract(
+    meta: Dict[str, Any],
+    identity: AuctionSignalIdentity,
+) -> None:
+    required_blocks = (
+        "downstream_contract",
+        "signal",
+        "lifecycle",
+        "active_signal_evidence",
+        "setup_decision",
+        "current_evidence",
+        "setup_levels",
+        "initiated_setup",
+    )
+    missing = [key for key in required_blocks if key not in meta]
+    if missing:
+        raise ValueError(f"Auction signal downstream contract missing blocks: {missing}")
+    for key in required_blocks:
+        if not isinstance(meta[key], dict):
+            raise ValueError(f"Auction signal downstream block {key} must be an object")
+
+    setup_levels = meta["setup_levels"]
+    _validate_setup_levels_identity(setup_levels, identity)
+    initiated = meta["initiated_setup"]
+    initiated_expected = {
+        "setup_label": identity.setup_family,
+        "setup_subtype": identity.setup_subtype,
+        "side": identity.side,
+        "candidate_id": identity.candidate_id,
+        "opportunity_key": identity.opportunity_key,
+        "boundary_event_key": identity.boundary_event_key,
+    }
+    initiated_missing = [key for key in initiated_expected if key not in initiated]
+    if initiated_missing:
+        raise ValueError(
+            f"initiated_setup missing Auction identity fields: {initiated_missing}"
+        )
+    initiated_mismatch = [
+        key for key in initiated_expected
+        if initiated[key] != initiated_expected[key]
+    ]
+    if initiated_mismatch:
+        raise ValueError(
+            f"initiated_setup Auction identity mismatch: {initiated_mismatch}"
+        )
+    if "setup_levels" not in initiated or initiated["setup_levels"] != setup_levels:
+        raise ValueError("initiated_setup.setup_levels must match immutable setup_levels")
+
+    signal_block = meta["signal"]
+    lifecycle_block = meta["lifecycle"]
+    active_evidence = meta["active_signal_evidence"]
+    setup_decision = meta["setup_decision"]
+    current_evidence = meta["current_evidence"]
+    for key in (
+        "contract_version",
+        "stage",
+        "side",
+        "signal_action",
+        "signal_state",
+        "signal_reason",
+        "setup_label",
+        "setup_levels",
+    ):
+        if key not in signal_block:
+            raise ValueError(f"signal downstream block missing {key}")
+    for key in (
+        "contract_version",
+        "stage",
+        "side",
+        "signal_action",
+        "signal_state",
+        "signal_reason",
+        "trade_action",
+    ):
+        if key not in lifecycle_block:
+            raise ValueError(f"lifecycle downstream block missing {key}")
+    for key in (
+        "contract_version",
+        "active_evidence_action",
+        "reason_code",
+        "exit_pressure",
+        "trail_mode",
+        "target_expansion_allowed",
+        "should_exit_signal",
+    ):
+        if key not in active_evidence:
+            raise ValueError(f"active_signal_evidence missing {key}")
+    if signal_block["contract_version"] != _DOWNSTREAM_CONTRACT_VERSION:
+        raise ValueError("signal downstream contract version mismatch")
+    if lifecycle_block["contract_version"] != _DOWNSTREAM_CONTRACT_VERSION:
+        raise ValueError("lifecycle downstream contract version mismatch")
+    if active_evidence["contract_version"] != _DOWNSTREAM_CONTRACT_VERSION:
+        raise ValueError("active_signal_evidence contract version mismatch")
+    if signal_block["side"] != identity.side:
+        raise ValueError("signal downstream side does not match Auction identity")
+    if signal_block["setup_label"] != identity.setup_family:
+        raise ValueError("signal downstream setup does not match Auction identity")
+    if signal_block["setup_levels"] != setup_levels:
+        raise ValueError("signal.setup_levels must match immutable setup_levels")
+    if lifecycle_block["side"] != identity.side:
+        raise ValueError("lifecycle downstream side does not match Auction identity")
+    for key in ("stage", "signal_action", "signal_state", "signal_reason"):
+        if signal_block[key] != lifecycle_block[key]:
+            raise ValueError(f"signal/lifecycle downstream mismatch for {key}")
+    if active_evidence["active_side"] != identity.side:
+        raise ValueError("active_signal_evidence side does not match Auction identity")
+    if active_evidence["active_setup_label"] != identity.setup_family:
+        raise ValueError("active_signal_evidence setup does not match Auction identity")
+    if active_evidence["active_opportunity_key"] != identity.opportunity_key:
+        raise ValueError("active_signal_evidence opportunity does not match Auction identity")
+    if active_evidence["active_candidate_id"] != identity.candidate_id:
+        raise ValueError("active_signal_evidence candidate does not match Auction identity")
+    if active_evidence["active_boundary_event_key"] != identity.boundary_event_key:
+        raise ValueError("active_signal_evidence boundary does not match Auction identity")
+    if active_evidence["stage"] != signal_block["stage"]:
+        raise ValueError("active_signal_evidence stage does not match signal block")
+    if active_evidence["reason_code"] != signal_block["signal_reason"]:
+        raise ValueError("active_signal_evidence reason does not match signal block")
+    if setup_decision["active_signal_evidence"] != active_evidence:
+        raise ValueError("setup_decision active evidence must match canonical block")
+    if current_evidence["active_signal_evidence"] != active_evidence:
+        raise ValueError("current_evidence active evidence must match canonical block")
+    if current_evidence["setup_decision"] != setup_decision:
+        raise ValueError("current_evidence setup decision must match canonical block")
 
 
 def _latest_auction_evaluation(
@@ -1522,6 +2271,13 @@ def _decimal_required(value: Any, source: str) -> Decimal:
         raise ValueError(f"Invalid decimal from {source}: {value!r}") from exc
     if not out.is_finite():
         raise ValueError(f"Non-finite decimal from {source}: {value!r}")
+    return out
+
+
+def _positive_decimal_required(value: Any, source: str) -> Decimal:
+    out = _decimal_required(value, source)
+    if out <= 0:
+        raise ValueError(f"Expected positive decimal from {source}: {value!r}")
     return out
 
 

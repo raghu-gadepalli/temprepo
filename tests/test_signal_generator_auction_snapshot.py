@@ -17,6 +17,11 @@ from schemas.snapshot import (
     SnapshotSchema,
 )
 from services.signals.signal_generator import SignalAssembler
+from services.signals.signal_helper import SignalHelper
+from services.trade.monitor.trademon_helper import (
+    _active_signal_evidence,
+    _get_signal_meta as trade_monitor_signal_meta,
+)
 
 
 TS = datetime(2026, 7, 20, 11, 48, tzinfo=timezone.utc)
@@ -196,7 +201,14 @@ def _active_signal(opportunity_key: str = OPP) -> SignalSchema:
                 "side": "SELL",
                 "created_snapshot_time": TS.isoformat(),
             },
-            "entry_criteria_json": {"source": "AUCTION"},
+            "entry_criteria_json": {
+                "source": "AUCTION",
+                "entry_price": 1497.7,
+                "stop_anchor_price": 1499.1,
+                "stop_anchor_type": "FROZEN_BOUNDARY",
+                "target_basis": "OPEN_ENDED_BREAKOUT_NO_ASSUMED_TARGET",
+                "target_reference_price": None,
+            },
             "current_criteria_json": {"source": "AUCTION"},
             "latest_auction_evaluation": {"auction_action": "LOCAL_CONFIRMED"},
             "signal_lifecycle": {
@@ -333,6 +345,30 @@ class AuctionSignalGeneratorTests(unittest.TestCase):
         self.assertEqual(OPP, persister.created["instruction"].current_opportunity.opportunity_key)
         self.assertEqual("ACTIVE", events[0][1].meta_json["signal_lifecycle"]["stage"])
         self.assertEqual("OPEN", events[0][1].meta_json["signal_lifecycle"]["status"])
+        meta = events[0][1].meta_json
+        self.assertEqual(
+            "AUCTION_SIGNAL_DOWNSTREAM_V1",
+            meta["downstream_contract"]["version"],
+        )
+        self.assertEqual("CREATE", meta["signal"]["signal_action"])
+        self.assertEqual("READY", meta["signal"]["signal_state"])
+        self.assertTrue(meta["signal"]["price_action_confirmed"])
+        self.assertEqual("CREATE_TRADE", meta["lifecycle"]["trade_action"])
+        self.assertEqual("STRENGTHEN", meta["active_signal_evidence"]["active_evidence_action"])
+        self.assertTrue(meta["active_signal_evidence"]["target_expansion_allowed"])
+        self.assertFalse(meta["active_signal_evidence"]["should_exit_signal"])
+        self.assertEqual(1499.1, meta["setup_levels"]["reference_price"])
+        self.assertEqual(OPP, meta["setup_levels"]["opportunity_key"])
+        self.assertEqual(meta["setup_levels"], meta["signal"]["setup_levels"])
+        self.assertEqual(meta["setup_levels"], meta["initiated_setup"]["setup_levels"])
+        self.assertEqual(meta["signal"], trade_monitor_signal_meta(events[0][1]))
+        self.assertEqual(
+            meta["active_signal_evidence"],
+            _active_signal_evidence(events[0][1]),
+        )
+        ui_rows = SignalHelper._build_signal_rows([meta["lifecycle"]])
+        self.assertEqual("ENTER", ui_rows[0]["entry_view"])
+        self.assertEqual("READY", ui_rows[0]["state"])
         self.assertIsNone(snapshot.ltp)
 
     def test_second_confirmed_updates_when_selected_candidate_is_not_in_current_list(self):
@@ -371,6 +407,17 @@ class AuctionSignalGeneratorTests(unittest.TestCase):
         self.assertEqual(
             2,
             len(events[0][1].meta_json["signal_lifecycle_history"]),
+        )
+        meta = events[0][1].meta_json
+        self.assertEqual("CAUTION", meta["active_signal_evidence"]["active_evidence_action"])
+        self.assertEqual("DEFENSIVE", meta["active_signal_evidence"]["trail_mode"])
+        self.assertFalse(meta["active_signal_evidence"]["target_expansion_allowed"])
+        self.assertFalse(meta["active_signal_evidence"]["should_exit_signal"])
+        self.assertEqual("TIGHTEN_STOP", meta["lifecycle"]["trade_action"])
+        self.assertEqual("MANAGE", meta["signal"]["signal_state"])
+        self.assertEqual(
+            "AUCTION_SIGNAL_DOWNSTREAM_V1",
+            meta["downstream_contract_migration"]["version"],
         )
 
     def test_watch_does_not_create_without_active_signal(self):
@@ -419,6 +466,11 @@ class AuctionSignalGeneratorTests(unittest.TestCase):
         ).assemble(snapshot)
         self.assertEqual("PROMOTE", events[0][0])
         self.assertEqual(LifecycleStage.EXPAND, events[0][1].stage)
+        meta = events[0][1].meta_json
+        self.assertEqual("STRENGTHEN", meta["active_signal_evidence"]["active_evidence_action"])
+        self.assertEqual("NORMAL", meta["active_signal_evidence"]["trail_mode"])
+        self.assertTrue(meta["active_signal_evidence"]["target_expansion_allowed"])
+        self.assertEqual("HOLD_POSITION", meta["lifecycle"]["trade_action"])
 
     def test_opposite_orderly_trend_downgrades_to_exit_bias(self):
         snapshot = _snapshot(
@@ -436,6 +488,13 @@ class AuctionSignalGeneratorTests(unittest.TestCase):
         self.assertEqual("DOWNGRADE", events[0][0])
         self.assertEqual(LifecycleStage.EXIT_BIAS, events[0][1].stage)
         self.assertEqual("OPPOSITE", persister.updated["instruction"].lifecycle.directional_alignment)
+        meta = events[0][1].meta_json
+        self.assertEqual("EXIT", meta["active_signal_evidence"]["active_evidence_action"])
+        self.assertEqual("EXIT_READY", meta["active_signal_evidence"]["trail_mode"])
+        self.assertEqual("HIGH", meta["active_signal_evidence"]["exit_pressure"])
+        self.assertTrue(meta["active_signal_evidence"]["should_exit_signal"])
+        self.assertEqual("EXIT_POSITION", meta["lifecycle"]["trade_action"])
+        self.assertEqual("MANAGE", meta["signal"]["signal_state"])
 
     def test_expired_active_opportunity_closes_signal(self):
         snapshot = _snapshot(
@@ -451,6 +510,10 @@ class AuctionSignalGeneratorTests(unittest.TestCase):
         self.assertEqual("EXPIRE", events[0][0])
         self.assertEqual(LifecycleStage.FORCE_EXIT, events[0][1].stage)
         self.assertEqual(SignalStatus.EXPIRED, events[0][1].status)
+        meta = events[0][1].meta_json
+        self.assertEqual("FORCE_EXIT", meta["lifecycle"]["trade_action"])
+        self.assertEqual("EXPIRED", meta["signal"]["signal_state"])
+        self.assertTrue(meta["active_signal_evidence"]["should_exit_signal"])
 
     def test_missing_active_opportunity_holds_current_stage(self):
         signal = _active_signal()
@@ -473,6 +536,20 @@ class AuctionSignalGeneratorTests(unittest.TestCase):
             "ACTIVE_OPPORTUNITY_NOT_IN_CURRENT_PROJECTION_HOLD",
             persister.updated["instruction"].lifecycle.reason_code,
         )
+
+    def test_patch51_migration_missing_setup_level_fails_visible(self):
+        signal = _active_signal()
+        del signal.meta_json["entry_criteria_json"]["stop_anchor_price"]
+        snapshot = _snapshot(
+            action="LOCAL_WATCH",
+            opportunities=[_opportunity(lifecycle="WATCH")],
+            candidates=[_candidate()],
+        )
+        with self.assertRaisesRegex(ValueError, "missing downstream setup-level fields"):
+            SignalAssembler(
+                fetcher=FakeFetcher(active=signal),
+                persister=FakePersister(),
+            ).assemble(snapshot)
 
     def test_active_non_auction_signal_fails_visible(self):
         signal = _active_signal()

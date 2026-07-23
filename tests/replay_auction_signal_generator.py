@@ -114,6 +114,51 @@ def _load_snapshots(
     return output
 
 
+def _downstream_meta(signal: SignalSchema) -> Dict[str, Dict[str, Any]]:
+    meta = signal.meta_json
+    if not isinstance(meta, dict):
+        raise ValueError(f"Signal {signal.signal_id} meta_json must be an object")
+    required = (
+        "downstream_contract",
+        "signal",
+        "lifecycle",
+        "active_signal_evidence",
+        "setup_levels",
+        "initiated_setup",
+    )
+    missing = [key for key in required if key not in meta]
+    if missing:
+        raise ValueError(
+            f"Signal {signal.signal_id} missing downstream contract blocks: {missing}"
+        )
+    output: Dict[str, Dict[str, Any]] = {}
+    for key in required:
+        value = meta[key]
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"Signal {signal.signal_id} downstream block {key} must be an object"
+            )
+        output[key] = value
+    version = output["downstream_contract"]["version"]
+    if version != "AUCTION_SIGNAL_DOWNSTREAM_V1":
+        raise ValueError(
+            f"Signal {signal.signal_id} downstream contract version is {version}"
+        )
+    setup_levels = output["setup_levels"]
+    for key in (
+        "setup_label",
+        "opportunity_key",
+        "candidate_id",
+        "reference_price",
+        "initial_stop_reference_price",
+    ):
+        if key not in setup_levels:
+            raise ValueError(
+                f"Signal {signal.signal_id} setup_levels missing {key}"
+            )
+    return output
+
+
 def _signal_rows(
     *,
     trading_day: date,
@@ -156,6 +201,12 @@ def _signal_rows(
         lifecycle_history = meta["signal_lifecycle_history"]
         if not isinstance(lifecycle_history, list):
             raise ValueError(f"Signal {signal.signal_id} signal_lifecycle_history must be a list")
+        downstream = _downstream_meta(signal)
+        downstream_contract = downstream["downstream_contract"]
+        signal_block = downstream["signal"]
+        lifecycle_block = downstream["lifecycle"]
+        active_evidence = downstream["active_signal_evidence"]
+        setup_levels = downstream["setup_levels"]
         result.append(sanitize_json({
             "signal_id": signal.signal_id,
             "symbol": signal.symbol,
@@ -183,6 +234,18 @@ def _signal_rows(
             "latest_signal_status": lifecycle_latest["status"],
             "latest_signal_reason_code": lifecycle_latest["reason_code"],
             "latest_directional_alignment": lifecycle_latest["directional_alignment"],
+            "downstream_contract_version": downstream_contract["version"],
+            "downstream_signal_action": signal_block["signal_action"],
+            "downstream_signal_state": signal_block["signal_state"],
+            "downstream_trade_action": lifecycle_block["trade_action"],
+            "active_evidence_action": active_evidence["active_evidence_action"],
+            "active_evidence_reason_code": active_evidence["reason_code"],
+            "trail_mode": active_evidence["trail_mode"],
+            "exit_pressure": active_evidence["exit_pressure"],
+            "target_expansion_allowed": active_evidence["target_expansion_allowed"],
+            "should_exit_signal": active_evidence["should_exit_signal"],
+            "setup_reference_price": setup_levels["reference_price"],
+            "setup_reference_source": setup_levels["reference_source"],
             "posture_history_count": len(history),
             "signal_lifecycle_history_count": len(lifecycle_history),
         }))
@@ -238,6 +301,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     action_counts: Counter[str] = Counter()
     stage_counts: Counter[str] = Counter()
     status_counts: Counter[str] = Counter()
+    active_evidence_action_counts: Counter[str] = Counter()
+    trade_action_counts: Counter[str] = Counter()
+    should_exit_signal_count = 0
     for index, snapshot in enumerate(snapshots, start=1):
         action = SignalGenerator(snapshot).generate()
         action_name = action or "NO_ACTION"
@@ -255,6 +321,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         signal_reason = latest_signal.status_reason if latest_signal is not None else None
         latest_lifecycle_action = None
         latest_alignment = None
+        active_evidence_action = None
+        active_evidence_reason_code = None
+        trail_mode = None
+        exit_pressure = None
+        target_expansion_allowed = None
+        should_exit_signal = None
+        downstream_trade_action = None
+        downstream_signal_state = None
+        downstream_contract_version = None
+        setup_reference_price = None
         if latest_signal is not None:
             meta = latest_signal.meta_json
             if not isinstance(meta, dict) or "signal_lifecycle" not in meta:
@@ -266,6 +342,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 raise ValueError("signal_lifecycle metadata must be an object")
             latest_lifecycle_action = lifecycle_payload["signal_action"]
             latest_alignment = lifecycle_payload["directional_alignment"]
+            downstream = _downstream_meta(latest_signal)
+            active_evidence = downstream["active_signal_evidence"]
+            lifecycle_block = downstream["lifecycle"]
+            signal_block = downstream["signal"]
+            setup_levels = downstream["setup_levels"]
+            downstream_contract_version = downstream["downstream_contract"]["version"]
+            active_evidence_action = active_evidence["active_evidence_action"]
+            active_evidence_reason_code = active_evidence["reason_code"]
+            trail_mode = active_evidence["trail_mode"]
+            exit_pressure = active_evidence["exit_pressure"]
+            target_expansion_allowed = active_evidence["target_expansion_allowed"]
+            should_exit_signal = active_evidence["should_exit_signal"]
+            downstream_trade_action = lifecycle_block["trade_action"]
+            downstream_signal_state = signal_block["signal_state"]
+            setup_reference_price = setup_levels["reference_price"]
+            active_evidence_action_counts[str(active_evidence_action)] += 1
+            trade_action_counts[str(downstream_trade_action)] += 1
+            if bool(should_exit_signal):
+                should_exit_signal_count += 1
         if signal_stage is not None:
             stage_counts[signal_stage] += 1
         if signal_status is not None:
@@ -284,6 +379,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "signal_status": signal_status,
             "signal_status_reason": signal_reason,
             "directional_alignment": latest_alignment,
+            "downstream_contract_version": downstream_contract_version,
+            "downstream_signal_state": downstream_signal_state,
+            "downstream_trade_action": downstream_trade_action,
+            "active_evidence_action": active_evidence_action,
+            "active_evidence_reason_code": active_evidence_reason_code,
+            "trail_mode": trail_mode,
+            "exit_pressure": exit_pressure,
+            "target_expansion_allowed": target_expansion_allowed,
+            "should_exit_signal": should_exit_signal,
+            "setup_reference_price": setup_reference_price,
         }))
 
     signals = _signal_rows(
@@ -307,6 +412,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "signal_action_counts": dict(sorted(action_counts.items())),
         "signal_stage_observation_counts": dict(sorted(stage_counts.items())),
         "signal_status_observation_counts": dict(sorted(status_counts.items())),
+        "active_evidence_action_counts": dict(
+            sorted(active_evidence_action_counts.items())
+        ),
+        "downstream_trade_action_counts": dict(sorted(trade_action_counts.items())),
+        "should_exit_signal_observations": should_exit_signal_count,
         "signals_persisted": len(signals),
         "snapshots_marked_processed": 0,
     })
@@ -323,6 +433,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ),
         "signal_status_observation_counts": json.dumps(
             summary["signal_status_observation_counts"], sort_keys=True
+        ),
+        "active_evidence_action_counts": json.dumps(
+            summary["active_evidence_action_counts"], sort_keys=True
+        ),
+        "downstream_trade_action_counts": json.dumps(
+            summary["downstream_trade_action_counts"], sort_keys=True
         ),
     }])
 
