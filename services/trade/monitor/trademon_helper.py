@@ -646,9 +646,16 @@ class TradeMonHelper:
             )
         atr_unit = d(_required(tm, "instrument_atr"))
         target_r = d(_required(tm, "target_r_multiple"))
-        stop_r = abs(d(_required(tm, "stop_r_multiple")))
-        if atr_unit <= 0 or target_r <= 0 or stop_r <= 0 or last <= 0:
-            raise ValueError("entry, last price, ATR and R multiples must be positive")
+        stop_r = d(_required(tm, "stop_r_multiple"))
+
+        # Adaptive management may legitimately move the stop exactly to the
+        # executed entry price. In that state stop_r_multiple is 0.0R
+        # (breakeven), which must remain valid on subsequent monitor cycles.
+        # Negative stop multiples are not part of the strict V2 contract.
+        if stop_r < 0:
+            raise ValueError("stop R multiple must not be negative")
+        if atr_unit <= 0 or target_r <= 0 or last <= 0:
+            raise ValueError("entry, last price, ATR and target R must be positive")
 
         normalized_group_role = str(group_role).upper().strip()
         if normalized_group_role not in {"STANDALONE", "REFERENCE", "FOLLOWER"}:
