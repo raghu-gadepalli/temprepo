@@ -108,6 +108,36 @@ class _FailedWatch:
     emitted_terminal: bool = False
 
 
+@dataclass
+class _ReversalWatch:
+    """Persistent deployment watch for one confirmed trend reversal.
+
+    The Auction State Engine owns recognition of TREND_FAILURE -> REVERSAL and
+    freezes the failed-trend structure in ``last_failure_*`` diagnostics.  The
+    setup engine must then retain that immutable event while entry/location and
+    opportunity-room gates are reevaluated on later snapshots.  A single
+    blocked confirmation snapshot must never consume the reversal event.
+    """
+
+    symbol: str
+    candidate_id: str
+    event_key: str
+    side: TradeSide
+    subtype: str
+    event_time: datetime
+    candidate_time: datetime
+    source_boundary: Dict[str, Any]
+    prior_trend_side: str
+    terminal_reason: str
+    failure_level_source: str
+    trend_anchor_price: Optional[float]
+    trend_extreme_price: Optional[float]
+    failure_atr: Optional[float]
+    exhaustion_diagnostics: Dict[str, Any]
+    expires_at: datetime
+    emitted_terminal: bool = False
+
+
 class SetupCandidateEngine:
     """Causal in-memory setup interpretation for one chronological replay."""
 
@@ -116,6 +146,7 @@ class SetupCandidateEngine:
         self.version = config.engine.config_version
         self._initiation: Dict[str, _InitiationWatch] = {}
         self._failed: Dict[str, _FailedWatch] = {}
+        self._reversal: Dict[str, _ReversalWatch] = {}
         self._emitted_once: Set[str] = set()
         self._completed: Set[str] = set()
         self._last_time: Dict[str, datetime] = {}
@@ -124,6 +155,7 @@ class SetupCandidateEngine:
         if symbol is None:
             self._initiation.clear()
             self._failed.clear()
+            self._reversal.clear()
             self._emitted_once.clear()
             self._completed.clear()
             self._last_time.clear()
@@ -136,6 +168,10 @@ class SetupCandidateEngine:
         }
         self._failed = {
             cid: item for cid, item in self._failed.items()
+            if item.symbol != key
+        }
+        self._reversal = {
+            cid: item for cid, item in self._reversal.items()
             if item.symbol != key
         }
         # Completed one-shot identities include the boundary event key (which
@@ -208,10 +244,9 @@ class SetupCandidateEngine:
                 evidence, auction_state, boundary_episode, state_diag
             )
         )
+        self._register_reversal_watch(evidence, auction_state, state_diag)
         candidates.extend(
-            self._reversal_candidates(
-                evidence, auction_state, state_diag
-            )
+            self._evaluate_reversal_watches(evidence, auction_state, state_diag)
         )
 
         # Stable deterministic order makes replay/report comparisons simple.
@@ -825,37 +860,52 @@ class SetupCandidateEngine:
     # ------------------------------------------------------------------
     # Confirmed normal / exhaustion reversal
     # ------------------------------------------------------------------
-    def _reversal_candidates(
+    def _register_reversal_watch(
         self,
         evidence: EvidenceSnapshot,
         auction_state: AuctionState,
         state_diag: Mapping[str, Any],
-    ) -> List[SetupCandidate]:
+    ) -> None:
+        """Register one immutable watch from a confirmed reversal event.
+
+        Registration is keyed by the frozen terminal trend-failure event rather
+        than by one exact state-transition snapshot.  This makes replay robust
+        when the first consumer snapshot arrives after the state transition,
+        while the configured watch window prevents stale historical reversals
+        from being resurrected.
+        """
+
         policy = self.config.reversal
         if not policy.enabled or not policy.create_enabled:
-            return []
-        if auction_state.current_state is not AuctionStateName.REVERSAL:
-            return []
-        # Emit only on the confirmed transition. The Opportunity Ledger carries
-        # the eligible record forward to the next snapshot for no-same-pass
-        # signal replacement/creation.
-        if auction_state.previous_state is not AuctionStateName.TREND_FAILURE:
-            return []
+            return
 
-        event_key = str(self._mapping_value(state_diag, "last_failure_terminal_key") or "").strip()
-        if not event_key:
-            return []
+        terminal_reason = str(
+            self._mapping_value(state_diag, "last_failure_terminal_reason") or ""
+        ).strip().upper()
+        if terminal_reason != "CONFIRMED_OPPOSITE_REVERSAL":
+            return
+
+        event_key = str(
+            self._mapping_value(state_diag, "last_failure_terminal_key") or ""
+        ).strip()
+        terminal_time = self._diag_datetime(
+            self._mapping_value(state_diag, "last_failure_terminal_time")
+        )
+        if not event_key or terminal_time is None:
+            return
+        if terminal_time > evidence.snapshot_time:
+            raise ValueError(
+                "REVERSAL_TERMINAL_TIME_AFTER_CURRENT_SNAPSHOT"
+            )
+
+        expires_at = terminal_time + timedelta(minutes=policy.watch_valid_minutes)
         side = self._trade_side_from_direction(
             self._mapping_value(state_diag, "last_failure_side")
-            or self._mapping_value(state_diag, "established_trend_side")
         )
         if side not in (TradeSide.BUY, TradeSide.SELL):
-            return []
+            return
 
-        subtype, exhaustion_diag = self._reversal_subtype(
-            evidence,
-            state_diag,
-        )
+        subtype, exhaustion_diag = self._reversal_subtype(evidence, state_diag)
         candidate_id = self._candidate_id(
             "REV",
             evidence.symbol,
@@ -863,8 +913,15 @@ class SetupCandidateEngine:
             SetupFamily.REVERSAL,
             subtype,
         )
-        if candidate_id in self._emitted_once:
-            return []
+        if (
+            candidate_id in self._reversal
+            or candidate_id in self._completed
+            or candidate_id in self._emitted_once
+        ):
+            return
+        if evidence.snapshot_time > expires_at:
+            self._completed.add(candidate_id)
+            return
 
         source = self._reversal_source_structure(
             evidence,
@@ -873,29 +930,245 @@ class SetupCandidateEngine:
             state_diag,
         )
         if source is None:
-            # A REVERSAL without its frozen failure structure violates the strict
-            # state/setup handoff. Fail visibly instead of fabricating a level.
             raise ValueError(
                 "REVERSAL_STATE_MISSING_FROZEN_TREND_FAILURE_STRUCTURE"
             )
 
+        event_time = self._diag_datetime(
+            self._mapping_value(state_diag, "last_failure_watch_onset")
+        ) or terminal_time
+        self._reversal[candidate_id] = _ReversalWatch(
+            symbol=evidence.symbol,
+            candidate_id=candidate_id,
+            event_key=event_key,
+            side=side,
+            subtype=subtype,
+            event_time=event_time,
+            candidate_time=terminal_time,
+            source_boundary=dict(source),
+            prior_trend_side=str(
+                self._mapping_value(
+                    state_diag, "last_failure_original_trend_side"
+                )
+                or "UNKNOWN"
+            ).strip().upper(),
+            terminal_reason=terminal_reason,
+            failure_level_source=str(
+                self._mapping_value(state_diag, "last_failure_level_source")
+                or "UNKNOWN"
+            ).strip().upper(),
+            trend_anchor_price=self._diag_float(
+                self._mapping_value(
+                    state_diag, "last_failure_trend_anchor_price"
+                )
+            ),
+            trend_extreme_price=self._diag_float(
+                self._mapping_value(
+                    state_diag, "last_failure_trend_extreme_price"
+                )
+            ),
+            failure_atr=self._diag_float(
+                self._mapping_value(state_diag, "last_failure_atr")
+            ),
+            exhaustion_diagnostics=dict(exhaustion_diag),
+            expires_at=expires_at,
+        )
+
+    def _evaluate_reversal_watches(
+        self,
+        evidence: EvidenceSnapshot,
+        auction_state: AuctionState,
+        state_diag: Mapping[str, Any],
+    ) -> List[SetupCandidate]:
+        """Reevaluate confirmed reversal deployment until eligible/expired.
+
+        Recognition remains frozen at the state-engine confirmation time.  Only
+        deployment facts such as current location, stop geometry, room and
+        retained opposite structure are refreshed.
+        """
+
+        policy = self.config.reversal
+        if not policy.enabled or not policy.create_enabled:
+            return []
+
+        out: List[SetupCandidate] = []
+        for candidate_id, watch in list(self._reversal.items()):
+            if watch.symbol != evidence.symbol or watch.emitted_terminal:
+                continue
+
+            now = evidence.snapshot_time
+            expired = now > watch.expires_at
+            blockers: List[str] = []
+
+            if not expired:
+                blockers.extend(
+                    self._reversal_deployment_blockers(
+                        evidence,
+                        auction_state,
+                        state_diag,
+                        watch,
+                    )
+                )
+
+            target_price, target_basis = self._reversal_target_from_watch(
+                evidence,
+                watch,
+            )
+            room_points = self._favorable_points(
+                evidence.close,
+                target_price,
+                watch.side,
+            )
+            room_atr = (
+                room_points / evidence.atr
+                if room_points is not None and evidence.atr
+                else None
+            )
+            room_pct = (
+                room_points / evidence.close
+                if room_points is not None and evidence.close
+                else None
+            )
+            if not expired and policy.require_opportunity_room:
+                if target_price is None:
+                    blockers.append("REVERSAL_STRUCTURAL_TARGET_UNAVAILABLE")
+                if room_atr is None or room_atr < policy.minimum_room_atr:
+                    blockers.append("REVERSAL_ROOM_ATR_INSUFFICIENT")
+                if room_pct is None or room_pct < policy.minimum_room_pct:
+                    blockers.append("REVERSAL_ROOM_BELOW_MINIMUM_PCT")
+
+            if expired:
+                eligibility = CandidateEligibility.EXPIRED
+                blockers = ["REVERSAL_WATCH_EXPIRED"]
+                terminal = True
+                valid_until = None
+            elif blockers:
+                eligibility = CandidateEligibility.WATCH
+                terminal = False
+                valid_until = watch.expires_at
+            else:
+                eligibility = CandidateEligibility.ELIGIBLE
+                terminal = True
+                valid_until = None
+
+            failure_level = float(watch.source_boundary["boundary_price"])
+            entry_distance = self._entry_distance_atr(
+                evidence.close,
+                failure_level,
+                evidence.atr,
+            )
+            age_minutes = max(
+                0.0,
+                (now - watch.candidate_time).total_seconds() / 60.0,
+            )
+            supporting = [
+                self._fact(
+                    "REVERSAL_CONFIRMED_AFTER_TREND_FAILURE",
+                    evidence,
+                    True,
+                    "state.last_failure_terminal_reason",
+                ),
+                self._fact(
+                    "REVERSAL_OPPOSITE_FOLLOWTHROUGH_CONFIRMED",
+                    evidence,
+                    watch.side.value,
+                    "state.last_failure_side",
+                ),
+                self._fact(
+                    "REVERSAL_FAILURE_LEVEL_FROZEN",
+                    evidence,
+                    failure_level,
+                    "state.last_failure_level",
+                ),
+            ]
+            if watch.subtype == "EXHAUSTION_REVERSAL":
+                supporting.append(
+                    self._fact(
+                        "REVERSAL_PRIOR_MOVE_EXHAUSTED",
+                        evidence,
+                        watch.exhaustion_diagnostics,
+                        "state.last_failure_prior_move",
+                    )
+                )
+
+            candidate = self._candidate(
+                evidence,
+                auction_state,
+                candidate_id=watch.candidate_id,
+                family=SetupFamily.REVERSAL,
+                subtype=watch.subtype,
+                candidate_role=CandidateRole.REVERSAL_ENTRY,
+                side=watch.side,
+                event_key=watch.event_key,
+                event_time=watch.event_time,
+                candidate_time=watch.candidate_time,
+                boundary_price=failure_level,
+                source_boundary=watch.source_boundary,
+                eligibility=eligibility,
+                blockers=blockers,
+                terminal=terminal,
+                valid_until=valid_until,
+                target_basis=target_basis,
+                target_reference_price=target_price,
+                stop_anchor_type="CONFIRMED_TREND_FAILURE_LEVEL",
+                supporting_evidence=supporting,
+                diagnostics={
+                    "reversal_family": "GENERAL_REVERSAL",
+                    "reversal_subtype": watch.subtype,
+                    "prior_trend_side": watch.prior_trend_side,
+                    "reversal_side": watch.side.value,
+                    "trend_failure_event_key": watch.event_key,
+                    "trend_failure_terminal_reason": watch.terminal_reason,
+                    "reversal_confirmation_time": watch.candidate_time.isoformat(
+                        sep=" "
+                    ),
+                    "failure_level": failure_level,
+                    "failure_level_source": watch.failure_level_source,
+                    "distance_from_failure_level_atr": entry_distance,
+                    "target_basis": target_basis,
+                    "target_reference_price": target_price,
+                    "room_atr": room_atr,
+                    "room_pct": room_pct,
+                    "watch_age_minutes": age_minutes,
+                    "watch_expires_at": watch.expires_at.isoformat(sep=" "),
+                    "watch_re_evaluated": now > watch.candidate_time,
+                    "dynamic_watch": eligibility is CandidateEligibility.WATCH,
+                    "exhaustion_classification": watch.exhaustion_diagnostics,
+                    "no_same_pass_reversal": True,
+                },
+            )
+            out.append(candidate)
+
+            if terminal:
+                watch.emitted_terminal = True
+                self._emitted_once.add(candidate_id)
+                self._completed.add(candidate_id)
+                self._reversal.pop(candidate_id, None)
+
+        return out
+
+    def _reversal_deployment_blockers(
+        self,
+        evidence: EvidenceSnapshot,
+        auction_state: AuctionState,
+        state_diag: Mapping[str, Any],
+        watch: _ReversalWatch,
+    ) -> List[str]:
+        policy = self.config.reversal
         blockers: List[str] = []
-        if policy.require_confirmed_reversal_state and (
-            auction_state.previous_state is not AuctionStateName.TREND_FAILURE
-            or auction_state.current_state is not AuctionStateName.REVERSAL
+
+        if (
+            policy.require_structural_trend_failure
+            and watch.terminal_reason != "CONFIRMED_OPPOSITE_REVERSAL"
         ):
-            blockers.append("REVERSAL_STATE_NOT_CONFIRMED")
-        if policy.require_structural_trend_failure and str(
-            self._mapping_value(state_diag, "last_failure_terminal_reason") or ""
-        ).strip().upper() != "CONFIRMED_OPPOSITE_REVERSAL":
             blockers.append("REVERSAL_NOT_LINKED_TO_CONFIRMED_TREND_FAILURE")
 
-        failure_level = float(source["boundary_price"])
+        failure_level = float(watch.source_boundary["boundary_price"])
         if policy.require_failure_level and failure_level <= 0:
             blockers.append("REVERSAL_FAILURE_LEVEL_MISSING")
-        if side is TradeSide.BUY and failure_level >= evidence.close:
+        if watch.side is TradeSide.BUY and failure_level >= evidence.close:
             blockers.append("REVERSAL_BUY_STOP_NOT_BELOW_ENTRY")
-        if side is TradeSide.SELL and failure_level <= evidence.close:
+        if watch.side is TradeSide.SELL and failure_level <= evidence.close:
             blockers.append("REVERSAL_SELL_STOP_NOT_ABOVE_ENTRY")
 
         entry_distance = self._entry_distance_atr(
@@ -909,34 +1182,6 @@ class SetupCandidateEngine:
         ):
             blockers.append("REVERSAL_ENTRY_TOO_FAR_FROM_FAILURE_LEVEL")
 
-        target_price, target_basis = self._reversal_target(
-            evidence,
-            side,
-            state_diag,
-        )
-        room_points = self._favorable_points(
-            evidence.close,
-            target_price,
-            side,
-        )
-        room_atr = (
-            room_points / evidence.atr
-            if room_points is not None and evidence.atr
-            else None
-        )
-        room_pct = (
-            room_points / evidence.close
-            if room_points is not None and evidence.close
-            else None
-        )
-        if policy.require_opportunity_room:
-            if target_price is None:
-                blockers.append("REVERSAL_STRUCTURAL_TARGET_UNAVAILABLE")
-            if room_atr is None or room_atr < policy.minimum_room_atr:
-                blockers.append("REVERSAL_ROOM_ATR_INSUFFICIENT")
-            if room_pct is None or room_pct < policy.minimum_room_pct:
-                blockers.append("REVERSAL_ROOM_BELOW_MINIMUM_PCT")
-
         if (
             evidence.opportunity.session_minutes_remaining is None
             or evidence.opportunity.session_minutes_remaining
@@ -944,100 +1189,69 @@ class SetupCandidateEngine:
         ):
             blockers.append("REVERSAL_INSUFFICIENT_SESSION_TIME")
 
-        if subtype == "EXHAUSTION_REVERSAL" and not policy.exhaustion_reversal_enabled:
+        if (
+            watch.subtype == "EXHAUSTION_REVERSAL"
+            and not policy.exhaustion_reversal_enabled
+        ):
             blockers.append("EXHAUSTION_REVERSAL_DISABLED")
-        if subtype == "NORMAL_REVERSAL" and not policy.normal_reversal_enabled:
+        if (
+            watch.subtype == "NORMAL_REVERSAL"
+            and not policy.normal_reversal_enabled
+        ):
             blockers.append("NORMAL_REVERSAL_DISABLED")
 
-        event_time = self._diag_datetime(
-            self._mapping_value(state_diag, "last_failure_watch_onset")
-        ) or self._diag_datetime(
-            self._mapping_value(state_diag, "last_failure_terminal_time")
-        ) or auction_state.transition_time
-        candidate_time = auction_state.transition_time
+        established_side = self._established_side(state_diag)
+        if established_side is not watch.side:
+            blockers.append("REVERSAL_OPPOSITE_STRUCTURE_NOT_RETAINED")
 
-        supporting = [
-            self._fact(
-                "REVERSAL_CONFIRMED_AFTER_TREND_FAILURE",
-                evidence,
-                True,
-                "auction_state.current_state",
-            ),
-            self._fact(
-                "REVERSAL_OPPOSITE_FOLLOWTHROUGH_CONFIRMED",
-                evidence,
-                self._mapping_value(state_diag, "last_failure_side"),
-                "state.last_failure_side",
-            ),
-            self._fact(
-                "REVERSAL_FAILURE_LEVEL_FROZEN",
-                evidence,
-                failure_level,
-                "state.last_failure_level",
-            ),
-        ]
-        if subtype == "EXHAUSTION_REVERSAL":
-            supporting.append(
-                self._fact(
-                    "REVERSAL_PRIOR_MOVE_EXHAUSTED",
-                    evidence,
-                    exhaustion_diag,
-                    "evidence.extension",
-                )
-            )
+        aligned_states = {
+            AuctionStateName.REVERSAL,
+            AuctionStateName.FRESH_EXPANSION,
+            AuctionStateName.ORDERLY_UPTREND
+            if watch.side is TradeSide.BUY
+            else AuctionStateName.ORDERLY_DOWNTREND,
+            AuctionStateName.CONTROLLED_PULLBACK,
+            AuctionStateName.RECOMPRESSION,
+            AuctionStateName.REACCELERATION,
+        }
+        if auction_state.current_state not in aligned_states:
+            blockers.append("REVERSAL_DEPLOYMENT_STATE_NOT_READY")
+        if auction_state.current_state is AuctionStateName.MATURE_EXTENSION:
+            blockers.append("REVERSAL_MATURE_EXTENSION_ENTRY_BLOCKED")
 
-        candidate = self._candidate(
-            evidence,
-            auction_state,
-            candidate_id=candidate_id,
-            family=SetupFamily.REVERSAL,
-            subtype=subtype,
-            candidate_role=CandidateRole.REVERSAL_ENTRY,
-            side=side,
-            event_key=event_key,
-            event_time=event_time,
-            candidate_time=candidate_time,
-            boundary_price=failure_level,
-            source_boundary=source,
-            eligibility=(
-                CandidateEligibility.INELIGIBLE
-                if blockers
-                else CandidateEligibility.ELIGIBLE
-            ),
-            blockers=blockers,
-            terminal=True,
-            valid_until=None,
-            target_basis=target_basis,
-            target_reference_price=target_price,
-            stop_anchor_type="CONFIRMED_TREND_FAILURE_LEVEL",
-            supporting_evidence=supporting,
-            diagnostics={
-                "reversal_family": "GENERAL_REVERSAL",
-                "reversal_subtype": subtype,
-                "prior_trend_side": self._mapping_value(
-                    state_diag, "last_failure_original_trend_side"
-                ),
-                "reversal_side": side.value,
-                "trend_failure_event_key": event_key,
-                "trend_failure_terminal_reason": self._mapping_value(
-                    state_diag, "last_failure_terminal_reason"
-                ),
-                "failure_level": failure_level,
-                "failure_level_source": self._mapping_value(
-                    state_diag, "last_failure_level_source"
-                ),
-                "distance_from_failure_level_atr": entry_distance,
-                "target_basis": target_basis,
-                "target_reference_price": target_price,
-                "room_atr": room_atr,
-                "room_pct": room_pct,
-                "exhaustion_classification": exhaustion_diag,
-                "no_same_pass_reversal": True,
-            },
+        return blockers
+
+    def _reversal_target_from_watch(
+        self,
+        evidence: EvidenceSnapshot,
+        watch: _ReversalWatch,
+    ) -> Tuple[Optional[float], str]:
+        prior_anchor = watch.trend_anchor_price
+        points = self._favorable_points(evidence.close, prior_anchor, watch.side)
+        if points is not None and points > 0:
+            return prior_anchor, "PRIOR_FAILED_TREND_ANCHOR"
+
+        levels = _required_raw_levels(evidence)
+        candidates: List[Tuple[float, str]] = []
+        for label, raw in (
+            ("TODAY_OPEN", self._mapping_value(levels, "today_open")),
+            ("VWAP", self._mapping_value(levels, "vwap")),
+            ("PREV_DAY_HIGH", self._mapping_value(levels, "prev_day_high")),
+            ("OPENING_RANGE_HIGH", self._mapping_value(levels, "opening_range_high")),
+            ("PREV_DAY_LOW", self._mapping_value(levels, "prev_day_low")),
+            ("OPENING_RANGE_LOW", self._mapping_value(levels, "opening_range_low")),
+        ):
+            price = self._diag_float(raw)
+            room = self._favorable_points(evidence.close, price, watch.side)
+            if price is not None and room is not None and room > 0:
+                candidates.append((price, label))
+        if not candidates:
+            return None, "NO_STRUCTURAL_REVERSAL_TARGET"
+        price, label = min(
+            candidates,
+            key=lambda item: abs(item[0] - evidence.close),
         )
-        self._emitted_once.add(candidate_id)
-        self._completed.add(candidate_id)
-        return [candidate]
+        return price, f"NEAREST_REVERSAL_LEVEL_{label}"
 
     def _reversal_subtype(
         self,
@@ -1175,43 +1389,6 @@ class SetupCandidateEngine:
             "frozen_range_low": low,
             "frozen_range_high": high,
         }
-
-    def _reversal_target(
-        self,
-        evidence: EvidenceSnapshot,
-        side: TradeSide,
-        state_diag: Mapping[str, Any],
-    ) -> Tuple[Optional[float], str]:
-        prior_anchor = self._diag_float(
-            self._mapping_value(state_diag, "last_failure_trend_anchor_price")
-        )
-        if self._favorable_points(evidence.close, prior_anchor, side) not in (
-            None,
-            0.0,
-        ):
-            return prior_anchor, "PRIOR_FAILED_TREND_ANCHOR"
-
-        levels = _required_raw_levels(evidence)
-        candidates: List[Tuple[float, str]] = []
-        for label, raw in (
-            ("TODAY_OPEN", self._mapping_value(levels, "today_open")),
-            ("VWAP", self._mapping_value(levels, "vwap")),
-            ("PREV_DAY_HIGH", self._mapping_value(levels, "prev_day_high")),
-            ("OPENING_RANGE_HIGH", self._mapping_value(levels, "opening_range_high")),
-            ("PREV_DAY_LOW", self._mapping_value(levels, "prev_day_low")),
-            ("OPENING_RANGE_LOW", self._mapping_value(levels, "opening_range_low")),
-        ):
-            price = self._diag_float(raw)
-            points = self._favorable_points(evidence.close, price, side)
-            if price is not None and points is not None and points > 0:
-                candidates.append((price, label))
-        if not candidates:
-            return None, "NO_STRUCTURAL_REVERSAL_TARGET"
-        price, label = min(
-            candidates,
-            key=lambda item: abs(item[0] - evidence.close),
-        )
-        return price, f"NEAREST_REVERSAL_LEVEL_{label}"
 
     @staticmethod
     def _trade_side_from_direction(value: Any) -> TradeSide:

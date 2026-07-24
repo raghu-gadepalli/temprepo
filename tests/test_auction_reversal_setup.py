@@ -45,23 +45,26 @@ class AuctionReversalSetupTests(unittest.TestCase):
     def _evidence(
         self,
         *,
+        ts: datetime | None = None,
+        close: float = 13283.0,
         current_extension_atr: float | None = None,
         extended: bool | None = None,
         mature: bool | None = None,
         rejection: bool = True,
     ) -> EvidenceSnapshot:
+        current_ts = ts or self.ts
         return EvidenceSnapshot(
             symbol="MARUTI",
-            trading_day=self.ts.date(),
-            snapshot_time=self.ts,
-            close=13283.0,
+            trading_day=current_ts.date(),
+            snapshot_time=current_ts,
+            close=close,
             atr=40.0,
             bar=BarEvidence(
-                snapshot_time=self.ts,
-                open=13270.0,
-                high=13290.0,
-                low=13265.0,
-                close=13283.0,
+                snapshot_time=current_ts,
+                open=close - 13.0,
+                high=close + 7.0,
+                low=close - 18.0,
+                close=close,
                 volume=1000.0,
                 direction=DirectionalBias.UP,
             ),
@@ -95,18 +98,20 @@ class AuctionReversalSetupTests(unittest.TestCase):
     def _state(
         self,
         *,
+        ts: datetime | None = None,
         previous: AuctionStateName = AuctionStateName.TREND_FAILURE,
         current: AuctionStateName = AuctionStateName.REVERSAL,
     ) -> AuctionState:
+        current_ts = ts or self.ts
         return AuctionState(
             state_key="STATE:MARUTI:REVERSAL",
             symbol="MARUTI",
-            snapshot_time=self.ts,
+            snapshot_time=current_ts,
             previous_state=previous,
             current_state=current,
-            transition_time=self.ts,
-            entered_at=self.ts,
-            expires_at=self.ts + timedelta(minutes=30),
+            transition_time=current_ts,
+            entered_at=current_ts,
+            expires_at=current_ts + timedelta(minutes=30),
             config_version=self.version,
         )
 
@@ -232,14 +237,92 @@ class AuctionReversalSetupTests(unittest.TestCase):
         self.assertIsNone(diag["current_extension_move_atr"])
         self.assertTrue(diag["classified_exhaustion"])
 
-    def test_no_reversal_candidate_without_transition_from_trend_failure(self) -> None:
+    def test_confirmed_terminal_event_is_not_lost_after_transition_snapshot(self) -> None:
+        later = self.ts + timedelta(minutes=3)
         rows = SetupCandidateEngine().evaluate(
-            self._evidence(),
-            self._state(previous=AuctionStateName.REVERSAL),
+            self._evidence(ts=later),
+            self._state(
+                ts=later,
+                previous=AuctionStateName.REVERSAL,
+                current=AuctionStateName.REVERSAL,
+            ),
             None,
             state_diagnostics=self._state_diagnostics(),
         )
-        self.assertEqual((), rows)
+        self.assertEqual(1, len(rows))
+        self.assertEqual(CandidateEligibility.ELIGIBLE, rows[0].eligibility)
+        self.assertTrue(rows[0].diagnostics["watch_re_evaluated"])
+
+    def test_blocked_confirmation_remains_watch_and_becomes_eligible_later(self) -> None:
+        engine = SetupCandidateEngine()
+        diagnostics = self._state_diagnostics(
+            anchor=13350.0,
+            extreme=13220.0,
+        )
+        first = engine.evaluate(
+            self._evidence(
+                close=13300.0,
+                rejection=False,
+            ),
+            self._state(),
+            None,
+            state_diagnostics=diagnostics,
+        )
+        self.assertEqual(1, len(first))
+        self.assertEqual(CandidateEligibility.WATCH, first[0].eligibility)
+        self.assertFalse(first[0].terminal)
+        self.assertIn("REVERSAL_ROOM_BELOW_MINIMUM_PCT", first[0].blockers)
+
+        later = self.ts + timedelta(minutes=3)
+        second = engine.evaluate(
+            self._evidence(
+                ts=later,
+                close=13280.0,
+                rejection=False,
+            ),
+            self._state(
+                ts=later,
+                previous=AuctionStateName.REVERSAL,
+                current=AuctionStateName.ORDERLY_UPTREND,
+            ),
+            None,
+            state_diagnostics=diagnostics,
+        )
+        self.assertEqual(1, len(second))
+        self.assertEqual(first[0].candidate_id, second[0].candidate_id)
+        self.assertEqual(CandidateEligibility.ELIGIBLE, second[0].eligibility)
+        self.assertTrue(second[0].terminal)
+        self.assertTrue(second[0].diagnostics["watch_re_evaluated"])
+
+    def test_reversal_watch_expires_terminally(self) -> None:
+        engine = SetupCandidateEngine()
+        diagnostics = self._state_diagnostics(
+            anchor=13350.0,
+            extreme=13220.0,
+        )
+        first = engine.evaluate(
+            self._evidence(close=13300.0, rejection=False),
+            self._state(),
+            None,
+            state_diagnostics=diagnostics,
+        )
+        self.assertEqual(CandidateEligibility.WATCH, first[0].eligibility)
+
+        later = self.ts + timedelta(minutes=16)
+        expired = engine.evaluate(
+            self._evidence(ts=later, close=13300.0, rejection=False),
+            self._state(
+                ts=later,
+                previous=AuctionStateName.REVERSAL,
+                current=AuctionStateName.REVERSAL,
+            ),
+            None,
+            state_diagnostics=diagnostics,
+        )
+        self.assertEqual(1, len(expired))
+        self.assertEqual(CandidateEligibility.EXPIRED, expired[0].eligibility)
+        self.assertTrue(expired[0].terminal)
+        self.assertIn("REVERSAL_WATCH_EXPIRED", expired[0].blockers)
 
     def test_confirmed_reversal_supersedes_old_opposite_opportunity(self) -> None:
         old_sell = self._old_sell_candidate()

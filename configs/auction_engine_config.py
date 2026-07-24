@@ -469,6 +469,7 @@ class ReversalPolicyConfig(BaseModel):
     minimum_room_atr: float = Field(default=0.75, ge=0.0)
     minimum_room_pct: float = Field(default=0.005, ge=0.0)
     max_entry_distance_from_failure_level_atr: float = Field(default=2.50, gt=0.0)
+    watch_valid_minutes: float = Field(default=15.5, gt=0.0)
     minimum_session_minutes: float = Field(default=30.0, ge=0.0)
     exhaustion_extension_atr_min: float = Field(default=1.50, ge=0.0)
     exhaustion_progress_decay_min: float = Field(default=0.35, ge=0.0, le=1.0)
