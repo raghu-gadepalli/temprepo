@@ -1,0 +1,3 @@
+code,details,message
+TRADE_MONITOR_AUDIT_COUNT_MISMATCH,"{'monitor_updates': 93, 'audit_rows': 91}",TradeMonitor audit rows do not match monitor updates
+TRADE_MONITOR_ITEM_ERRORS,{'monitor_error_count': 2},TradeMonitor completed with one or more per-trade errors
