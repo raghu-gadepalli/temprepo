@@ -13,26 +13,39 @@ from zoneinfo import ZoneInfo
 # allow imports from project root
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from config import AppConfig
 from database.database import get_trades_db, trades_engine
 from logconfig import setup_logging
 from models.trade_models import Snapshot as SnapshotORM
 from schemas.symbol import SymbolSchema
+from schemas.user import UserSchema
 from services.snapshot.snapshot_generator import SnapshotGenerator
 
-#  Configuration
-API_KEY = "d17pao9dsc9jsp84"
-ACCESS_TOKEN = "BgNPkTcOu665OKmf041OwaiUyOAXvVNS"
-
+# ---------------------------------------------------------------------------
+# Hard-coded replay configuration
+# ---------------------------------------------------------------------------
 START = datetime(2026, 7, 24, 9, 18, tzinfo=ZoneInfo("Asia/Kolkata"))
 END = datetime(2026, 7, 24, 15, 30, tzinfo=ZoneInfo("Asia/Kolkata"))
 
-# If empty, all active/enabled EQ symbols are replayed.
-# Example: ["BHARATFORG", "BAJFINANCE"]
-# SYMBOLS: List[str] = ['BHEL','ANGELONE','BAJAJFINSV','BHARTIARTL','CGPOWER','DRREDDY','GRASIM','HDFCLIFE','M&M','PNBHOUSING','TRENT']
-SYMBOLS: List[str] = ['ALKEM', 'AMBER', 'APLAPOLLO', 'ASIANPAINT', 'AUBANK', 'AXISBANK', 'BAJAJFINSV', 'BAJFINANCE', 'NIFTY BANK', 'BHARATFORG']
-
-SYMBOLS_FETCH_ACTIVE = 1
+# Use exactly one of these forms:
+#   ["ALL"]                         -> all symbols allowed by ACTIVE_ONLY
+#   ["MARUTI", "INFY", "ASTRAL"]  -> only the named symbols allowed by ACTIVE_ONLY
+SYMBOLS: List[str] = ["ALL"]
 SYMBOL_TYPE_FILTER = "EQ"
+
+# True  -> replay only enabled symbols whose intraday `active` flag is True.
+# False -> replay every enabled symbol, regardless of its intraday `active` flag.
+#
+# `enabled=True` remains the policy/universe gate in both modes because
+# SymbolSchema.fetch_symbols applies it implicitly.
+ACTIVE_ONLY: bool = True
+
+# Credentials are read from the DATA_USER configured in config.AppConfig.
+# Leave these blank to use the database values. A non-empty value overrides
+# only that credential, which is useful when testing with a temporary token.
+DATA_USER_ID = AppConfig.DATA_USER
+API_KEY_OVERRIDE = ""
+ACCESS_TOKEN_OVERRIDE = ""
 
 # Number of parallel worker processes
 MAX_WORKERS = 5
@@ -53,36 +66,121 @@ SKIP_EXISTING_SNAPSHOTS = True
 RECHECK_EXISTS_IN_WORKER = True
 
 
+def _normalized_symbol_selection() -> List[str]:
+    """Return a de-duplicated, uppercase copy of the hard-coded selection."""
+    normalized: List[str] = []
+    seen = set()
+    for value in SYMBOLS:
+        symbol = str(value or "").strip().upper()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        normalized.append(symbol)
+
+    if not normalized:
+        raise RuntimeError(
+            'SYMBOLS is empty. Use ["ALL"] or provide one or more EQ symbols.'
+        )
+
+    if "ALL" in seen and len(normalized) != 1:
+        raise RuntimeError(
+            'Use SYMBOLS = ["ALL"] by itself; do not combine ALL with named symbols.'
+        )
+
+    return normalized
+
+
+def _all_symbols_requested() -> bool:
+    return _normalized_symbol_selection() == ["ALL"]
+
+
 def _requested_symbols() -> List[str]:
-    return [str(s).strip().upper() for s in SYMBOLS if str(s).strip()]
+    selection = _normalized_symbol_selection()
+    return [] if selection == ["ALL"] else selection
 
 
 def _selected_symbol_rows():
+    # `enabled=True` is applied implicitly inside SymbolSchema.fetch_symbols.
+    # ACTIVE_ONLY=True applies the intraday active gate; False ignores it.
+    active_filter = 1 if ACTIVE_ONLY else None
     rows = SymbolSchema.fetch_symbols(
-        active=SYMBOLS_FETCH_ACTIVE,
+        active=active_filter,
         type_filter=SYMBOL_TYPE_FILTER,
     ) or []
+    rows = sorted(
+        rows,
+        key=lambda row: str(getattr(row, "symbol", "") or "").strip().upper(),
+    )
 
-    requested = _requested_symbols()
-    if not requested:
+    if _all_symbols_requested():
         return rows
 
+    requested = _requested_symbols()
     requested_set = set(requested)
-    selected = [
-        r for r in rows
-        if str(getattr(r, "symbol", "") or "").strip().upper() in requested_set
-    ]
-    found = {
-        str(getattr(r, "symbol", "") or "").strip().upper()
-        for r in selected
+    selected_by_symbol = {
+        str(getattr(row, "symbol", "") or "").strip().upper(): row
+        for row in rows
     }
-    missing = sorted(requested_set - found)
+
+    missing = sorted(requested_set - set(selected_by_symbol))
     if missing:
         raise RuntimeError(
-            "Requested replay symbols were not found in the active/enabled %s universe: %s"
-            % (SYMBOL_TYPE_FILTER, ", ".join(missing))
+            "Requested replay symbols were not found in the selected enabled %s "
+            "universe (ACTIVE_ONLY=%s): %s"
+            % (SYMBOL_TYPE_FILTER, ACTIVE_ONLY, ", ".join(missing))
         )
-    return selected
+
+    # Preserve the order written in SYMBOLS for easier controlled replays.
+    return [selected_by_symbol[symbol] for symbol in requested]
+
+
+def _resolve_api_credentials() -> Tuple[str, str, str]:
+    """Resolve Kite credentials from DATA_USER, with optional hard-coded overrides."""
+    userid = str(DATA_USER_ID or "").strip()
+    api_key_override = str(API_KEY_OVERRIDE or "").strip()
+    access_token_override = str(ACCESS_TOKEN_OVERRIDE or "").strip()
+
+    db_api_key = ""
+    db_access_token = ""
+
+    if userid:
+        user = UserSchema.fetch_user(userid)
+        if user is None:
+            if not (api_key_override and access_token_override):
+                raise RuntimeError(
+                    f"DATA_USER {userid!r} was not found and complete credential "
+                    "overrides were not supplied"
+                )
+        else:
+            db_api_key = str(user.apikey or "").strip()
+            db_access_token = str(user.access_token or "").strip()
+    elif not (api_key_override and access_token_override):
+        raise RuntimeError(
+            "DATA_USER_ID is blank and complete credential overrides were not supplied"
+        )
+
+    api_key = api_key_override or db_api_key
+    access_token = access_token_override or db_access_token
+
+    if not api_key or not access_token:
+        missing = []
+        if not api_key:
+            missing.append("apikey")
+        if not access_token:
+            missing.append("access_token")
+        raise RuntimeError(
+            "Replay credentials are incomplete for DATA_USER %r; missing %s"
+            % (userid, ", ".join(missing))
+        )
+
+    if api_key_override and access_token_override:
+        source = "HARDCODED_OVERRIDES"
+    elif api_key_override or access_token_override:
+        source = "DATABASE_WITH_PARTIAL_OVERRIDE"
+    else:
+        source = "DATABASE"
+
+    return api_key, access_token, source
 
 
 
@@ -212,7 +310,14 @@ def _symbol_token_map(rows) -> Dict[str, int]:
     return tokens
 
 
-def _generate_for_symbol(symbol: str, token: int, current_time: datetime, expected_snapshot_time: datetime):
+def _generate_for_symbol(
+    symbol: str,
+    token: int,
+    current_time: datetime,
+    expected_snapshot_time: datetime,
+    api_key: str,
+    access_token: str,
+):
     # dispose any inherited connections so each process gets a fresh one
     trades_engine.dispose()
 
@@ -223,8 +328,8 @@ def _generate_for_symbol(symbol: str, token: int, current_time: datetime, expect
     gen = SnapshotGenerator(
         token=token,
         symbol=symbol,
-        api_key=API_KEY,
-        access_token=ACCESS_TOKEN,
+        api_key=api_key,
+        access_token=access_token,
     )
     snapshot = gen.generate_snapshot(
         end_date=current_time,
@@ -250,23 +355,34 @@ def main():
     setup_logging(log_file="replay_snapshots.log")
     logger = logging.getLogger(__name__)
 
-    # Fetch selected symbols and tokens *before* spawning children.
-    # Empty SYMBOLS means active/enabled EQ universe.
+    # Resolve all startup dependencies before spawning worker processes.
+    api_key, access_token, credential_source = _resolve_api_credentials()
     rows = _selected_symbol_rows()
     symbols = [str(r.symbol).strip().upper() for r in rows]
     tokens = _symbol_token_map(rows)
 
     if not symbols:
-        raise RuntimeError("No symbols selected for replay_snapshots")
+        raise RuntimeError(
+            f"No enabled {SYMBOL_TYPE_FILTER} symbols selected for replay_snapshots"
+        )
 
     logger.info(
-        "Starting replay_snapshots for %d symbols from %s to %s | symbols=%s active=%s type=%s",
+        "Starting replay_snapshots for %d symbols from %s to %s | symbols=%s "
+        "type=%s active_only=%s data_user=%s credentials=%s",
         len(symbols),
         START,
         END,
-        symbols if _requested_symbols() else "ACTIVE_SYMBOLS",
-        SYMBOLS_FETCH_ACTIVE,
+        (
+            "ALL_ACTIVE_ENABLED_EQ"
+            if _all_symbols_requested() and ACTIVE_ONLY
+            else "ALL_ENABLED_EQ"
+            if _all_symbols_requested()
+            else symbols
+        ),
         SYMBOL_TYPE_FILTER,
+        ACTIVE_ONLY,
+        DATA_USER_ID,
+        credential_source,
     )
 
     current = START
@@ -307,7 +423,15 @@ def main():
 
             # submit one task per missing symbol only
             futures = {
-                pool.submit(_generate_for_symbol, sym, tokens[sym], current, expected_snapshot_time): sym
+                pool.submit(
+                    _generate_for_symbol,
+                    sym,
+                    tokens[sym],
+                    current,
+                    expected_snapshot_time,
+                    api_key,
+                    access_token,
+                ): sym
                 for sym in symbols_to_generate
             }
 
