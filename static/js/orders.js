@@ -98,7 +98,10 @@
     return Number(v || 0) >= 0 ? "dash-text-success" : "dash-text-danger";
   }
 
-  function renderPnl(v) {
+  function renderPnl(v, available = true) {
+    if (!available) {
+      return `<span class="text-muted">—</span>`;
+    }
     const n = Number(v || 0);
     return `<span class="${pnlClass(n)}">${n.toFixed(2)}</span>`;
   }
@@ -128,6 +131,7 @@
     if (es === "SUBMITTED") return `<span class="badge bg-primary">SUBMITTED</span>`;
     if (es === "FILLED") return `<span class="badge bg-success">FILLED</span>`;
     if (es === "CANCELLED") return `<span class="badge bg-danger">CANCELLED</span>`;
+    if (es === "REJECTED") return `<span class="badge bg-danger">REJECTED</span>`;
     if (es === "INVALID") return `<span class="badge bg-danger">INVALID</span>`;
 
     return `<span class="badge bg-light text-dark border">${esc(es || "—")}</span>`;
@@ -218,6 +222,7 @@
       last_pnl: num(r.last_pnl ?? 0) ?? 0,
       last_pnl_value: num(r.last_pnl_value ?? 0) ?? 0,
       exit_pnl: num(r.exit_pnl ?? 0) ?? 0,
+      pnl_available: r.pnl_available === true,
       pnl: num(r.pnl ?? r.pnl_value ?? r.exit_pnl ?? r.last_pnl_value ?? 0) ?? 0,
       pnl_value: num(r.pnl_value ?? r.pnl ?? r.exit_pnl ?? r.last_pnl_value ?? 0) ?? 0,
 
@@ -313,7 +318,7 @@
         fmtNum(r.entry_price),
         esc(String(r.quantity)),
         fmtNum(r.last_price),
-        renderPnl(pnl),
+        renderPnl(pnl, r.pnl_available),
         renderStatusBadge(r.entry_status, r.exit_status),
         actionIcons(r)
       ]);
@@ -343,7 +348,9 @@
     $("#oe-signal-reference").text(row.signal_reference || "—");
     $("#oe-exit-time").text(row.exit_time || "Active");
     $("#oe-last-price").text(fmtNum(row.last_price));
-    $("#oe-pnl").html(renderPnl(row.pnl_value ?? row.pnl ?? 0));
+    $("#oe-pnl").html(
+      renderPnl(row.pnl_value ?? row.pnl ?? 0, row.pnl_available)
+    );
     $("#oe-status").html(renderStatusBadge(row.entry_status, row.exit_status));
 
     $("#oe-stop-price").text(row.current_stop_price != null ? fmtNum(row.current_stop_price) : "—");
@@ -423,7 +430,13 @@
     if (res.ok) {
       await refreshOrdersAndPositions();
     } else {
-      alert(res.payload?.error || res.payload?.reason || "Unable to queue order.");
+      alert(
+        res.payload?.message ||
+        res.payload?.skipped?.[0]?.details ||
+        res.payload?.error ||
+        res.payload?.reason ||
+        "Unable to queue order."
+      );
     }
   });
 

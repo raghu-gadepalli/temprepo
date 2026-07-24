@@ -39,6 +39,7 @@ from schemas.user import UserSchema
 from schemas.snapshot import SnapshotSchema
 from schemas.orderprofile import OrderProfileSchema
 from services.trade.monitor.trademon_helper import TradeMonHelper
+from services.trade.generator.tradegen_helper import TradeGenHelper
 from services.audit.auditlog import write_auditlog
 
 from services.zerodha.kiteconnect_service import KiteConnectService
@@ -72,6 +73,12 @@ ORDER_POLL_TIMEOUT_SEC = float(EXECUTION_CONFIG.order_poll_timeout_sec)
 MAX_REPRICES_PER_PASS = int(EXECUTION_CONFIG.max_reprices_per_pass)
 
 TICK_SIZE = Decimal(str(EXECUTION_CONFIG.tick_size))
+MAX_ENTRY_PRICE_DRIFT_OPTION = Decimal(
+    str(EXECUTION_CONFIG.max_entry_price_drift_option_pct)
+)
+MAX_ENTRY_PRICE_DRIFT_DEFAULT = Decimal(
+    str(EXECUTION_CONFIG.max_entry_price_drift_default_pct)
+)
 
 
 # -------------------------------------------------------------------
@@ -219,6 +226,59 @@ def _extract_order_id(resp: Any) -> str:
         return str(oid or "").strip()
     except Exception:
         return ""
+
+
+def _entry_price_drift_limit(instrument_type: Any) -> Decimal:
+    return (
+        MAX_ENTRY_PRICE_DRIFT_OPTION
+        if _enum_str(instrument_type) in ("CE", "PE")
+        else MAX_ENTRY_PRICE_DRIFT_DEFAULT
+    )
+
+
+def _entry_price_drift_pct(
+    planned_price: Any,
+    executable_price: Any,
+) -> Optional[Decimal]:
+    planned = d(planned_price)
+    executable = d(executable_price)
+    if planned <= 0 or executable <= 0:
+        return None
+    return abs(executable - planned) / planned
+
+
+def _extract_latest_order_price(hist: List[dict]) -> Optional[Decimal]:
+    for row in reversed(hist or []):
+        if not isinstance(row, dict):
+            continue
+        for key in ("price", "average_price", "trigger_price"):
+            value = d(row.get(key))
+            if value > 0:
+                return value
+    return None
+
+
+def _extract_broker_status_message(hist: List[dict]) -> Optional[str]:
+    for row in reversed(hist or []):
+        if not isinstance(row, dict):
+            continue
+        for key in (
+            "status_message_raw",
+            "status_message",
+            "rejection_reason",
+            "message",
+        ):
+            value = str(row.get(key) or "").strip()
+            if value:
+                return value[:220]
+    return None
+
+
+def _json_safe_order_request(params: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        str(key): getattr(value, "value", value)
+        for key, value in params.items()
+    }
 
 
 def _calc_exit_pnl_per_unit(ut: UserTradeSchema, exit_px: Any) -> Optional[Decimal]:
@@ -903,12 +963,17 @@ class TradeExecutor:
         return None
 
     def _defer_ready_entry(self, ut: UserTradeSchema, *, reason: str, asof_time: datetime) -> bool:
-        """Keep a fresh intent READY when a transient quote/context input is unavailable."""
-        _persist_executor_update(ut, {
-            "exec_status": str(reason or "ENTRY_DEFERRED").split(" ", 1)[0],
-            "exec_status_message": str(reason or "ENTRY_DEFERRED")[:500],
-            "exec_last_checked_at": asof_time,
-        })
+        """Keep a READY intent without emitting the same defer audit every tick."""
+        code = str(reason or "ENTRY_DEFERRED").split(" ", 1)[0]
+        message = str(reason or "ENTRY_DEFERRED")[:250]
+        updates: Dict[str, Any] = {"exec_last_checked_at": asof_time}
+        if (
+            _enum_str(getattr(ut, "exec_status", "")) != _enum_str(code)
+            or str(getattr(ut, "exec_status_message", "") or "") != message
+        ):
+            updates["exec_status"] = code
+            updates["exec_status_message"] = message
+        _persist_executor_update(ut, updates)
         return True
 
     # ---------------- cancel pending entry ----------------
@@ -926,7 +991,7 @@ class TradeExecutor:
         upd = {
             "entry_status": EntryStatus.CANCELLED.value,
             "exit_status": ExitStatus.NONE.value,
-            "entry_order_id": None,
+            "entry_order_id": oid or None,
             "exec_last_checked_at": _now_ist_naive(),
             "exec_status": "ENTRY_CANCELLED_BY_USER",
             "exec_status_message": (
@@ -1025,7 +1090,40 @@ class TradeExecutor:
         es = _entry_status(ut)
 
         if es == EntryStatus.READY.value:
-            candidate_px = _quote_best_price(getattr(ut, "symbol", ""), _side(ut))
+            try:
+                plan_updates = TradeGenHelper.build_unsubmitted_plan_refresh(
+                    ut,
+                    asof_time=asof_time,
+                    refresh_reason="AUTO_PRE_EXECUTION_PLAN_REFRESH",
+                    force=False,
+                )
+                if plan_updates:
+                    plan_updates.update({
+                        "exec_status": "ENTRY_PLAN_REFRESHED",
+                        "exec_status_message": (
+                            "Entry plan rebuilt from the latest completed snapshot "
+                            "before REAL execution."
+                        ),
+                        "exec_last_checked_at": asof_time,
+                    })
+                    refreshed = _persist_executor_update(ut, plan_updates)
+                    if refreshed is None:
+                        return True
+                    ut = refreshed
+            except Exception as exc:
+                return self._defer_ready_entry(
+                    ut,
+                    reason=(
+                        "ENTRY_DEFER_PLAN_REFRESH_FAILED "
+                        f"{str(exc)[:210]}"
+                    ),
+                    asof_time=asof_time,
+                )
+
+            candidate_px = _quote_best_price(
+                getattr(ut, "symbol", ""),
+                _side(ut),
+            )
             expiry_reason = self._revalidate_ready_entry(
                 ut,
                 candidate_price=candidate_px,
@@ -1034,9 +1132,49 @@ class TradeExecutor:
             )
             if expiry_reason:
                 if expiry_reason.startswith("ENTRY_DEFER_"):
-                    return self._defer_ready_entry(ut, reason=expiry_reason, asof_time=asof_time)
-                return self._expire_entry_package(ut, reason=expiry_reason, asof_time=asof_time)
-            placed = self._place_entry_real(ut, broker)
+                    return self._defer_ready_entry(
+                        ut,
+                        reason=expiry_reason,
+                        asof_time=asof_time,
+                    )
+                return self._expire_entry_package(
+                    ut,
+                    reason=expiry_reason,
+                    asof_time=asof_time,
+                )
+
+            executable_px = _round_to_tick(d(candidate_px))
+            drift = _entry_price_drift_pct(
+                getattr(ut, "entry_price", None),
+                executable_px,
+            )
+            drift_limit = _entry_price_drift_limit(
+                getattr(ut, "instrument_type", None)
+            )
+            if drift is None:
+                return self._defer_ready_entry(
+                    ut,
+                    reason="ENTRY_DEFER_PRICE_DRIFT_INPUT_INVALID",
+                    asof_time=asof_time,
+                )
+            if drift > drift_limit:
+                return self._defer_ready_entry(
+                    ut,
+                    reason=(
+                        "ENTRY_DEFER_PRICE_DRIFT "
+                        f"planned={d(getattr(ut, 'entry_price', None))} "
+                        f"executable={executable_px} "
+                        f"drift_pct={(drift * Decimal('100')):.2f} "
+                        f"limit_pct={(drift_limit * Decimal('100')):.2f}"
+                    ),
+                    asof_time=asof_time,
+                )
+
+            placed = self._place_entry_real(
+                ut,
+                broker,
+                executable_price=executable_px,
+            )
             if not placed:
                 return True
             return self._poll_entry_until_terminal(ut.id, broker)
@@ -1046,7 +1184,13 @@ class TradeExecutor:
 
         return False
 
-    def _place_entry_real(self, ut: UserTradeSchema, broker: ZerodhaBroker) -> bool:
+    def _place_entry_real(
+        self,
+        ut: UserTradeSchema,
+        broker: ZerodhaBroker,
+        *,
+        executable_price: Any,
+    ) -> bool:
         if hasattr(ut, "entry_retries") and getattr(ut, "entry_retries", None) is not None:
             if int(getattr(ut, "entry_retries") or 0) <= 0:
                 _persist_executor_update(ut, {
@@ -1074,16 +1218,16 @@ class TradeExecutor:
             "variety": variety,
         }
 
-        entry_px = Decimal("0")
+        entry_px = _round_to_tick(d(executable_price))
+        if entry_px <= 0:
+            raise ValueError("REAL entry executable_price must be positive")
+
         if order_type == OrderType.LIMIT:
-            entry_px = _best_limit_price(ut.symbol, _side(ut), getattr(ut, "entry_price", None))
             params["price"] = float(entry_px)
         elif order_type == OrderType.SL:
-            entry_px = _best_limit_price(ut.symbol, _side(ut), getattr(ut, "entry_price", None))
             params["trigger_price"] = float(entry_px)
             params["price"] = float(entry_px)
         elif order_type == OrderType.SLM:
-            entry_px = _best_limit_price(ut.symbol, _side(ut), getattr(ut, "entry_price", None))
             params["trigger_price"] = float(entry_px)
 
         try:
@@ -1096,16 +1240,23 @@ class TradeExecutor:
             upd: Dict[str, Any] = {
                 "entry_status": EntryStatus.SUBMITTED.value,
                 "entry_order_id": oid,
-                "entry_order_response_json": json.dumps(resp),
+                "entry_order_response_json": json.dumps(
+                    {
+                        "request": _json_safe_order_request(params),
+                        "guarded_reference_price": float(entry_px),
+                        "broker_response": resp,
+                    },
+                    default=str,
+                ),
                 "entry_intent_time": _to_ist_naive(getattr(ut, "entry_intent_time", None)) or now,
                 "exec_last_checked_at": now,
                 "exec_status": None,
                 "exec_status_message": None,
             }
 
-            if entry_px > 0 and order_type in (OrderType.LIMIT, OrderType.SL, OrderType.SLM):
-                upd["entry_price"] = entry_px
-
+            # Keep entry_price as the refreshed plan anchor. Broker request
+            # price is stored in entry_order_response_json; executed fill truth
+            # is stored separately and rebases management only after COMPLETE.
             _persist_executor_update(ut, upd)
             return True
 
@@ -1137,7 +1288,12 @@ class TradeExecutor:
                 return True
 
             es = _entry_status(ut)
-            if es in (EntryStatus.FILLED.value, EntryStatus.CANCELLED.value, EntryStatus.INVALID.value):
+            if es in (
+                EntryStatus.FILLED.value,
+                EntryStatus.CANCELLED.value,
+                EntryStatus.REJECTED.value,
+                EntryStatus.INVALID.value,
+            ):
                 return True
 
             did_terminal = self._poll_entry_once(ut, broker)
@@ -1147,7 +1303,12 @@ class TradeExecutor:
                 return True
 
             es2 = _entry_status(ut2)
-            if es2 in (EntryStatus.FILLED.value, EntryStatus.CANCELLED.value, EntryStatus.INVALID.value):
+            if es2 in (
+                EntryStatus.FILLED.value,
+                EntryStatus.CANCELLED.value,
+                EntryStatus.REJECTED.value,
+                EntryStatus.INVALID.value,
+            ):
                 return True
 
             if (time.time() - t0) >= ORDER_POLL_TIMEOUT_SEC:
@@ -1183,20 +1344,56 @@ class TradeExecutor:
             })
             return False
 
-        current_price = d(getattr(ut, "entry_price", None) or 0)
-        new_px = _next_modified_limit_price(ut.symbol, _side(ut), current_price)
+        try:
+            hist = broker.history(oid)
+        except Exception:
+            hist = []
+
+        current_order_price = (
+            _extract_latest_order_price(hist)
+            or d(getattr(ut, "entry_price", None) or 0)
+        )
+        new_px = _next_modified_limit_price(
+            ut.symbol,
+            _side(ut),
+            current_order_price,
+        )
         if new_px is None or new_px <= 0:
             return False
 
-        if not _safe_modify_order_price(broker, order_id=oid, price=new_px, variety=variety):
+        drift = _entry_price_drift_pct(
+            getattr(ut, "entry_price", None),
+            new_px,
+        )
+        drift_limit = _entry_price_drift_limit(
+            getattr(ut, "instrument_type", None)
+        )
+        if drift is None or drift > drift_limit:
+            _persist_executor_update(ut, {
+                "exec_last_checked_at": _now_ist_naive(),
+                "exec_status": "ENTRY_REPRICE_BLOCKED_PRICE_DRIFT",
+                "exec_status_message": (
+                    f"Refused reprice to {new_px}; "
+                    f"planned={getattr(ut, 'entry_price', None)} "
+                    f"limit_pct={(drift_limit * Decimal('100')):.2f}"
+                )[:250],
+            })
+            return False
+
+        if not _safe_modify_order_price(
+            broker,
+            order_id=oid,
+            price=new_px,
+            variety=variety,
+        ):
             return False
 
         _persist_executor_update(ut, {
-            "entry_price": new_px,
+            # Do not mutate the plan anchor while changing a broker LIMIT.
             "entry_retries": max(left - 1, 0),
             "exec_last_checked_at": _now_ist_naive(),
             "exec_status": "ENTRY_REPRICED",
-            "exec_status_message": f"Modified entry order to {new_px}",
+            "exec_status_message": f"Modified broker entry order to {new_px}",
         })
         return True
 
@@ -1242,22 +1439,40 @@ class TradeExecutor:
                 _persist_executor_update(ut, updates)
                 return True
 
-            if st in (OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.INVALID):
-                left = _try_int(getattr(ut, "entry_retries", None), MAX_RETRIES)
-                upd = {
-                    "exec_status": f"ENTRY_{st.value}",
-                    "exec_status_message": f"Broker status={st.value}",
-                    "exec_last_checked_at": _now_ist_naive(),
-                }
+            if st in (
+                OrderStatus.CANCELLED,
+                OrderStatus.REJECTED,
+                OrderStatus.INVALID,
+            ):
+                try:
+                    hist = broker.history(oid)
+                except Exception:
+                    hist = []
 
-                if left > 0:
-                    upd["entry_status"] = EntryStatus.READY.value
-                    upd["entry_retries"] = max(left - 1, 0)
-                    upd["entry_order_id"] = None
+                broker_message = _extract_broker_status_message(hist)
+                status_message = f"Broker status={st.value}"
+                if broker_message:
+                    status_message = f"{status_message}: {broker_message}"
+
+                if st == OrderStatus.CANCELLED:
+                    terminal_status = EntryStatus.CANCELLED.value
+                elif st == OrderStatus.REJECTED:
+                    terminal_status = EntryStatus.REJECTED.value
                 else:
-                    upd["entry_status"] = EntryStatus.INVALID.value
+                    terminal_status = EntryStatus.INVALID.value
 
-                _persist_executor_update(ut, upd)
+                _persist_executor_update(ut, {
+                    "entry_status": terminal_status,
+                    # Broker identity is immutable audit/reconciliation truth.
+                    "entry_order_id": oid,
+                    "executed_entry_price": None,
+                    "executed_entry_qty": 0,
+                    "last_pnl": 0,
+                    "last_pnl_value": 0,
+                    "exec_status": f"ENTRY_{st.value}",
+                    "exec_status_message": status_message[:250],
+                    "exec_last_checked_at": _now_ist_naive(),
+                })
                 return True
 
             _persist_executor_update(ut, {"exec_last_checked_at": _now_ist_naive()})

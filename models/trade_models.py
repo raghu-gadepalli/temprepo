@@ -674,7 +674,7 @@ class UserTrade(Base):
     # 3) Lifecycle control (ENTRY + EXIT)
     # =============================
     entry_status    = Column(String(30),  nullable=False, default="CREATED", index=True)
-    # CREATED | READY | SUBMITTED | FILLED | EXPIRED | CANCELLED | INVALID
+    # CREATED | READY | SUBMITTED | FILLED | EXPIRED | CANCELLED | REJECTED | INVALID
 
     exit_status     = Column(String(30),  nullable=False, default="NONE", index=True)
     # NONE | READY | SUBMITTED | FILLED | CANCELLED | FAILED

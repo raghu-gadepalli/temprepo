@@ -670,19 +670,32 @@ class TradeBackfillService:
             OrderStatus.REJECTED.value,
             OrderStatus.INVALID.value,
         ):
-            left = max(_try_int(getattr(ut, "entry_retries", None), 1) - 1, 0)
-            upd = {
-                "entry_retries": left,
-                "entry_order_id": None if left > 0 else getattr(ut, "entry_order_id", None),
-            }
-            if left > 0:
-                upd["entry_status"] = EntryStatus.READY.value
+            if st == OrderStatus.CANCELLED.value:
+                terminal_status = EntryStatus.CANCELLED.value
+            elif st == OrderStatus.REJECTED.value:
+                terminal_status = EntryStatus.REJECTED.value
             else:
-                upd["entry_status"] = EntryStatus.INVALID.value
+                terminal_status = EntryStatus.INVALID.value
 
+            matched_order_id = str(
+                getattr(order, "order_id", "")
+                or getattr(ut, "entry_order_id", "")
+                or ""
+            ).strip() or None
+            upd = {
+                "entry_status": terminal_status,
+                "entry_order_id": matched_order_id,
+                "executed_entry_price": None,
+                "executed_entry_qty": 0,
+                "last_pnl": 0,
+                "last_pnl_value": 0,
+            }
             upd.update(_reconcile_obs(
                 f"ENTRY_{st}_FROM_OMS",
-                f"Entry terminal status resolved from oms_orders order_id={getattr(order, 'order_id', None)}.",
+                (
+                    "Entry terminal status resolved from oms_orders "
+                    f"order_id={matched_order_id or 'unknown'} status={st}."
+                ),
             ))
             return _apply_update(ut.id, upd, dry_run=self.dry_run)
 

@@ -67,6 +67,7 @@ from schemas.user_trade import UserTradeSchema
 from database.database import get_trades_db
 from models.trade_models import UserTrade as UserTradeORM, Snapshot as SnapshotORM
 from utils.datetime_utils import IST, business_now_naive
+from utils.json_utils import sanitize_json
 from services.trade.monitor.trademon_helper import TradeMonHelper, extract_underlying_atr
 from services.trade.generator.tradegen_validator import (
     TradeDecisionHelper,
@@ -502,6 +503,7 @@ def _build_trade_management_payload(
     initial_target_source: Optional[str] = None,
     initial_target_reason: Optional[str] = None,
     signal_setup_label: Optional[str] = None,
+    asof_time: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """Build the Phase-1 trade_management payload.
 
@@ -514,7 +516,7 @@ def _build_trade_management_payload(
         instrument_type=instrument_type,
         entry_price=d(basis_price),
         underlying_atr=atr,
-        asof_time=business_now_naive(),
+        asof_time=_to_ist_naive(asof_time) or business_now_naive(),
         initial_stop_price=initial_stop_price,
         initial_stop_source=initial_stop_source,
         initial_stop_reason=initial_stop_reason,
@@ -882,7 +884,7 @@ def _existing_active_trades_for_signal(*, userid: str, signal_id: str) -> List[U
     if not uid or not opp:
         return []
 
-    terminal_entries = {EntryStatus.CANCELLED.value, EntryStatus.INVALID.value}
+    terminal_entries = {EntryStatus.CANCELLED.value, EntryStatus.REJECTED.value, EntryStatus.INVALID.value}
     terminal_exits = {ExitStatus.FILLED.value, ExitStatus.CANCELLED.value}
 
     try:
@@ -958,7 +960,7 @@ def _existing_open_trades_for_symbol(*, userid: str, symbol: str) -> List[UserTr
     if not uid or not sym:
         return []
 
-    terminal_entries = {EntryStatus.CANCELLED.value, EntryStatus.INVALID.value}
+    terminal_entries = {EntryStatus.CANCELLED.value, EntryStatus.REJECTED.value, EntryStatus.INVALID.value}
 
     try:
         with get_trades_db() as db:
@@ -1066,7 +1068,7 @@ def _existing_open_trades_for_signal_instrument(
     if not uid or not opp or not inst:
         return []
 
-    terminal_entries = {EntryStatus.CANCELLED.value, EntryStatus.INVALID.value}
+    terminal_entries = {EntryStatus.CANCELLED.value, EntryStatus.REJECTED.value, EntryStatus.INVALID.value}
 
     try:
         with get_trades_db() as db:
@@ -1409,6 +1411,199 @@ class TradeGenHelper:
         except Exception:
             logger.exception("TradeGenHelper: failed to fetch signal_id=%s", signal_id)
             return None
+
+    @staticmethod
+    def build_unsubmitted_plan_refresh(
+        trade: Any,
+        *,
+        asof_time: Optional[datetime],
+        refresh_reason: str,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        """Rebuild one unsubmitted entry plan from the latest completed snapshot.
+
+        The traded symbol and requested quantity are preserved. Entry price,
+        snapshot context, ATR-based stop/target state, and mark fields are
+        refreshed atomically. A caller must persist the returned mapping in the
+        same transaction that queues or executes the trade.
+        """
+        status = _enum_str(
+            getattr(trade, "entry_status", EntryStatus.CREATED.value)
+        )
+        allowed_statuses = {
+            EntryStatus.CREATED.value,
+            getattr(EntryStatus, "READY", EntryStatus.CREATED).value,
+        }
+        if status not in allowed_statuses:
+            raise ValueError(
+                "PLAN_REFRESH_REQUIRES_UNSUBMITTED_ENTRY "
+                f"entry_status={status}"
+            )
+
+        if int(getattr(trade, "executed_entry_qty", 0) or 0) > 0:
+            raise ValueError("PLAN_REFRESH_BLOCKED_AFTER_ENTRY_FILL")
+        if str(getattr(trade, "entry_order_id", "") or "").strip():
+            raise ValueError("PLAN_REFRESH_BLOCKED_AFTER_BROKER_SUBMISSION")
+
+        equity_ref = str(
+            getattr(trade, "equity_ref", "") or ""
+        ).strip().upper()
+        trade_symbol = str(
+            getattr(trade, "symbol", "") or ""
+        ).strip().upper()
+        instrument_type = _inst_code(
+            getattr(trade, "instrument_type", "")
+        )
+
+        if not equity_ref or not trade_symbol:
+            raise ValueError("PLAN_REFRESH_REQUIRES_TRADE_SYMBOL_AND_EQUITY_REF")
+        if instrument_type not in ("EQ", "FUT", "CE", "PE"):
+            raise ValueError(
+                f"PLAN_REFRESH_UNSUPPORTED_INSTRUMENT={instrument_type}"
+            )
+
+        asof = _to_ist_naive(asof_time) or business_now_naive()
+        snapshot = SnapshotSchema.fetch_latest_for_symbol_asof(
+            equity_ref,
+            asof,
+        )
+        if snapshot is None:
+            raise ValueError(
+                f"PLAN_REFRESH_NO_COMPLETED_SNAPSHOT symbol={equity_ref}"
+            )
+
+        snapshot_time = _to_ist_naive(
+            getattr(snapshot, "snapshot_time", None)
+        )
+        if snapshot_time is None:
+            raise ValueError("PLAN_REFRESH_SNAPSHOT_TIME_MISSING")
+
+        current_snapshot = _as_dict_maybe_json(
+            getattr(trade, "last_snapshot", None)
+        )
+        current_snapshot_time = current_snapshot.get("snapshot_time")
+        if isinstance(current_snapshot_time, str):
+            try:
+                current_snapshot_time = datetime.fromisoformat(
+                    current_snapshot_time.replace("Z", "+00:00")
+                )
+            except Exception:
+                current_snapshot_time = None
+        current_snapshot_time = _to_ist_naive(current_snapshot_time)
+
+        if (
+            not force
+            and current_snapshot_time is not None
+            and snapshot_time <= current_snapshot_time
+        ):
+            return {}
+
+        snapshot_dict = sanitize_json(snapshot.to_db_dict())
+        equity_price = _snapshot_close(snapshot)
+
+        refreshed_entry: Optional[Decimal] = None
+        if instrument_type == "EQ":
+            refreshed_entry = equity_price
+        elif instrument_type == "FUT":
+            latest_future_symbol = str(
+                _resolve_future_symbol_from_snapshot(snapshot_dict) or ""
+            ).strip().upper()
+            if not latest_future_symbol or latest_future_symbol != trade_symbol:
+                raise ValueError(
+                    "PLAN_REFRESH_FUTURE_SYMBOL_UNAVAILABLE "
+                    f"stored={trade_symbol} latest={latest_future_symbol or 'NONE'}"
+                )
+            refreshed_entry = _resolve_future_price_from_snapshot(snapshot_dict)
+        else:
+            option_rows = _option_rows_from_snapshot(
+                snapshot_dict,
+                is_call=(instrument_type == "CE"),
+            )
+            for row in option_rows:
+                if str(row.get("symbol") or "").strip().upper() != trade_symbol:
+                    continue
+                refreshed_entry = _safe_num(
+                    row.get("ltp"),
+                    _safe_num(row.get("last_price"), None),
+                )
+                if refreshed_entry is not None and refreshed_entry > 0:
+                    break
+
+        refreshed_entry = _round_to_tick(d(refreshed_entry))
+        if refreshed_entry <= 0:
+            raise ValueError(
+                "PLAN_REFRESH_INSTRUMENT_PRICE_UNAVAILABLE "
+                f"instrument={instrument_type} symbol={trade_symbol}"
+            )
+
+        refreshed_atr = _extract_atr_from_snapshot_dict(snapshot_dict)
+        if refreshed_atr is None or refreshed_atr <= 0:
+            raise ValueError(
+                f"PLAN_REFRESH_ATR_UNAVAILABLE symbol={equity_ref}"
+            )
+
+        old_management = _as_dict_maybe_json(
+            getattr(trade, "trade_management", None)
+        )
+        if not old_management:
+            raise ValueError("PLAN_REFRESH_TRADE_MANAGEMENT_MISSING")
+
+        stop_source = str(
+            old_management.get("initial_stop_source") or "ATR_MULTIPLE"
+        ).upper().strip()
+        target_source = str(
+            old_management.get("initial_target_source") or "ATR_MULTIPLE"
+        ).upper().strip()
+
+        setup_stop = (
+            old_management.get("initial_stop_price")
+            if stop_source == "SIGNAL_SETUP_LEVEL"
+            else None
+        )
+        setup_target = (
+            old_management.get("initial_target_price")
+            if target_source == "SIGNAL_SETUP_TARGET"
+            else None
+        )
+
+        risk_side = (
+            "BUY"
+            if instrument_type in ("CE", "PE")
+            else _side(getattr(trade, "trade_type", "BUY"))
+        )
+        refreshed_management = _build_trade_management_payload(
+            side=risk_side,
+            basis_price=refreshed_entry,
+            atr=refreshed_atr,
+            instrument_type=instrument_type,
+            initial_stop_price=setup_stop,
+            initial_stop_source=stop_source,
+            initial_stop_reason=old_management.get("initial_stop_reason"),
+            initial_target_price=setup_target,
+            initial_target_source=target_source,
+            initial_target_reason=old_management.get("initial_target_reason"),
+            signal_setup_label=old_management.get("signal_setup_label"),
+            asof_time=snapshot_time,
+        )
+
+        reason = str(refresh_reason or "PRE_ENTRY_PLAN_REFRESH").strip()[:80]
+        refreshed_management["last_update_reason"] = reason
+        refreshed_management["group_update_source"] = "PLAN_REFRESH"
+        refreshed_management["group_update_reason"] = reason
+
+        return {
+            "entry_price": refreshed_entry,
+            "trade_management": refreshed_management,
+            "last_snapshot": snapshot_dict,
+            "last_time": snapshot_time,
+            "last_price": refreshed_entry,
+            "last_pnl": Decimal("0"),
+            "last_pnl_value": Decimal("0"),
+            "max_price": refreshed_entry,
+            "min_price": refreshed_entry,
+            "max_time": snapshot_time,
+            "min_time": snapshot_time,
+        }
 
     @staticmethod
     def _default_qty_for_inst(inst: str, entry_price: Decimal, lotsize: int) -> int:

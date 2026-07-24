@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ExecutionConfig(BaseModel):
@@ -25,9 +25,13 @@ class ExecutionConfig(BaseModel):
     cooldown_user_symbol_sec: int = 30
     tick_size: str = "0.05"
 
-    # The executor is intentionally mechanical: once TradeGenerator persists
-    # a READY package, execution does not re-run signal/setup/entry policy.
-    # It only requires an executable price and timestamp.
+    # REAL entry safety: compare the latest executable quote with the refreshed
+    # completed-snapshot plan immediately before broker submission.
+    max_entry_price_drift_option_pct: float = Field(default=0.20, gt=0, le=1)
+    max_entry_price_drift_default_pct: float = Field(default=0.02, gt=0, le=1)
+
+    # Once a READY package passes the refreshed-plan price-drift guard, the
+    # executor remains mechanical and does not re-run signal/setup entry policy.
 
 
 EXECUTION_CONFIG = ExecutionConfig()

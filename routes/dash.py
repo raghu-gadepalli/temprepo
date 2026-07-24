@@ -163,20 +163,47 @@ def _refresh_order_mark_fields(tr):
     consistent across edit/submit flows.
     """
     try:
-        entry_price = _trade_entry_display_price(tr)
-        qty = _safe_int(getattr(tr, "quantity", None), 0)
+        entry_status, _ = _status(tr)
+        planned_entry_price = _safe_float(
+            getattr(tr, "entry_price", None),
+            0.0,
+        )
+        executed_entry_price = _safe_float(
+            getattr(tr, "executed_entry_price", None),
+            0.0,
+        )
+        executed_entry_qty = _safe_int(
+            getattr(tr, "executed_entry_qty", None),
+            0,
+        )
         side = _safe_str(getattr(tr, "trade_type", None), "").upper()
 
-        last_price = _safe_float(getattr(tr, "last_price", None), entry_price)
+        last_price = _safe_float(
+            getattr(tr, "last_price", None),
+            planned_entry_price,
+        )
         if last_price <= 0:
-            last_price = entry_price
+            last_price = planned_entry_price
 
         pnl_value = 0.0
-        if entry_price > 0 and qty > 0:
+        entry_is_filled = (
+            entry_status == "FILLED"
+            and executed_entry_price > 0
+            and executed_entry_qty > 0
+        )
+        if entry_is_filled:
             if side == "SELL":
-                pnl_value = round((entry_price - last_price) * qty, 2)
+                pnl_value = round(
+                    (executed_entry_price - last_price)
+                    * executed_entry_qty,
+                    2,
+                )
             else:
-                pnl_value = round((last_price - entry_price) * qty, 2)
+                pnl_value = round(
+                    (last_price - executed_entry_price)
+                    * executed_entry_qty,
+                    2,
+                )
 
         if hasattr(tr, "last_price"):
             tr.last_price = last_price
@@ -443,6 +470,15 @@ def _to_orders_row(tr):
 
     entry_status, exit_status = _status(tr)
     exec_status = _exec_status_compat(tr)
+    executed_entry_qty = _safe_int(
+        getattr(tr, "executed_entry_qty", None),
+        0,
+    )
+    entry_filled = (
+        entry_status == "FILLED"
+        and executed_entry_price > 0
+        and executed_entry_qty > 0
+    )
 
     trade_side = _safe_str(getattr(tr, "trade_type", None), "").upper()
 
@@ -461,21 +497,43 @@ def _to_orders_row(tr):
             return round((entry_px - mark_px) * calc_qty, 2)
         return round((mark_px - entry_px) * calc_qty, 2)
 
-    pnl_basis_entry = display_entry_price
+    pnl_basis_entry = executed_entry_price if entry_filled else 0.0
 
-    if exited:
-        close_qty = executed_exit_qty if executed_exit_qty > 0 else qty
-        close_px = executed_exit_price if executed_exit_price > 0 else display_last_price
+    if not entry_filled:
+        # An unfilled order is not a position. Never manufacture P&L from the
+        # requested price and requested quantity.
+        pnl_value = 0.0
+    elif exited:
+        close_qty = (
+            executed_exit_qty
+            if executed_exit_qty > 0
+            else executed_entry_qty
+        )
+        close_px = (
+            executed_exit_price
+            if executed_exit_price > 0
+            else display_last_price
+        )
 
         if abs(exit_pnl_stored) > 0:
             pnl_value = exit_pnl_stored
         else:
-            pnl_value = _calc_pnl(pnl_basis_entry, close_px, trade_side, close_qty)
+            pnl_value = _calc_pnl(
+                pnl_basis_entry,
+                close_px,
+                trade_side,
+                close_qty,
+            )
     else:
         if abs(last_pnl_value_stored) > 0:
             pnl_value = last_pnl_value_stored
         else:
-            pnl_value = _calc_pnl(pnl_basis_entry, live_last_price, trade_side, qty)
+            pnl_value = _calc_pnl(
+                pnl_basis_entry,
+                live_last_price,
+                trade_side,
+                executed_entry_qty,
+            )
 
     return {
         "id": tr.id,
@@ -503,7 +561,9 @@ def _to_orders_row(tr):
 
         "quantity": qty,
         "qty": qty,
+        "executed_entry_qty": executed_entry_qty,
         "executed_exit_qty": executed_exit_qty,
+        "pnl_available": entry_filled,
 
         "required_amt": required_amt,
 
@@ -1255,6 +1315,27 @@ def trading_submit_trade():
                     skipped.append({"id": tid, "reason": f"exit_status_{xs}"})
                     continue
 
+                try:
+                    plan_updates = TradeGenHelper.build_unsubmitted_plan_refresh(
+                        tr,
+                        asof_time=now,
+                        refresh_reason="MANUAL_SUBMIT_PLAN_REFRESH",
+                        force=True,
+                    )
+                    for key, value in plan_updates.items():
+                        setattr(tr, key, value)
+                except Exception as exc:
+                    logger.exception(
+                        "Manual submit plan refresh failed trade_id=%s",
+                        tid,
+                    )
+                    skipped.append({
+                        "id": tid,
+                        "reason": "entry_plan_refresh_failed",
+                        "details": str(exc)[:250],
+                    })
+                    continue
+
                 _prepare_draft_for_queue(tr, now=now)
                 queued.append(tid)
                 rows.append(tr)
@@ -1264,14 +1345,23 @@ def trading_submit_trade():
             for tr in rows:
                 db.refresh(tr)
 
-        return jsonify({
-            "ok": True,
+        response_payload = {
+            "ok": bool(queued),
             "queued": queued,
             "submitted": queued,
             "skipped": skipped,
             "rows": [_to_orders_row(tr) for tr in rows],
-            "note": "QUEUED_FOR_EXECUTOR_NO_BROKER_CALL"
-        }), 200
+            "note": "QUEUED_FOR_EXECUTOR_NO_BROKER_CALL",
+        }
+        if not queued:
+            response_payload["error"] = "NO_TRADES_QUEUED"
+            if skipped:
+                response_payload["message"] = (
+                    skipped[0].get("details")
+                    or skipped[0].get("reason")
+                    or "Trade was not queued."
+                )
+        return jsonify(response_payload), (200 if queued else 409)
 
     except Exception as e:
         logger.exception("trading_submit_trade failed: %s", e)

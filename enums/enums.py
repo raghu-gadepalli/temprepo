@@ -320,6 +320,7 @@ class EntryStatus(BaseEnum):
     FILLED = "FILLED"
     EXPIRED = "EXPIRED"
     CANCELLED = "CANCELLED"
+    REJECTED = "REJECTED"
     INVALID = "INVALID"
 
 
