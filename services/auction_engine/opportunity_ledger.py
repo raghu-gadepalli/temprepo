@@ -34,6 +34,7 @@ _ROLE_RANK = {
     "EARLY_INITIATION": 0,
     "ACCEPTED_RESOLUTION_ENTRY": 1,
     "FAILED_RESOLUTION_ENTRY": 1,
+    "REVERSAL_ENTRY": 0,
     "CONTINUATION_INTERPRETATION": 2,
 }
 _ELIGIBILITY_RANK = {
@@ -97,6 +98,8 @@ class OpportunityRecord:
     consumed_time: Optional[datetime] = None
     selected_time: Optional[datetime] = None
     selected_candidate_id: Optional[str] = None
+    superseded_time: Optional[datetime] = None
+    superseded_by_opportunity_key: Optional[str] = None
     decision_count: int = 0
     reason_codes: Tuple[str, ...] = ()
 
@@ -181,6 +184,8 @@ class OpportunityRecord:
             "selected_time": self.selected_time.isoformat(sep=" ") if self.selected_time else None,
             "selected_candidate_id": self.selected_candidate_id,
             "consumed_time": self.consumed_time.isoformat(sep=" ") if self.consumed_time else None,
+            "superseded_time": self.superseded_time.isoformat(sep=" ") if self.superseded_time else None,
+            "superseded_by_opportunity_key": self.superseded_by_opportunity_key,
             "decision_count": self.decision_count,
             "primary_candidate_id": c.candidate_id,
             "primary_family": c.family.value,
@@ -233,9 +238,16 @@ class OpportunityLedger:
         self._last_day[symbol] = day
 
         touched: set[str] = set()
-        for candidate in candidates:
+        candidate_rows = tuple(candidates)
+        for candidate in candidate_rows:
             self._upsert(candidate)
             touched.add(candidate.opportunity_key)
+        for candidate in candidate_rows:
+            if (
+                candidate.family.value == "REVERSAL"
+                and candidate.eligibility is CandidateEligibility.ELIGIBLE
+            ):
+                touched.update(self._supersede_opposite_for_reversal(candidate))
         for episode in (boundary_episode, closed_episode):
             if episode is not None:
                 touched.update(self._sync_boundary_episode(episode))
@@ -294,6 +306,54 @@ class OpportunityLedger:
             record.reason_codes = tuple(dict.fromkeys((*record.reason_codes, *candidate.reason_codes)))
         self._select_primary(record)
 
+    def _supersede_opposite_for_reversal(
+        self,
+        reversal: SetupCandidate,
+    ) -> Tuple[str, ...]:
+        """A confirmed reversal terminates older opposite-side opportunities."""
+        touched: List[str] = []
+        for key, record in self._records.items():
+            if key == reversal.opportunity_key:
+                continue
+            if record.symbol != reversal.symbol or record.trading_day != reversal.trading_day:
+                continue
+            if record.side is reversal.side:
+                continue
+            if record.first_observed_time > reversal.snapshot_time:
+                continue
+            if record.consumed_time is not None or record.superseded_time is not None:
+                continue
+            if record.lifecycle_state not in {"WATCH", "ELIGIBLE"}:
+                continue
+
+            previous = record.lifecycle_state
+            record.superseded_time = reversal.snapshot_time
+            record.superseded_by_opportunity_key = reversal.opportunity_key
+            record.terminal_time = reversal.snapshot_time
+            record.boundary_terminal_reason = "SUPERSEDED_BY_CONFIRMED_REVERSAL"
+            record.reason_codes = tuple(dict.fromkeys((
+                *record.reason_codes,
+                "SUPERSEDED_BY_CONFIRMED_REVERSAL",
+                f"REVERSAL_CANDIDATE_{reversal.candidate_id}",
+            )))
+            touched.append(key)
+            self._events.append(OpportunityEvent(
+                key,
+                record.symbol,
+                record.trading_day,
+                reversal.snapshot_time,
+                "SUPERSEDED_BY_REVERSAL",
+                previous,
+                "SUPERSEDED",
+                reversal.candidate_id,
+                ("SUPERSEDED_BY_CONFIRMED_REVERSAL",),
+                {
+                    "reversal_opportunity_key": reversal.opportunity_key,
+                    "reversal_side": reversal.side.value,
+                },
+            ))
+        return tuple(touched)
+
     def _sync_boundary_episode(self, episode: BoundaryEpisode) -> Tuple[str, ...]:
         touched: List[str] = []
         for opportunity_key, record in self._records.items():
@@ -351,6 +411,8 @@ class OpportunityLedger:
     def _derive_state(record: OpportunityRecord) -> str:
         if record.consumed_time is not None:
             return "CONSUMED"
+        if record.superseded_time is not None:
+            return "SUPERSEDED"
         states = {candidate.eligibility for candidate in record.candidates.values()}
         if CandidateEligibility.ELIGIBLE in states:
             return "ELIGIBLE"

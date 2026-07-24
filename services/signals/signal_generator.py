@@ -18,8 +18,9 @@ Rules
   operational stage per completed snapshot.
 * EXPIRED and SUPERSEDED apply only when the exact originating opportunity is
   explicitly carried with that terminal lifecycle. Absence is an explicit HOLD.
-* A different confirmed opportunity updates the active signal posture but does
-  not replace it in the same pass.
+* A different confirmed opportunity normally updates the active signal posture.
+  A confirmed REVERSAL is the explicit exception: it terminally replaces the
+  old opposite signal, while creation of the new side waits for the next snapshot.
 * Opportunity identity is exact and immutable. There is no symbol/side/setup
   fallback matching.
 * snapshot.close is the completed-candle price used for signal analytics.
@@ -681,6 +682,19 @@ def _resolve_signal_lifecycle(
             target_stage = LifecycleStage.PROTECT
             reason_code = "COMPETING_SAME_SIDE_OPPORTUNITY_PROTECT"
             alignment = "ALIGNED"
+        elif str(current_opportunity.primary_family).strip().upper() == "REVERSAL":
+            # Confirmed reversal replaces the old signal on this snapshot. The
+            # new side can be created only on a later snapshot, preserving the
+            # no-same-pass reversal rule.
+            return AuctionLifecycleDecision(
+                signal_action="REPLACE",
+                stage=LifecycleStage.FORCE_EXIT,
+                status=SignalStatus.REPLACED,
+                reason_code="CONFIRMED_REVERSAL_REPLACED_OPPOSITE_SIGNAL",
+                opportunity_lifecycle=opportunity_lifecycle,
+                directional_alignment="OPPOSITE",
+                terminal=True,
+            )
         else:
             target_stage = LifecycleStage.EXIT_BIAS
             reason_code = "COMPETING_OPPOSITE_OPPORTUNITY_EXIT_BIAS"

@@ -21,15 +21,15 @@ from services.snapshot.snapshot_generator import SnapshotGenerator
 
 #  Configuration
 API_KEY = "d17pao9dsc9jsp84"
-ACCESS_TOKEN = "q505JJsaMgUStUok5CEJK4rnXLCeU583"
+ACCESS_TOKEN = "BgNPkTcOu665OKmf041OwaiUyOAXvVNS"
 
-START = datetime(2026, 7, 23, 9, 18, tzinfo=ZoneInfo("Asia/Kolkata"))
-END = datetime(2026, 7, 23, 15, 30, tzinfo=ZoneInfo("Asia/Kolkata"))
+START = datetime(2026, 7, 24, 9, 18, tzinfo=ZoneInfo("Asia/Kolkata"))
+END = datetime(2026, 7, 24, 15, 30, tzinfo=ZoneInfo("Asia/Kolkata"))
 
 # If empty, all active/enabled EQ symbols are replayed.
 # Example: ["BHARATFORG", "BAJFINANCE"]
 # SYMBOLS: List[str] = ['BHEL','ANGELONE','BAJAJFINSV','BHARTIARTL','CGPOWER','DRREDDY','GRASIM','HDFCLIFE','M&M','PNBHOUSING','TRENT']
-SYMBOLS: List[str] = ['GVT&D', 'OFSS', 'NIFTY 50', 'NIFTY BANK', 'SRF', 'ASTRAL', 'INFY', 'LICHSGFIN', 'OFSS', 'MANAPPURAM', 'KOTAKBANK']
+SYMBOLS: List[str] = ['MARUTI']
 
 SYMBOLS_FETCH_ACTIVE = 1
 SYMBOL_TYPE_FILTER = "EQ"

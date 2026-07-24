@@ -144,6 +144,7 @@ class _StateMemory:
     failure_level_time: Optional[datetime] = None
     failure_level_version: int = 0
     failure_level_episode_key: Optional[str] = None
+    failure_atr: Optional[float] = None
     failure_level_breach_bars: int = 0
     failure_structure_loss_bars: int = 0
     local_structure_weakening_bars: int = 0
@@ -162,6 +163,21 @@ class _StateMemory:
     last_failure_terminal_key: Optional[str] = None
     last_failure_terminal_reason: str = ""
     last_failure_terminal_time: Optional[datetime] = None
+    # Frozen source structure retained after the active failure watch is cleared.
+    # The setup engine consumes this causal handoff on a confirmed REVERSAL.
+    last_failure_watch_onset: Optional[datetime] = None
+    last_failure_side: DirectionalBias = DirectionalBias.UNKNOWN
+    last_failure_original_trend_side: DirectionalBias = DirectionalBias.UNKNOWN
+    last_failure_level: Optional[float] = None
+    last_failure_level_source: str = ""
+    last_failure_level_time: Optional[datetime] = None
+    last_failure_level_version: int = 0
+    last_failure_level_episode_key: Optional[str] = None
+    last_failure_atr: Optional[float] = None
+    last_failure_structure_low: Optional[float] = None
+    last_failure_structure_high: Optional[float] = None
+    last_failure_trend_anchor_price: Optional[float] = None
+    last_failure_trend_extreme_price: Optional[float] = None
     trend_failure_age_bars: int = 0
     trend_failure_expired: bool = False
     trend_recovery_bars: int = 0
@@ -382,6 +398,19 @@ class AuctionStateEngine:
             "last_failure_terminal_key": memory.last_failure_terminal_key,
             "last_failure_terminal_reason": memory.last_failure_terminal_reason,
             "last_failure_terminal_time": _iso(memory.last_failure_terminal_time),
+            "last_failure_watch_onset": _iso(memory.last_failure_watch_onset),
+            "last_failure_side": memory.last_failure_side.value,
+            "last_failure_original_trend_side": memory.last_failure_original_trend_side.value,
+            "last_failure_level": memory.last_failure_level,
+            "last_failure_level_source": memory.last_failure_level_source,
+            "last_failure_level_time": _iso(memory.last_failure_level_time),
+            "last_failure_level_version": memory.last_failure_level_version,
+            "last_failure_level_episode_key": memory.last_failure_level_episode_key,
+            "last_failure_atr": memory.last_failure_atr,
+            "last_failure_structure_low": memory.last_failure_structure_low,
+            "last_failure_structure_high": memory.last_failure_structure_high,
+            "last_failure_trend_anchor_price": memory.last_failure_trend_anchor_price,
+            "last_failure_trend_extreme_price": memory.last_failure_trend_extreme_price,
             "trend_failure_age_bars": memory.trend_failure_age_bars,
             "trend_failure_expired": memory.trend_failure_expired,
             "trend_recovery_bars": memory.trend_recovery_bars,
@@ -1057,6 +1086,7 @@ class AuctionStateEngine:
         memory.failure_level_time = memory.trend_protection_time
         memory.failure_level_version = memory.trend_protection_version
         memory.failure_level_episode_key = memory.trend_protection_episode_key
+        memory.failure_atr = _required_evidence_atr(evidence)
         memory.failure_episode_key = stable_key(
             "trend-failure-watch",
             evidence.symbol,
@@ -1133,6 +1163,34 @@ class AuctionStateEngine:
             memory.last_failure_terminal_key = memory.failure_episode_key
             memory.last_failure_terminal_reason = reason
             memory.last_failure_terminal_time = timestamp
+            memory.last_failure_watch_onset = memory.failure_watch_onset
+            memory.last_failure_side = memory.failure_side
+            memory.last_failure_original_trend_side = memory.established_trend_side
+            memory.last_failure_level = memory.failure_level
+            memory.last_failure_level_source = memory.failure_level_source
+            memory.last_failure_level_time = memory.failure_level_time
+            memory.last_failure_level_version = memory.failure_level_version
+            memory.last_failure_level_episode_key = memory.failure_level_episode_key
+            memory.last_failure_atr = memory.failure_atr
+            memory.last_failure_trend_anchor_price = memory.trend_anchor_price
+            memory.last_failure_trend_extreme_price = memory.trend_extreme_price
+
+            level = memory.failure_level
+            atr = memory.failure_atr
+            extreme = memory.trend_extreme_price
+            original = memory.established_trend_side
+            if level is not None and original == DirectionalBias.DOWN:
+                lower = extreme if extreme is not None and extreme < level else None
+                if lower is None and atr is not None and atr > 0:
+                    lower = level - atr
+                memory.last_failure_structure_low = lower
+                memory.last_failure_structure_high = level
+            elif level is not None and original == DirectionalBias.UP:
+                upper = extreme if extreme is not None and extreme > level else None
+                if upper is None and atr is not None and atr > 0:
+                    upper = level + atr
+                memory.last_failure_structure_low = level
+                memory.last_failure_structure_high = upper
         self._clear_failure_watch(memory)
 
     @staticmethod
@@ -1146,6 +1204,7 @@ class AuctionStateEngine:
         memory.failure_level_time = None
         memory.failure_level_version = 0
         memory.failure_level_episode_key = None
+        memory.failure_atr = None
         memory.failure_level_breach_bars = 0
         memory.failure_structure_loss_bars = 0
         memory.local_structure_weakening_bars = 0
@@ -1933,6 +1992,19 @@ class AuctionStateEngine:
             "last_failure_terminal_key": memory.last_failure_terminal_key,
             "last_failure_terminal_reason": memory.last_failure_terminal_reason,
             "last_failure_terminal_time": _iso(memory.last_failure_terminal_time),
+            "last_failure_watch_onset": _iso(memory.last_failure_watch_onset),
+            "last_failure_side": memory.last_failure_side.value,
+            "last_failure_original_trend_side": memory.last_failure_original_trend_side.value,
+            "last_failure_level": memory.last_failure_level,
+            "last_failure_level_source": memory.last_failure_level_source,
+            "last_failure_level_time": _iso(memory.last_failure_level_time),
+            "last_failure_level_version": memory.last_failure_level_version,
+            "last_failure_level_episode_key": memory.last_failure_level_episode_key,
+            "last_failure_atr": memory.last_failure_atr,
+            "last_failure_structure_low": memory.last_failure_structure_low,
+            "last_failure_structure_high": memory.last_failure_structure_high,
+            "last_failure_trend_anchor_price": memory.last_failure_trend_anchor_price,
+            "last_failure_trend_extreme_price": memory.last_failure_trend_extreme_price,
             "trend_failure_age_bars": memory.trend_failure_age_bars,
             "trend_failure_expired": memory.trend_failure_expired,
             "reversal_confirmation_bars": memory.reversal_confirmation_bars,

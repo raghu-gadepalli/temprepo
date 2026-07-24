@@ -32,8 +32,8 @@ class AuctionEngineRuntimeConfig(BaseModel):
     strict_evaluation: bool = True
 
     engine_name: str = "AUCTION_STATE_SIGNAL_ENGINE"
-    engine_version: str = "0.5.4"
-    config_version: str = "AUCTION_ENGINE_STRICT_LOCAL_V2"
+    engine_version: str = "0.6.0"
+    config_version: str = "AUCTION_ENGINE_STRICT_LOCAL_V3_REVERSAL"
 
     timezone: str = "Asia/Kolkata"
     snapshot_interval_minutes: float = Field(default=3.0, gt=0.0)
@@ -443,22 +443,35 @@ class ContinuationPolicyConfig(BaseModel):
     actual_barrier_diagnostics_enabled: bool = True
 
 
-class ExhaustionPolicyConfig(BaseModel):
-    """Shared exhaustion evidence and separate reversal thesis policy."""
+class ReversalPolicyConfig(BaseModel):
+    """Confirmed reversal setup with normal/exhaustion subtype classification.
+
+    A reversal candidate is created only after the persistent Auction State
+    Engine has moved from TREND_FAILURE to REVERSAL. Exhaustion evidence only
+    classifies the subtype; it is never required for a normal reversal.
+    """
 
     model_config = STRICT_CONFIG
 
     enabled: bool = True
-    observation_only: bool = True
-    create_enabled: bool = False
-    persistence_namespace: str = "EXHAUSTION_REVERSAL"
+    observation_only: bool = False
+    create_enabled: bool = True
+    persistence_namespace: str = "REVERSAL"
 
-    extension_alone_is_watch_only: bool = True
-    require_loss_of_progress: bool = True
-    require_rejection: bool = True
+    normal_reversal_enabled: bool = True
+    exhaustion_reversal_enabled: bool = True
+    require_confirmed_reversal_state: bool = True
     require_structural_trend_failure: bool = True
+    require_failure_level: bool = True
     require_opportunity_room: bool = True
     indicators_may_support_but_not_trigger: bool = True
+
+    minimum_room_atr: float = Field(default=0.75, ge=0.0)
+    minimum_room_pct: float = Field(default=0.005, ge=0.0)
+    max_entry_distance_from_failure_level_atr: float = Field(default=2.50, gt=0.0)
+    minimum_session_minutes: float = Field(default=30.0, ge=0.0)
+    exhaustion_extension_atr_min: float = Field(default=1.50, ge=0.0)
+    exhaustion_progress_decay_min: float = Field(default=0.35, ge=0.0, le=1.0)
 
 
 class AuctionDecisionPolicyConfig(BaseModel):
@@ -534,7 +547,7 @@ class AuctionEngineConfig(BaseModel):
     acceptance: AcceptedOutcomePolicyConfig = Field(default_factory=AcceptedOutcomePolicyConfig)
     failure: FailedOutcomePolicyConfig = Field(default_factory=FailedOutcomePolicyConfig)
     continuation: ContinuationPolicyConfig = Field(default_factory=ContinuationPolicyConfig)
-    exhaustion: ExhaustionPolicyConfig = Field(default_factory=ExhaustionPolicyConfig)
+    reversal: ReversalPolicyConfig = Field(default_factory=ReversalPolicyConfig)
     decision: AuctionDecisionPolicyConfig = Field(default_factory=AuctionDecisionPolicyConfig)
     diagnostics: AuctionDiagnosticsConfig = Field(default_factory=AuctionDiagnosticsConfig)
 
@@ -576,7 +589,7 @@ __all__ = [
     "AcceptedOutcomePolicyConfig",
     "FailedOutcomePolicyConfig",
     "ContinuationPolicyConfig",
-    "ExhaustionPolicyConfig",
+    "ReversalPolicyConfig",
     "AuctionDecisionPolicyConfig",
     "AuctionDiagnosticsConfig",
     "AuctionEngineConfig",
