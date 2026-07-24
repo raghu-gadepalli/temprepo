@@ -29,7 +29,7 @@ END = datetime(2026, 7, 24, 15, 30, tzinfo=ZoneInfo("Asia/Kolkata"))
 # If empty, all active/enabled EQ symbols are replayed.
 # Example: ["BHARATFORG", "BAJFINANCE"]
 # SYMBOLS: List[str] = ['BHEL','ANGELONE','BAJAJFINSV','BHARTIARTL','CGPOWER','DRREDDY','GRASIM','HDFCLIFE','M&M','PNBHOUSING','TRENT']
-SYMBOLS: List[str] = ['MARUTI']
+SYMBOLS: List[str] = ['ALKEM', 'AMBER', 'APLAPOLLO', 'ASIANPAINT', 'AUBANK', 'AXISBANK', 'BAJAJFINSV', 'BAJFINANCE', 'NIFTY BANK', 'BHARATFORG']
 
 SYMBOLS_FETCH_ACTIVE = 1
 SYMBOL_TYPE_FILTER = "EQ"
