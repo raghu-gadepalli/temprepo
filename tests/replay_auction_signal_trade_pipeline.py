@@ -78,8 +78,8 @@ logger = logging.getLogger(__name__)
 
 # Safe, visible defaults for the current dedicated COFORGE replay. Every value
 # can be overridden from the command line.
-DEFAULT_TRADING_DAY = "2026-07-23"
-DEFAULT_SYMBOLS = "GVT&D, OFSS, NIFTY 50, NIFTY BANK, SRF, ASTRAL, INFY, LICHSGFIN, OFSS, MANAPPURAM, KOTAKBANK"
+DEFAULT_TRADING_DAY = "2026-07-24"
+DEFAULT_SYMBOLS = "MARUTI"
 DEFAULT_USERID = "DR1812"
 DEFAULT_INSTRUMENT_CHOICE = "MULTI"
 DEFAULT_TEST_MODE = "ADAPTIVE_EXIT"
