@@ -12,7 +12,13 @@ from enums.enums import TradePosture
 from services.signals.signal_generator import SignalAssembler
 from services.trade.monitor.signal_contract import AuctionTradeSignalContext
 from services.trade.monitor.trademon_helper import TradeMonHelper
-from services.trade.monitor.trade_monitor import TradeMonitor, _audit_trade_monitor
+from services.trade.monitor.trade_monitor import (
+    EXIT_RULE_MAX_LENGTH,
+    SIBLING_PRIMARY_EXIT_RULE,
+    TradeMonitor,
+    _audit_trade_monitor,
+    _canonical_exit_rule,
+)
 from tests.test_signal_generator_auction_snapshot import (
     FakeFetcher,
     FakePersister,
@@ -288,6 +294,34 @@ class StrictAuctionTradeMonitorContractTests(unittest.TestCase):
         self.assertIn("signal_auction_action", source)
         self.assertIn("current_signal_stage", source)
         self.assertIn("trade_state_frozen_at_exit", source)
+
+    def test_exit_rule_contract_rejects_oversize_values_before_sql(self):
+        self.assertEqual(100, EXIT_RULE_MAX_LENGTH)
+        self.assertEqual(
+            "close_sibling_legs_on_primary_exit",
+            SIBLING_PRIMARY_EXIT_RULE,
+        )
+        self.assertLessEqual(
+            len(SIBLING_PRIMARY_EXIT_RULE),
+            EXIT_RULE_MAX_LENGTH,
+        )
+        with self.assertRaisesRegex(ValueError, "exceeds 100 characters"):
+            _canonical_exit_rule("x" * 101, context="test")
+
+    def test_sibling_exit_rule_is_not_composed_from_primary_details(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (
+            root / "services" / "trade" / "monitor" / "trade_monitor.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("sibling_rule = _canonical_exit_rule(", source)
+        self.assertIn("SIBLING_PRIMARY_EXIT_RULE", source)
+        self.assertNotIn(
+            'f"close_sibling_legs_on_primary_exit:{reason}:{rule}"',
+            source,
+        )
+        self.assertIn('"primary_exit_reason": reason', source)
+        self.assertIn('"primary_exit_rule": rule', source)
+        self.assertIn("reason_text=sibling_reason_text", source)
 
     def test_signal_lifecycle_exit_uses_exact_canonical_rule(self):
         signal = _signal()

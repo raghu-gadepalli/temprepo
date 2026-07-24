@@ -48,6 +48,12 @@ from services.trade.monitor.signal_contract import AuctionTradeSignalContext
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 
+# user_trades.exit_rule is VARCHAR(100).  Keep it as one compact, canonical
+# machine-readable code.  Human-readable causal detail belongs in audit payloads,
+# not in colon-concatenated database values.
+EXIT_RULE_MAX_LENGTH = 100
+SIBLING_PRIMARY_EXIT_RULE = "close_sibling_legs_on_primary_exit"
+
 
 # =============================================================================
 # small helpers
@@ -89,6 +95,24 @@ def _to_ist_naive(ts: Optional[datetime]) -> Optional[datetime]:
 def _enum_str(x: Any) -> str:
     v = getattr(x, "value", x)
     return str(v or "").upper().strip()
+
+
+def _canonical_exit_rule(value: Any, *, context: str) -> str:
+    """Validate one exact machine-readable exit-rule code.
+
+    Do not truncate or compose multiple reasons into this database column.  A
+    too-long value indicates a programming error and must fail before SQL is
+    attempted, while the detailed causal chain remains available in audit JSON.
+    """
+    rule = str(value or "").strip()
+    if not rule:
+        raise ValueError(f"{context} exit_rule cannot be blank")
+    if len(rule) > EXIT_RULE_MAX_LENGTH:
+        raise ValueError(
+            f"{context} exit_rule exceeds {EXIT_RULE_MAX_LENGTH} characters: "
+            f"length={len(rule)} value={rule!r}"
+        )
+    return rule
 
 
 def _trade_side_str(v: Any) -> str:
@@ -813,9 +837,19 @@ class TradeMonitor:
             return 0
 
         reason = str(_required(updates, "exit_reason", "monitor updates")).strip()
-        rule = str(_required(updates, "exit_rule", "monitor updates")).strip()
+        rule = _canonical_exit_rule(
+            _required(updates, "exit_rule", "monitor updates"),
+            context="primary monitor update",
+        )
         sibling_reason = "RELATED_PRIMARY_EXIT"
-        sibling_rule = f"close_sibling_legs_on_primary_exit:{reason}:{rule}"
+        sibling_rule = _canonical_exit_rule(
+            SIBLING_PRIMARY_EXIT_RULE,
+            context="sibling primary-exit update",
+        )
+        sibling_reason_text = (
+            f"{sibling_rule}; primary_exit_reason={reason}; "
+            f"primary_exit_rule={rule}"
+        )
 
         if _group_management_enabled() and ctx.group_role == "REFERENCE":
             self._refresh_group_followers_before_exit(ctx)
@@ -849,7 +883,7 @@ class TradeMonitor:
                     new_state=ExitStatus.READY.value,
                     action="EXIT_READY",
                     reason_code=sibling_reason,
-                    reason_text=sibling_rule,
+                    reason_text=sibling_reason_text,
                     confidence=None,
                     ts=ctx.last_time,
                     payload_json={
@@ -1451,6 +1485,7 @@ class TradeMonitor:
         rule: str,
         extra_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
+        canonical_rule = _canonical_exit_rule(rule, context="exit payload")
         updates: Dict[str, Any] = {
             "exit_status": ExitStatus.READY.value,
             "exit_intent_time": ctx.last_time,
@@ -1458,7 +1493,7 @@ class TradeMonitor:
             "exit_price": ctx.last_price,
             "exit_pnl": ctx.pnl_value,
             "exit_reason": reason,
-            "exit_rule": rule,
+            "exit_rule": canonical_rule,
             "last_time": ctx.last_time,
             "last_price": ctx.last_price,
             "last_pnl": ctx.pnl_per_unit,
@@ -1485,6 +1520,13 @@ class TradeMonitor:
 
             if key in self._dt_keys:
                 out[key] = _to_ist_naive(value) if isinstance(value, datetime) else value
+                continue
+
+            if key == "exit_rule":
+                out[key] = _canonical_exit_rule(
+                    value,
+                    context="normalized monitor update",
+                )
                 continue
 
             if isinstance(value, Decimal):
