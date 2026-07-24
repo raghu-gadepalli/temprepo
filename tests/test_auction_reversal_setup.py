@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused tests for confirmed normal/exhaustion reversal deployment."""
+"""Focused tests for normal/exhaustion reversal economics and progression."""
 
 from __future__ import annotations
 
@@ -47,6 +47,7 @@ class AuctionReversalSetupTests(unittest.TestCase):
         *,
         ts: datetime | None = None,
         close: float = 13283.0,
+        vwap: float = 13360.0,
         current_extension_atr: float | None = None,
         extended: bool | None = None,
         mature: bool | None = None,
@@ -85,7 +86,7 @@ class AuctionReversalSetupTests(unittest.TestCase):
             raw_facts={
                 "source_levels": {
                     "today_open": 13450.0,
-                    "vwap": 13360.0,
+                    "vwap": vwap,
                     "prev_day_high": 13500.0,
                     "opening_range_high": 13420.0,
                     "prev_day_low": 13150.0,
@@ -121,6 +122,7 @@ class AuctionReversalSetupTests(unittest.TestCase):
         anchor: float = 13450.0,
         extreme: float = 13208.0,
         failure_atr: float = 40.0,
+        established_side: str = "UP",
     ) -> dict:
         return {
             "last_failure_terminal_key": "FAILURE:MARUTI:1",
@@ -139,26 +141,19 @@ class AuctionReversalSetupTests(unittest.TestCase):
             "last_failure_structure_high": 13250.0,
             "last_failure_trend_anchor_price": anchor,
             "last_failure_trend_extreme_price": extreme,
-            "established_trend_side": "UP",
+            "established_trend_side": established_side,
         }
 
-    def _reversal_candidate(
+    def _evaluate_once(
         self,
         *,
-        current_extension_atr: float | None = None,
-        extended: bool | None = None,
-        mature: bool | None = None,
-        rejection: bool = True,
         anchor: float = 13450.0,
         extreme: float = 13208.0,
+        rejection: bool = True,
+        vwap: float = 13360.0,
     ) -> SetupCandidate:
         rows = SetupCandidateEngine().evaluate(
-            self._evidence(
-                current_extension_atr=current_extension_atr,
-                extended=extended,
-                mature=mature,
-                rejection=rejection,
-            ),
+            self._evidence(rejection=rejection, vwap=vwap),
             self._state(),
             None,
             state_diagnostics=self._state_diagnostics(
@@ -209,77 +204,114 @@ class AuctionReversalSetupTests(unittest.TestCase):
             config_version=self.version,
         )
 
-    def test_confirmed_normal_reversal_is_eligible(self) -> None:
-        candidate = self._reversal_candidate(
+    def test_pure_normal_reversal_is_open_ended_and_eligible(self) -> None:
+        candidate = self._evaluate_once(
             rejection=False,
             anchor=13280.0,
             extreme=13230.0,
+            vwap=13284.0,
         )
         self.assertEqual(SetupFamily.REVERSAL, candidate.family)
         self.assertEqual("NORMAL_REVERSAL", candidate.subtype)
-        self.assertEqual(TradeSide.BUY, candidate.side)
         self.assertEqual(CandidateEligibility.ELIGIBLE, candidate.eligibility)
-        self.assertEqual("CONFIRMED_TREND_FAILURE_LEVEL", candidate.stop_anchor_type)
-        self.assertLess(candidate.stop_anchor_price, candidate.entry_price)
-
-    def test_exhaustion_subtype_uses_frozen_prior_trend_geometry(self) -> None:
-        candidate = self._reversal_candidate(
-            current_extension_atr=None,
-            extended=False,
-            mature=False,
-            rejection=True,
-            anchor=13450.0,
-            extreme=13208.0,
+        self.assertEqual(
+            "OPEN_ENDED_REVERSAL_NO_ASSUMED_TARGET",
+            candidate.target_basis,
         )
+        self.assertIsNone(candidate.target_reference_price)
+        self.assertIsNone(candidate.room_atr)
+        self.assertIsNone(candidate.room_pct)
+
+    def test_exhaustion_reversal_uses_vwap_as_first_target(self) -> None:
+        candidate = self._evaluate_once(vwap=13360.0)
         self.assertEqual("EXHAUSTION_REVERSAL", candidate.subtype)
-        diag = candidate.diagnostics["exhaustion_classification"]
-        self.assertGreater(diag["frozen_prior_move_atr"], 1.50)
-        self.assertIsNone(diag["current_extension_move_atr"])
-        self.assertTrue(diag["classified_exhaustion"])
-
-    def test_confirmed_terminal_event_is_not_lost_after_transition_snapshot(self) -> None:
-        later = self.ts + timedelta(minutes=3)
-        rows = SetupCandidateEngine().evaluate(
-            self._evidence(ts=later),
-            self._state(
-                ts=later,
-                previous=AuctionStateName.REVERSAL,
-                current=AuctionStateName.REVERSAL,
-            ),
-            None,
-            state_diagnostics=self._state_diagnostics(),
+        self.assertEqual(CandidateEligibility.ELIGIBLE, candidate.eligibility)
+        self.assertEqual(
+            "EXHAUSTION_REVERSAL_VWAP_FIRST_TARGET",
+            candidate.target_basis,
         )
-        self.assertEqual(1, len(rows))
-        self.assertEqual(CandidateEligibility.ELIGIBLE, rows[0].eligibility)
-        self.assertTrue(rows[0].diagnostics["watch_re_evaluated"])
+        self.assertEqual(13360.0, candidate.target_reference_price)
+        self.assertGreaterEqual(
+            candidate.room_atr,
+            AUCTION_ENGINE_CONFIG.reversal.minimum_room_atr,
+        )
+        self.assertGreaterEqual(
+            candidate.room_pct,
+            AUCTION_ENGINE_CONFIG.reversal.minimum_room_pct,
+        )
 
-    def test_blocked_confirmation_remains_watch_and_becomes_eligible_later(self) -> None:
+    def test_exhaustion_waits_when_vwap_room_is_insufficient(self) -> None:
+        candidate = self._evaluate_once(vwap=13300.0)
+        self.assertEqual("EXHAUSTION_REVERSAL", candidate.subtype)
+        self.assertEqual(CandidateEligibility.WATCH, candidate.eligibility)
+        self.assertFalse(candidate.terminal)
+        self.assertIn(
+            "EXHAUSTION_REVERSAL_VWAP_ROOM_ATR_INSUFFICIENT",
+            candidate.blockers,
+        )
+        self.assertIn(
+            "EXHAUSTION_REVERSAL_VWAP_ROOM_BELOW_MINIMUM_PCT",
+            candidate.blockers,
+        )
+
+    def test_exhaustion_matures_into_open_ended_normal_reversal(self) -> None:
         engine = SetupCandidateEngine()
-        diagnostics = self._state_diagnostics(
-            anchor=13350.0,
-            extreme=13220.0,
-        )
+        diagnostics = self._state_diagnostics()
+
         first = engine.evaluate(
-            self._evidence(
-                close=13300.0,
-                rejection=False,
-            ),
+            self._evidence(vwap=13300.0),
             self._state(),
             None,
             state_diagnostics=diagnostics,
         )
         self.assertEqual(1, len(first))
+        self.assertEqual("EXHAUSTION_REVERSAL", first[0].subtype)
         self.assertEqual(CandidateEligibility.WATCH, first[0].eligibility)
-        self.assertFalse(first[0].terminal)
-        self.assertIn("REVERSAL_ROOM_BELOW_MINIMUM_PCT", first[0].blockers)
 
-        later = self.ts + timedelta(minutes=3)
+        later = self.ts + timedelta(minutes=9)
         second = engine.evaluate(
-            self._evidence(
+            self._evidence(ts=later, close=13320.0, vwap=13305.0),
+            self._state(
                 ts=later,
-                close=13280.0,
-                rejection=False,
+                previous=AuctionStateName.REVERSAL,
+                current=AuctionStateName.ORDERLY_UPTREND,
             ),
+            None,
+            state_diagnostics=diagnostics,
+        )
+        self.assertEqual(2, len(second))
+        by_subtype = {candidate.subtype: candidate for candidate in second}
+
+        exhausted = by_subtype["EXHAUSTION_REVERSAL"]
+        normal = by_subtype["NORMAL_REVERSAL"]
+        self.assertEqual(CandidateEligibility.SUPERSEDED, exhausted.eligibility)
+        self.assertTrue(exhausted.terminal)
+        self.assertEqual(CandidateEligibility.ELIGIBLE, normal.eligibility)
+        self.assertTrue(normal.terminal)
+        self.assertEqual(
+            "OPEN_ENDED_REVERSAL_NO_ASSUMED_TARGET",
+            normal.target_basis,
+        )
+        self.assertIsNone(normal.target_reference_price)
+        self.assertTrue(normal.diagnostics["promoted_from_exhaustion"])
+        self.assertEqual(first[0].opportunity_key, normal.opportunity_key)
+        self.assertNotEqual(first[0].candidate_id, normal.candidate_id)
+
+    def test_eligible_exhaustion_still_records_later_normal_reversal(self) -> None:
+        engine = SetupCandidateEngine()
+        diagnostics = self._state_diagnostics()
+        first = engine.evaluate(
+            self._evidence(vwap=13360.0),
+            self._state(),
+            None,
+            state_diagnostics=diagnostics,
+        )
+        self.assertEqual(CandidateEligibility.ELIGIBLE, first[0].eligibility)
+        self.assertEqual("EXHAUSTION_REVERSAL", first[0].subtype)
+
+        later = self.ts + timedelta(minutes=9)
+        second = engine.evaluate(
+            self._evidence(ts=later, close=13320.0, vwap=13305.0),
             self._state(
                 ts=later,
                 previous=AuctionStateName.REVERSAL,
@@ -289,19 +321,87 @@ class AuctionReversalSetupTests(unittest.TestCase):
             state_diagnostics=diagnostics,
         )
         self.assertEqual(1, len(second))
-        self.assertEqual(first[0].candidate_id, second[0].candidate_id)
-        self.assertEqual(CandidateEligibility.ELIGIBLE, second[0].eligibility)
-        self.assertTrue(second[0].terminal)
-        self.assertTrue(second[0].diagnostics["watch_re_evaluated"])
+        normal = second[0]
+        self.assertEqual("NORMAL_REVERSAL", normal.subtype)
+        self.assertEqual(CandidateEligibility.ELIGIBLE, normal.eligibility)
+        self.assertEqual(first[0].opportunity_key, normal.opportunity_key)
+
+    def test_ledger_prefers_normal_after_structural_control(self) -> None:
+        engine = SetupCandidateEngine()
+        diagnostics = self._state_diagnostics()
+        exhaustion = engine.evaluate(
+            self._evidence(vwap=13360.0),
+            self._state(),
+            None,
+            state_diagnostics=diagnostics,
+        )[0]
+        later = self.ts + timedelta(minutes=9)
+        normal = engine.evaluate(
+            self._evidence(ts=later, close=13320.0, vwap=13305.0),
+            self._state(
+                ts=later,
+                previous=AuctionStateName.REVERSAL,
+                current=AuctionStateName.ORDERLY_UPTREND,
+            ),
+            None,
+            state_diagnostics=diagnostics,
+        )[0]
+
+        ledger = OpportunityLedger()
+        ledger.update("MARUTI", exhaustion.snapshot_time, [exhaustion])
+        records = ledger.update("MARUTI", normal.snapshot_time, [normal])
+        record = next(
+            row for row in records if row.opportunity_key == normal.opportunity_key
+        )
+        self.assertEqual("NORMAL_REVERSAL", record.primary_candidate.subtype)
+        self.assertEqual(2, len(record.candidates))
+
+    def test_later_normal_interpretation_does_not_reopen_consumed_opportunity(self) -> None:
+        engine = SetupCandidateEngine()
+        diagnostics = self._state_diagnostics()
+        exhaustion = engine.evaluate(
+            self._evidence(vwap=13360.0),
+            self._state(),
+            None,
+            state_diagnostics=diagnostics,
+        )[0]
+        later = self.ts + timedelta(minutes=9)
+        normal = engine.evaluate(
+            self._evidence(ts=later, close=13320.0, vwap=13305.0),
+            self._state(
+                ts=later,
+                previous=AuctionStateName.REVERSAL,
+                current=AuctionStateName.ORDERLY_UPTREND,
+            ),
+            None,
+            state_diagnostics=diagnostics,
+        )[0]
+
+        ledger = OpportunityLedger()
+        ledger.update("MARUTI", exhaustion.snapshot_time, [exhaustion])
+        ledger.mark_selected(
+            exhaustion.opportunity_key,
+            exhaustion.snapshot_time,
+            exhaustion.candidate_id,
+        )
+        ledger.mark_consumed(
+            exhaustion.opportunity_key,
+            exhaustion.snapshot_time,
+            candidate_id=exhaustion.candidate_id,
+        )
+        records = ledger.update("MARUTI", normal.snapshot_time, [normal])
+        record = next(
+            row for row in records if row.opportunity_key == normal.opportunity_key
+        )
+        self.assertEqual("CONSUMED", record.lifecycle_state)
+        self.assertEqual(2, len(record.candidates))
+        self.assertEqual("NORMAL_REVERSAL", record.primary_candidate.subtype)
 
     def test_reversal_watch_expires_terminally(self) -> None:
         engine = SetupCandidateEngine()
-        diagnostics = self._state_diagnostics(
-            anchor=13350.0,
-            extreme=13220.0,
-        )
+        diagnostics = self._state_diagnostics()
         first = engine.evaluate(
-            self._evidence(close=13300.0, rejection=False),
+            self._evidence(vwap=13300.0),
             self._state(),
             None,
             state_diagnostics=diagnostics,
@@ -310,7 +410,7 @@ class AuctionReversalSetupTests(unittest.TestCase):
 
         later = self.ts + timedelta(minutes=16)
         expired = engine.evaluate(
-            self._evidence(ts=later, close=13300.0, rejection=False),
+            self._evidence(ts=later, vwap=13300.0),
             self._state(
                 ts=later,
                 previous=AuctionStateName.REVERSAL,
@@ -326,23 +426,15 @@ class AuctionReversalSetupTests(unittest.TestCase):
 
     def test_confirmed_reversal_supersedes_old_opposite_opportunity(self) -> None:
         old_sell = self._old_sell_candidate()
-        reversal = self._reversal_candidate()
+        reversal = self._evaluate_once(vwap=13360.0)
         ledger = OpportunityLedger()
-        ledger.update(
-            "MARUTI",
-            old_sell.snapshot_time,
-            [old_sell],
-        )
+        ledger.update("MARUTI", old_sell.snapshot_time, [old_sell])
         ledger.mark_selected(
             old_sell.opportunity_key,
             old_sell.snapshot_time,
             old_sell.candidate_id,
         )
-        records = ledger.update(
-            "MARUTI",
-            reversal.snapshot_time,
-            [reversal],
-        )
+        records = ledger.update("MARUTI", reversal.snapshot_time, [reversal])
         by_key = {record.opportunity_key: record for record in records}
         self.assertEqual(
             "SUPERSEDED",

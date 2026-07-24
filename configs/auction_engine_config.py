@@ -447,8 +447,16 @@ class ReversalPolicyConfig(BaseModel):
     """Confirmed reversal setup with normal/exhaustion subtype classification.
 
     A reversal candidate is created only after the persistent Auction State
-    Engine has moved from TREND_FAILURE to REVERSAL. Exhaustion evidence only
-    classifies the subtype; it is never required for a normal reversal.
+    Engine has moved from TREND_FAILURE to REVERSAL.  The two interpretations
+    intentionally have different economics:
+
+    * EXHAUSTION_REVERSAL is initially a mean-reversion deployment whose first
+      target is VWAP and therefore requires adequate room to VWAP.
+    * NORMAL_REVERSAL is a structural transfer of control.  It is open-ended,
+      like an accepted breakout, and carries no assumed-target room gate.
+
+    An exhaustion event may later mature into a normal structural reversal
+    when the opposite side establishes directional control.
     """
 
     model_config = STRICT_CONFIG
@@ -463,7 +471,9 @@ class ReversalPolicyConfig(BaseModel):
     require_confirmed_reversal_state: bool = True
     require_structural_trend_failure: bool = True
     require_failure_level: bool = True
-    require_opportunity_room: bool = True
+    exhaustion_require_vwap_room: bool = True
+    normal_reversal_open_ended: bool = True
+    promote_exhaustion_to_normal_on_structural_control: bool = True
     indicators_may_support_but_not_trigger: bool = True
 
     minimum_room_atr: float = Field(default=0.75, ge=0.0)

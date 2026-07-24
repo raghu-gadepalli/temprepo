@@ -45,6 +45,13 @@ _ELIGIBILITY_RANK = {
     CandidateEligibility.SUPERSEDED: 4,
     CandidateEligibility.CONSUMED: 5,
 }
+_SUBTYPE_RANK = {
+    # Once opposite structural control is established, the open-ended normal
+    # reversal is the primary interpretation.  The earlier exhaustion
+    # interpretation remains in candidate history as the causal precursor.
+    "NORMAL_REVERSAL": 0,
+    "EXHAUSTION_REVERSAL": 1,
+}
 
 
 @dataclass
@@ -531,10 +538,15 @@ class OpportunityLedger:
         )
 
 
-def _candidate_sort_key(candidate: SetupCandidate) -> Tuple[int, int, datetime, str]:
+def _candidate_sort_key(
+    candidate: SetupCandidate,
+) -> Tuple[int, int, int, datetime, str]:
     return (
         _ELIGIBILITY_RANK[candidate.eligibility],
         _ROLE_RANK[candidate.candidate_role.value],
+        _SUBTYPE_RANK[candidate.subtype]
+        if candidate.subtype in _SUBTYPE_RANK
+        else 0,
         candidate.candidate_time,
         candidate.candidate_id,
     )
